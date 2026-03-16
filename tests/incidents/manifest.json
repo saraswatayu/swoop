@@ -31,6 +31,18 @@
       "category": "pricing-cabin",
       "summary": "Unknown cabin bucket fallback leaked economy brands into business/first/premium-economy pricing.",
       "test_ref": "tests/test_selection.py::TestExactPricing::test_eligible_returns_empty_for_unknown_on_business"
+    },
+    {
+      "id": "pricing_jetblue_unknown_classification",
+      "category": "pricing-cabin",
+      "summary": "JetBlue brands (Blue, Blue Extra, Even More) classified as unknown instead of economy.",
+      "test_ref": "tests/test_cabin_pipeline.py::TestJetBlueBrandClassification::test_blue_classified_as_economy"
+    },
+    {
+      "id": "pricing_suite_misclassification",
+      "category": "pricing-cabin",
+      "summary": "Branded business suites (Club Suite, Qsuite, Sky Suite) misclassified as first due to SUITE pattern.",
+      "test_ref": "tests/test_cabin_pipeline.py::TestSuiteDisambiguation::test_club_suite_is_business"
     }
   ]
 }

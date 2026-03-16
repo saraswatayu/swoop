@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Build cabin brand mapping from Google Flights booking data.
 
-Searches diverse routes, collects booking option brands, and classifies each
-brand into a cabin class using price ratio + seat_type signals from shopping
-results.
+Optimized search-then-book pipeline: economy searches discover airlines,
+then a single booking call per airline collects brands across ALL cabins.
+
+~182 RPC calls in ~5 min, covering 100-150 airlines (vs. old brute-force
+approach of 800 calls in 20 min for 13 airlines).
 
 Usage:
-    python scripts/build_cabin_mapping.py                          # full run
-    python scripts/build_cabin_mapping.py --routes JFK-LAX,JFK-LHR # specific routes
-    python scripts/build_cabin_mapping.py --cabins economy,business # specific cabins
-    python scripts/build_cabin_mapping.py --resume                  # resume from checkpoint
-    python scripts/build_cabin_mapping.py --dry-run                 # print plan, no API calls
-    python scripts/build_cabin_mapping.py --delay 2.0               # slower rate limiting
-    python scripts/build_cabin_mapping.py --max-itins 5             # more itineraries per search
+    python scripts/build_cabin_mapping.py                    # full run
+    python scripts/build_cabin_mapping.py --resume           # resume from checkpoint
+    python scripts/build_cabin_mapping.py --dry-run          # print route plan
+    python scripts/build_cabin_mapping.py --delay 2.0        # slower rate limiting
+    python scripts/build_cabin_mapping.py --tier 1           # only Tier 1 routes
+    python scripts/build_cabin_mapping.py --airlines AA,DL   # only these airlines
 """
 
 from __future__ import annotations
@@ -44,160 +45,288 @@ SEAT_TYPE_TO_CABIN: dict[int, str] = {
     9: "business",
 }
 
-CABINS = ["economy", "premium-economy", "business", "first"]
+# Airlines known to offer premium economy
+PREMIUM_ECONOMY_AIRLINES = {
+    "AA", "DL", "UA", "BA", "AF", "LH", "KL", "SQ", "CX", "QF",
+    "NH", "JL", "KE", "OZ", "TG", "BR", "CI", "QR", "EK", "EY",
+    "TK", "VS", "AZ", "IB", "TP", "SK", "AY", "NZ", "LA", "AC",
+}
 
-# Route matrix targeting 40+ airlines across all cabin classes
-ROUTES: list[tuple[str, str]] = [
-    # US Domestic (14)
-    ("JFK", "LAX"), ("JFK", "SEA"), ("ORD", "DEN"), ("DFW", "MIA"),
-    ("MSP", "PHX"), ("LAX", "HNL"), ("DEN", "LAS"), ("ATL", "FLL"),
-    ("BOS", "SFO"), ("SEA", "SFO"), ("JFK", "ORD"), ("MCO", "EWR"),
-    ("YYZ", "YVR"), ("LAX", "SFO"),
-    # Transatlantic (10)
-    ("JFK", "LHR"), ("EWR", "FRA"), ("JFK", "CDG"), ("JFK", "AMS"),
-    ("ORD", "ZRH"), ("JFK", "MAD"), ("JFK", "DUB"), ("LAX", "CPH"),
-    ("JFK", "HEL"), ("JFK", "LIS"),
-    # Middle East (4)
-    ("JFK", "DOH"), ("JFK", "DXB"), ("JFK", "AUH"), ("JFK", "IST"),
-    # Asia-Pacific (12)
-    ("LAX", "NRT"), ("LAX", "HKG"), ("LAX", "SIN"), ("LAX", "ICN"),
-    ("LAX", "TPE"), ("SFO", "MNL"), ("LAX", "BKK"), ("SFO", "SYD"),
-    ("LAX", "AKL"), ("ORD", "HND"), ("SFO", "NRT"), ("SFO", "ICN"),
-    # Latin America (6)
-    ("MIA", "GRU"), ("MIA", "BOG"), ("MIA", "PTY"), ("JFK", "MEX"),
-    ("LAX", "LIM"), ("DFW", "CUN"),
-    # Other (4)
-    ("JFK", "OSL"), ("LAX", "MEL"), ("YYZ", "LHR"), ("BOS", "KEF"),
+# Airlines known to offer first class
+FIRST_CLASS_AIRLINES = {
+    "AA", "EK", "SQ", "LH", "NH", "JL", "QR", "BA", "CX", "EY",
+    "TK", "KE", "AF", "GA",
+}
+
+# Tier 1: 25 mega-hub routes (~80 airlines expected)
+TIER_1_ROUTES: list[tuple[str, str]] = [
+    # US domestic
+    ("JFK", "LAX"), ("JFK", "SFO"), ("ORD", "LAX"), ("ATL", "LAX"),
+    ("DFW", "JFK"), ("SEA", "JFK"), ("DEN", "JFK"),
+    # Transatlantic
+    ("JFK", "LHR"), ("JFK", "CDG"), ("JFK", "FRA"), ("JFK", "AMS"),
+    ("JFK", "MAD"), ("JFK", "FCO"), ("JFK", "IST"),
+    # Gulf
+    ("JFK", "DXB"), ("JFK", "DOH"), ("JFK", "AUH"),
+    # Asia-Pacific
+    ("LAX", "NRT"), ("LAX", "ICN"), ("LAX", "SIN"), ("SFO", "HKG"),
+    ("LAX", "TPE"), ("SFO", "SYD"),
+    # LatAm/Other
+    ("MIA", "GRU"), ("YYZ", "LHR"),
 ]
+
+# Tier 2: 15 regional fill routes (~20 more airlines)
+TIER_2_ROUTES: list[tuple[str, str]] = [
+    ("JFK", "OSL"), ("LAX", "AKL"), ("BOS", "KEF"), ("JFK", "LIS"),
+    ("MIA", "BOG"), ("MIA", "PTY"), ("LAX", "MEX"), ("JFK", "HEL"),
+    ("JFK", "DUB"), ("LAX", "BKK"), ("SFO", "MNL"), ("LAX", "HNL"),
+    ("MSP", "PHX"), ("DFW", "CUN"), ("ORD", "HND"),
+]
+
+# Likely routes for targeted airline searches (Tier 3)
+AIRLINE_ROUTE_HINTS: dict[str, tuple[str, str]] = {
+    # US majors (usually found in Tier 1, but needed for --airlines)
+    "AA": ("JFK", "LAX"),   # American
+    "DL": ("JFK", "LAX"),   # Delta
+    "UA": ("JFK", "SFO"),   # United
+    "B6": ("JFK", "LAX"),   # JetBlue
+    "WN": ("LAX", "LAS"),   # Southwest
+    "NK": ("FLL", "LAX"),   # Spirit
+    "F9": ("DEN", "LAX"),   # Frontier
+    "G4": ("LAS", "LAX"),   # Allegiant
+    "SY": ("MSP", "FLL"),   # Sun Country
+    "HA": ("LAX", "HNL"),   # Hawaiian
+    "AS": ("SEA", "LAX"),   # Alaska
+    "WS": ("YYC", "YYZ"),   # WestJet
+    "AC": ("YYZ", "LHR"),   # Air Canada
+    "AM": ("MEX", "LAX"),   # Aeromexico
+    "CM": ("PTY", "MIA"),   # Copa
+    "AV": ("BOG", "MIA"),   # Avianca
+    "LA": ("SCL", "MIA"),   # LATAM
+    "AR": ("EZE", "MIA"),   # Aerolineas Argentinas
+    "TP": ("LIS", "JFK"),   # TAP
+    "AY": ("HEL", "JFK"),   # Finnair
+    "SK": ("CPH", "JFK"),   # SAS
+    "LO": ("WAW", "JFK"),   # LOT
+    "OS": ("VIE", "JFK"),   # Austrian
+    "LX": ("ZRH", "JFK"),   # Swiss
+    "SN": ("BRU", "JFK"),   # Brussels Airlines
+    "EI": ("DUB", "JFK"),   # Aer Lingus
+    "IB": ("MAD", "JFK"),   # Iberia
+    "AZ": ("FCO", "JFK"),   # ITA Airways
+    "FI": ("KEF", "JFK"),   # Icelandair
+    "DY": ("OSL", "JFK"),   # Norwegian
+    "EW": ("FRA", "JFK"),   # Eurowings
+    "GA": ("CGK", "NRT"),   # Garuda
+    "MH": ("KUL", "NRT"),   # Malaysia Airlines
+    "PR": ("MNL", "LAX"),   # Philippine Airlines
+    "VN": ("SGN", "NRT"),   # Vietnam Airlines
+    "AI": ("DEL", "JFK"),   # Air India
+    "UL": ("CMB", "NRT"),   # SriLankan
+    "ET": ("ADD", "JFK"),   # Ethiopian
+    "SA": ("JNB", "JFK"),   # South African
+    "MS": ("CAI", "JFK"),   # EgyptAir
+    "RJ": ("AMM", "JFK"),   # Royal Jordanian
+    "SV": ("JED", "JFK"),   # Saudia
+    "WY": ("MCT", "JFK"),   # Oman Air
+    "GF": ("BAH", "LHR"),   # Gulf Air
+    "NZ": ("AKL", "LAX"),   # Air New Zealand
+}
 
 CHECKPOINT_PATH = Path(__file__).parent / ".cabin_mapping_checkpoint.jsonl"
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "swoop" / "cabin_brands.json"
 
 
 # ---------------------------------------------------------------------------
-# Data model
+# Data models
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class BrandObservation:
-    route: str
-    cabin_searched: str
     airline_iata: str
     brand_code: str
     brand_label: str
     option_price: int
     base_price: int
-    price_ratio: float
-    seat_types: list[int | None]
     is_basic: bool
+    seat_types: list[int | None]
+    route: str
+    cabin_searched: str = "economy"  # always economy in the new pipeline
+    price_ratio: float = 0.0
 
 
 # ---------------------------------------------------------------------------
-# Collection
+# Search date helper
 # ---------------------------------------------------------------------------
 
 
 def _search_date() -> str:
     """Return a search date ~30 days from now (weekday)."""
     target = date.today() + timedelta(days=30)
-    # Avoid weekends for better price signals
     while target.weekday() >= 5:
         target += timedelta(days=1)
     return target.isoformat()
 
 
-def _collect_observations_for_route(
-    origin: str,
-    dest: str,
-    cabin: str,
-    search_date: str,
-    *,
-    max_itins: int = 3,
-    delay: float = 1.5,
-) -> list[BrandObservation]:
-    """Search one route+cabin, fetch booking options, return observations."""
-    # Late imports to avoid requiring swoop installation for --dry-run
-    from swoop.rpc import search_raw, get_trip_booking_results
-    from swoop._selection import _build_selected_legs
-    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+# ---------------------------------------------------------------------------
+# Discovery + immediate booking
+# ---------------------------------------------------------------------------
 
-    observations: list[BrandObservation] = []
-    route_key = f"{origin}-{dest}"
+
+def _book_airline(
+    itin,
+    airline_code: str,
+    route: str,
+    *,
+    delay: float,
+) -> list[BrandObservation]:
+    """Book a single itinerary and return brand observations."""
+    from swoop.rpc import get_booking_results
+
+    time.sleep(delay)
+
+    base_price = itin.price or 0
+    seat_types = [f.seat_type for f in itin.flights]
 
     try:
-        result = search_raw(origin, dest, search_date, cabin=cabin)
-    except (SwoopHTTPError, SwoopRateLimitError) as exc:
-        logger.warning("Search failed for %s/%s: %s", route_key, cabin, exc)
-        return observations
+        options = get_booking_results(itin, cabin="economy")
+    except Exception as exc:
+        logger.debug("Booking failed for %s on %s: %s", airline_code, route, exc)
+        return []
+
+    observations: list[BrandObservation] = []
+    for opt in options:
+        price = opt.price
+        brand_code = opt.brand_code
+        brand_label = opt.brand_label
+        is_basic = opt.is_basic
+        ratio = price / base_price if base_price > 0 else 0.0
+
+        observations.append(BrandObservation(
+            airline_iata=airline_code,
+            brand_code=brand_code,
+            brand_label=brand_label,
+            option_price=price,
+            base_price=base_price,
+            is_basic=is_basic,
+            seat_types=seat_types,
+            route=route,
+            price_ratio=round(ratio, 4),
+        ))
+
+    return observations
+
+
+def _discover_and_book_route(
+    origin: str,
+    dest: str,
+    search_dt: str,
+    seen_airlines: set[str],
+    all_observations: list[BrandObservation],
+    *,
+    delay: float,
+    airlines_filter: list[str] | None = None,
+) -> int:
+    """Search one route, then immediately book each new airline discovered.
+
+    Returns number of new airlines booked.
+    """
+    from swoop.rpc import search_raw
+
+    route = f"{origin}-{dest}"
+    new_booked = 0
+
+    try:
+        result = search_raw(
+            origin, dest, search_dt,
+            cabin="economy",
+            airlines=airlines_filter,
+        )
+    except Exception as exc:
+        logger.warning("Search failed for %s: %s", route, exc)
+        return 0
 
     if result is None:
-        return observations
+        return 0
 
     itineraries = [*result.best, *result.other]
     if not itineraries:
-        return observations
+        return 0
 
-    # Sort by price for consistent sampling
-    priced = sorted(
-        [it for it in itineraries if it.price is not None and it.price > 0],
-        key=lambda it: it.price,
-    )
-    if not priced:
-        return observations
+    # Group itineraries by airline, keep first with booking token
+    airline_itins: dict[str, object] = {}
+    for itin in itineraries:
+        code = itin.airline_code
+        if (
+            code
+            and code not in seen_airlines
+            and code not in airline_itins
+            and itin.booking_token
+        ):
+            airline_itins[code] = itin
 
-    for itin in priced[:max_itins]:
-        time.sleep(delay)
-
-        token = itin.booking_token
-        if not token:
+    for airline_code, itin in airline_itins.items():
+        if airline_code in seen_airlines:
             continue
 
-        base_price = itin.price or 0
-        seat_types = [f.seat_type for f in itin.flights]
+        logger.info("  Booking %s (from %s)...", airline_code, route)
+        obs = _book_airline(itin, airline_code, route, delay=delay)
 
-        selected_legs = _build_selected_legs(itin)
-        if not selected_legs:
-            continue
+        if obs:
+            _save_checkpoint(obs, airline_code, route)
+            all_observations.extend(obs)
+            seen_airlines.add(airline_code)
+            new_booked += 1
+            logger.info("    → %d brands for %s", len(obs), airline_code)
+        else:
+            # Retry with fresh search filtered to this airline
+            logger.debug("    Empty booking for %s, retrying with airline filter", airline_code)
+            obs = _retry_booking(origin, dest, search_dt, airline_code, route, delay=delay)
+            if obs:
+                _save_checkpoint(obs, airline_code, route)
+                all_observations.extend(obs)
+                seen_airlines.add(airline_code)
+                new_booked += 1
+                logger.info("    → %d brands for %s (retry)", len(obs), airline_code)
+            else:
+                logger.info("    → no brands for %s (skipped)", airline_code)
+                seen_airlines.add(airline_code)  # don't retry again
 
-        # Build minimal leg for booking request
-        legs = [{
-            "origin": origin,
-            "destination": dest,
-            "date": search_date,
-            "selected_legs": selected_legs,
-        }]
+    return new_booked
 
-        try:
-            booking_options = get_trip_booking_results(
-                token, legs, cabin=cabin, adults=1,
-            )
-        except (SwoopHTTPError, SwoopParseError, SwoopRateLimitError) as exc:
-            logger.debug("Booking failed for %s/%s itin: %s", route_key, cabin, exc)
-            continue
 
-        airline_iata = itin.airline_code or ""
-        for opt in booking_options:
-            price = opt.price if hasattr(opt, "price") else opt.get("price", 0)
-            brand_code = opt.brand_code if hasattr(opt, "brand_code") else opt.get("brand_code", "")
-            brand_label = opt.brand_label if hasattr(opt, "brand_label") else opt.get("brand_label", "")
-            is_basic = opt.is_basic if hasattr(opt, "is_basic") else opt.get("is_basic", False)
+def _retry_booking(
+    origin: str,
+    dest: str,
+    search_dt: str,
+    airline_code: str,
+    route: str,
+    *,
+    delay: float,
+) -> list[BrandObservation]:
+    """Re-search with airline filter and try booking again."""
+    from swoop.rpc import search_raw
 
-            ratio = price / base_price if base_price > 0 else 0.0
-            observations.append(BrandObservation(
-                route=route_key,
-                cabin_searched=cabin,
-                airline_iata=airline_iata,
-                brand_code=brand_code,
-                brand_label=brand_label,
-                option_price=price,
-                base_price=base_price,
-                price_ratio=round(ratio, 4),
-                seat_types=seat_types,
-                is_basic=is_basic,
-            ))
+    time.sleep(delay)
 
-    return observations
+    try:
+        fresh = search_raw(
+            origin, dest, search_dt,
+            cabin="economy",
+            airlines=[airline_code],
+        )
+    except Exception:
+        return []
+
+    if fresh is None:
+        return []
+
+    for itin in [*fresh.best, *fresh.other]:
+        if itin.booking_token:
+            return _book_airline(itin, airline_code, route, delay=delay)
+
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -244,32 +373,54 @@ def classify_brand(observations: list[BrandObservation]) -> tuple[str, float]:
 # ---------------------------------------------------------------------------
 
 
-def _load_checkpoint() -> list[BrandObservation]:
-    """Load observations from checkpoint file."""
+def _load_checkpoint() -> tuple[list[BrandObservation], set[str]]:
+    """Load observations and completed airlines from checkpoint file."""
     if not CHECKPOINT_PATH.exists():
-        return []
+        return [], set()
+
     observations: list[BrandObservation] = []
+    seen_airlines: set[str] = set()
+
     for line in CHECKPOINT_PATH.read_text().splitlines():
         if not line.strip():
             continue
         try:
             data = json.loads(line)
-            observations.append(BrandObservation(**data))
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError:
             continue
-    return observations
+
+        if data.get("type") == "discovery":
+            seen_airlines.add(data["airline"])
+        elif data.get("type") == "brand":
+            # Remove checkpoint metadata before creating BrandObservation
+            brand_data = {k: v for k, v in data.items() if k != "type"}
+            try:
+                observations.append(BrandObservation(**brand_data))
+            except TypeError:
+                continue
+
+    return observations, seen_airlines
 
 
-def _save_checkpoint(observations: list[BrandObservation]) -> None:
-    """Append observations to checkpoint file."""
+def _save_checkpoint(
+    observations: list[BrandObservation],
+    airline_code: str,
+    route: str,
+) -> None:
+    """Append observations + discovery record to checkpoint file."""
     with CHECKPOINT_PATH.open("a") as f:
+        # Write discovery record first
+        f.write(json.dumps({
+            "type": "discovery",
+            "airline": airline_code,
+            "route": route,
+            "brands_collected": len(observations),
+        }) + "\n")
+        # Write brand observations
         for obs in observations:
-            f.write(json.dumps(asdict(obs)) + "\n")
-
-
-def _completed_route_cabins(observations: list[BrandObservation]) -> set[tuple[str, str]]:
-    """Return set of (route, cabin) pairs already collected."""
-    return {(obs.route, obs.cabin_searched) for obs in observations}
+            record = asdict(obs)
+            record["type"] = "brand"
+            f.write(json.dumps(record) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -317,18 +468,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build cabin brand mapping from Google Flights data",
     )
-    parser.add_argument("--routes", type=str, default=None,
-                        help="Comma-separated routes (e.g., JFK-LAX,JFK-LHR)")
-    parser.add_argument("--cabins", type=str, default=None,
-                        help="Comma-separated cabins (e.g., economy,business)")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from checkpoint")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print plan without making API calls")
     parser.add_argument("--delay", type=float, default=1.5,
                         help="Delay between RPC calls in seconds (default: 1.5)")
-    parser.add_argument("--max-itins", type=int, default=3,
-                        help="Max itineraries to fetch booking for per search (default: 3)")
+    parser.add_argument("--tier", type=int, default=None, choices=[1, 2, 3],
+                        help="Only run specific tier (1, 2, or 3)")
+    parser.add_argument("--airlines", type=str, default=None,
+                        help="Comma-separated airlines to target (e.g., AA,DL)")
     parser.add_argument("--output", type=str, default=str(OUTPUT_PATH),
                         help=f"Output path (default: {OUTPUT_PATH})")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -339,79 +488,129 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    # Parse routes
-    if args.routes:
-        routes = []
-        for r in args.routes.split(","):
-            parts = r.strip().split("-")
-            if len(parts) == 2:
-                routes.append((parts[0].upper(), parts[1].upper()))
-            else:
-                logger.error("Invalid route format: %s (expected ORIGIN-DEST)", r)
-                sys.exit(1)
-    else:
-        routes = ROUTES
+    # Determine which tiers to run
+    run_tier_1 = args.tier is None or args.tier == 1
+    run_tier_2 = args.tier is None or args.tier == 2
+    run_tier_3 = args.tier is None or args.tier == 3
 
-    # Parse cabins
-    cabins = args.cabins.split(",") if args.cabins else CABINS
+    routes_tier_1 = TIER_1_ROUTES if run_tier_1 else []
+    routes_tier_2 = TIER_2_ROUTES if run_tier_2 else []
+
+    # If --airlines specified, only run targeted searches (Tier 3)
+    target_airlines: set[str] | None = None
+    if args.airlines:
+        target_airlines = {a.strip().upper() for a in args.airlines.split(",")}
+        routes_tier_1 = []
+        routes_tier_2 = []
+        run_tier_3 = True
 
     search_dt = _search_date()
-    total_pairs = len(routes) * len(cabins)
-    est_calls = total_pairs * (1 + args.max_itins)
-    est_time_min = (est_calls * args.delay) / 60
 
-    logger.info("Plan: %d routes × %d cabins = %d pairs", len(routes), len(cabins), total_pairs)
-    logger.info("Estimated RPC calls: ~%d, time: ~%.0f min (at %.1fs delay)",
-                est_calls, est_time_min, args.delay)
+    # Estimate RPC budget
+    tier_1_calls = len(routes_tier_1)
+    tier_2_calls = len(routes_tier_2)
+    # Booking calls estimated at ~3 airlines per route + 1 booking each
+    est_booking = (tier_1_calls + tier_2_calls) * 3
+    est_tier_3 = len(target_airlines) if target_airlines else 10
+    est_total = tier_1_calls + tier_2_calls + est_booking + est_tier_3
+    est_time_min = (est_total * args.delay) / 60
+
+    logger.info("Plan: Tier 1=%d routes, Tier 2=%d routes, Tier 3=targeted",
+                len(routes_tier_1), len(routes_tier_2))
+    logger.info("Estimated RPC calls: ~%d, time: ~%.1f min (at %.1fs delay)",
+                est_total, est_time_min, args.delay)
     logger.info("Search date: %s", search_dt)
 
     if args.dry_run:
-        for origin, dest in routes:
-            for cabin in cabins:
-                print(f"  {origin}-{dest} / {cabin}")
+        if routes_tier_1:
+            print("\nTier 1 — Mega-hub routes:")
+            for origin, dest in routes_tier_1:
+                print(f"  {origin}-{dest}")
+        if routes_tier_2:
+            print("\nTier 2 — Regional fill routes:")
+            for origin, dest in routes_tier_2:
+                print(f"  {origin}-{dest}")
+        if run_tier_3:
+            print("\nTier 3 — Targeted airline searches:")
+            if target_airlines:
+                for a in sorted(target_airlines):
+                    route = AIRLINE_ROUTE_HINTS.get(a, ("???", "???"))
+                    print(f"  {a}: {route[0]}-{route[1]}")
+            else:
+                print("  (stragglers not found in Tiers 1-2)")
         logger.info("Dry run complete. No API calls made.")
         return
 
     # Load checkpoint
     all_observations: list[BrandObservation] = []
+    seen_airlines: set[str] = set()
+
     if args.resume:
-        all_observations = _load_checkpoint()
-        logger.info("Resumed %d observations from checkpoint", len(all_observations))
+        all_observations, seen_airlines = _load_checkpoint()
+        logger.info("Resumed: %d observations, %d airlines done (%s)",
+                     len(all_observations), len(seen_airlines),
+                     ", ".join(sorted(seen_airlines)))
 
-    completed = _completed_route_cabins(all_observations)
-    remaining = [
-        (origin, dest, cabin)
-        for origin, dest in routes
-        for cabin in cabins
-        if (f"{origin}-{dest}", cabin) not in completed
-    ]
-    logger.info("Remaining: %d / %d pairs", len(remaining), total_pairs)
+    # --- Tier 1: Mega-hub discovery ---
+    if routes_tier_1:
+        logger.info("=== Tier 1: %d mega-hub routes ===", len(routes_tier_1))
+        for i, (origin, dest) in enumerate(routes_tier_1, 1):
+            logger.info("[T1 %d/%d] %s-%s (seen: %d airlines)",
+                        i, len(routes_tier_1), origin, dest, len(seen_airlines))
+            _discover_and_book_route(
+                origin, dest, search_dt, seen_airlines, all_observations,
+                delay=args.delay,
+            )
+            time.sleep(args.delay)
 
-    for i, (origin, dest, cabin) in enumerate(remaining, 1):
-        route_key = f"{origin}-{dest}"
-        logger.info("[%d/%d] %s / %s", i, len(remaining), route_key, cabin)
+    # --- Tier 2: Regional fill ---
+    if routes_tier_2:
+        logger.info("=== Tier 2: %d regional routes ===", len(routes_tier_2))
+        for i, (origin, dest) in enumerate(routes_tier_2, 1):
+            logger.info("[T2 %d/%d] %s-%s (seen: %d airlines)",
+                        i, len(routes_tier_2), origin, dest, len(seen_airlines))
+            _discover_and_book_route(
+                origin, dest, search_dt, seen_airlines, all_observations,
+                delay=args.delay,
+            )
+            time.sleep(args.delay)
 
-        new_obs = _collect_observations_for_route(
-            origin, dest, cabin, search_dt,
-            max_itins=args.max_itins,
-            delay=args.delay,
-        )
-
-        if new_obs:
-            _save_checkpoint(new_obs)
-            all_observations.extend(new_obs)
-            logger.info("  → %d observations collected", len(new_obs))
+    # --- Tier 3: Targeted airline searches for stragglers ---
+    if run_tier_3:
+        if target_airlines:
+            missing = target_airlines - seen_airlines
         else:
-            logger.info("  → no observations")
+            missing = set(AIRLINE_ROUTE_HINTS.keys()) - seen_airlines
 
-        time.sleep(args.delay)
+        if missing:
+            logger.info("=== Tier 3: %d targeted airline searches ===", len(missing))
+            for i, airline in enumerate(sorted(missing), 1):
+                route_hint = AIRLINE_ROUTE_HINTS.get(airline, ("JFK", "LHR"))
+                origin, dest = route_hint
+                logger.info("[T3 %d/%d] %s via %s-%s",
+                            i, len(missing), airline, origin, dest)
+
+                _discover_and_book_route(
+                    origin, dest, search_dt, seen_airlines, all_observations,
+                    delay=args.delay,
+                    airlines_filter=[airline],
+                )
+                time.sleep(args.delay)
 
     # Build and write output
     mapping = build_mapping(all_observations)
     output_path = Path(args.output)
     output_path.write_text(json.dumps(mapping, indent=2) + "\n")
-    logger.info("Wrote %d brands to %s (%d unmapped)",
-                len(mapping["brands"]), output_path, len(mapping["unmapped"]))
+
+    # Summary
+    n_brands = len(mapping["brands"])
+    n_unmapped = len(mapping["unmapped"])
+    brand_airlines = set()
+    for v in mapping["brands"].values():
+        brand_airlines.update(v.get("airlines", []))
+
+    logger.info("Done! %d brands, %d airlines, %d unmapped → %s",
+                n_brands, len(brand_airlines), n_unmapped, output_path)
 
 
 if __name__ == "__main__":

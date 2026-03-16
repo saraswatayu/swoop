@@ -631,6 +631,38 @@ class TestExactPricing:
         assert result.price == 1990
         assert result.fare_brand is None
 
+    def test_eligible_rejects_suspiciously_cheap_business(self):
+        """$200 option classified as business, base=$1000 → rejected."""
+        options = [_booking_option(200, "Delta One", "business")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business", base_price=1000,
+        )
+        assert result == []
+
+    def test_eligible_accepts_reasonable_business(self):
+        """$500 option classified as business, base=$1000 → accepted."""
+        options = [_booking_option(500, "Delta One", "business")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business", base_price=1000,
+        )
+        assert len(result) == 1
+
+    def test_eligible_no_sanity_check_for_economy(self):
+        """Economy options are not subject to price sanity check."""
+        options = [_booking_option(50, "Basic Economy", "economy")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="economy", base_price=1000,
+        )
+        assert len(result) == 1
+
+    def test_eligible_no_sanity_check_without_base_price(self):
+        """No base_price → no sanity check."""
+        options = [_booking_option(200, "Delta One", "business")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business",
+        )
+        assert len(result) == 1
+
     def test_price_selected_trip_does_not_treat_extra_legroom_economy_as_premium(self, monkeypatch):
         request_legs = [
             {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},

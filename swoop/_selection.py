@@ -231,6 +231,7 @@ def _eligible_booking_options(
     include_basic_economy: bool,
     *,
     cabin: str,
+    base_price: int | None = None,
 ) -> list:
     priced = [option for option in options if option.price > 0]
     if cabin == "economy":
@@ -251,6 +252,12 @@ def _eligible_booking_options(
         option for option in priced if option._cabin_bucket == cabin
     ]
     if exact_bucket:
+        # Price sanity check: reject options below 40% of base_price
+        if base_price and base_price > 0 and cabin != "economy":
+            sane = [opt for opt in exact_bucket if opt.price >= base_price * 0.4]
+            if sane:
+                return sane
+            return []  # all suspiciously cheap → fall back to base_price
         return exact_bucket
 
     return []
@@ -530,6 +537,7 @@ def price_selected_trip(
             booking_options,
             include_basic_economy,
             cabin=cabin,
+            base_price=base_price,
         )
         if eligible:
             best_option = min(eligible, key=lambda option: option.price)

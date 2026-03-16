@@ -334,12 +334,64 @@ def _retry_booking(
 # ---------------------------------------------------------------------------
 
 
-def classify_brand(observations: list[BrandObservation]) -> tuple[str, float]:
-    """Classify a brand from its observations. Returns (cabin, confidence)."""
+def _cabin_from_brand_name(brand_code: str) -> str | None:
+    """Infer cabin from brand name patterns. Returns None if ambiguous.
+
+    Mirrors the pattern-matching layer in _booking._classify_cabin_bucket
+    to correct misclassifications from price-ratio-only analysis.
+    Checked highest-cabin-first so "PREMIUM ECONOMY" matches before "ECONOMY".
+    """
+    h = brand_code.upper().strip()
+    if not h:
+        return None
+
+    # Named business suites BEFORE generic "SUITE" → first
+    if any(t in h for t in (
+        "CLUB SUITE", "QSUITE", "Q SUITE", "PRESTIGE SUITE",
+        "SKY SUITE", "THE ROOM",
+    )):
+        return "business"
+    if any(t in h for t in ("FIRST", "LA PREMIERE", "SUITE")):
+        return "first"
+    if any(t in h for t in (
+        "BUSINESS", "DELTA ONE", "POLARIS", "UPPER CLASS", "MINT",
+        "CLUB WORLD", "PRESTIGE",
+    )):
+        return "business"
+    if any(t in h for t in (
+        "PREMIUM ECONOMY", "PREMIUM SELECT", "PREMIUM PLUS",
+        "PREM ECON", "WORLD TRAVELLER PLUS",
+    )):
+        return "premium-economy"
+    # Economy brands — prevents seat_type override from misclassifying
+    if any(t in h for t in (
+        "BASIC", "MAIN CABIN", "MAIN CLASSIC", "ECONOMY", "COMFORT",
+        "COACH", "STANDARD", "SAVER", "VALUE", "BLUE", "EVEN MORE",
+    )):
+        return "economy"
+    return None
+
+
+def classify_brand(
+    observations: list[BrandObservation],
+    brand_code: str = "",
+) -> tuple[str, float]:
+    """Classify a brand from its observations. Returns (cabin, confidence).
+
+    Uses a 3-signal approach:
+    1. Brand name pattern matching (strongest — unambiguous cabin keywords)
+    2. seat_type consensus from near-base observations
+    3. Price ratio closest to 1.0 relative to searched cabin
+    """
     if not observations:
         return "unknown", 0.0
 
-    # Signal 1: Which searched cabin gives price_ratio closest to 1.0?
+    # Signal 1 (strongest): brand name indicates cabin unambiguously
+    name_cabin = _cabin_from_brand_name(brand_code)
+    if name_cabin is not None:
+        return name_cabin, 0.95
+
+    # Signal 2: Price ratio analysis
     cabin_ratios: dict[str, list[float]] = defaultdict(list)
     for obs in observations:
         cabin_ratios[obs.cabin_searched].append(obs.price_ratio)
@@ -353,7 +405,7 @@ def classify_brand(observations: list[BrandObservation]) -> tuple[str, float]:
             best_distance = dist
             best_cabin = cabin
 
-    # Signal 2: seat_type consensus from near-base observations
+    # Signal 3: seat_type consensus from near-base observations
     near_base = [o for o in observations if 0.8 <= o.price_ratio <= 1.3]
     seat_types = [st for o in near_base for st in o.seat_types if st is not None]
     if seat_types:
@@ -440,7 +492,7 @@ def build_mapping(observations: list[BrandObservation]) -> dict:
     unmapped: list[str] = []
 
     for brand_key, obs_list in sorted(by_brand.items()):
-        cabin, confidence = classify_brand(obs_list)
+        cabin, confidence = classify_brand(obs_list, brand_code=brand_key)
         airlines = sorted({o.airline_iata for o in obs_list if o.airline_iata})
         if cabin == "unknown":
             unmapped.append(brand_key)

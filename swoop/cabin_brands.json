@@ -1,48 +1,437 @@
 {
   "version": "2026-03-16",
   "brands": {
-    "MAIN": {"cabin": "economy", "confidence": 0.92, "observations": 0, "airlines": ["AS"]},
-    "SAVER": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": ["AS"]},
-    "VALUE": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": ["NK", "F9"]},
-    "BLUE BASIC": {"cabin": "economy", "confidence": 0.95, "observations": 0, "airlines": ["B6"]},
-    "BLUE": {"cabin": "economy", "confidence": 0.88, "observations": 0, "airlines": ["B6"]},
-    "BLUE EXTRA": {"cabin": "economy", "confidence": 0.88, "observations": 0, "airlines": ["B6"]},
-    "EVEN MORE": {"cabin": "economy", "confidence": 0.85, "observations": 0, "airlines": ["B6"]},
-    "CLUB SUITE": {"cabin": "business", "confidence": 0.97, "observations": 0, "airlines": ["BA"]},
-    "CLUB WORLD": {"cabin": "business", "confidence": 0.97, "observations": 0, "airlines": ["BA"]},
-    "QSUITE": {"cabin": "business", "confidence": 0.97, "observations": 0, "airlines": ["QR"]},
-    "Q SUITE": {"cabin": "business", "confidence": 0.97, "observations": 0, "airlines": ["QR"]},
-    "SKY SUITE": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["KE"]},
-    "PRESTIGE SUITE": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["KE"]},
-    "PRESTIGE": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["KE"]},
-    "THE ROOM": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["JL"]},
-    "DELTA ONE": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["DL"]},
-    "DELTA ONE SUITE": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["DL"]},
-    "POLARIS": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["UA"]},
-    "MINT": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["B6"]},
-    "UPPER CLASS": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": ["VS"]},
-    "FLAGSHIP BUSINESS": {"cabin": "business", "confidence": 0.93, "observations": 0, "airlines": ["AA"]},
-    "LA PREMIERE": {"cabin": "first", "confidence": 0.95, "observations": 0, "airlines": ["AF"]},
-    "FLAGSHIP FIRST": {"cabin": "first", "confidence": 0.95, "observations": 0, "airlines": ["AA"]},
-    "PREMIUM SELECT": {"cabin": "premium-economy", "confidence": 0.95, "observations": 0, "airlines": ["DL"]},
-    "PREMIUM PLUS": {"cabin": "premium-economy", "confidence": 0.95, "observations": 0, "airlines": ["UA"]},
-    "WORLD TRAVELLER PLUS": {"cabin": "premium-economy", "confidence": 0.95, "observations": 0, "airlines": ["BA"]},
-    "PREMIUM ECONOMY": {"cabin": "premium-economy", "confidence": 0.95, "observations": 0, "airlines": []},
-    "DELTA MAIN BASIC": {"cabin": "economy", "confidence": 0.97, "observations": 0, "airlines": ["DL"]},
-    "DELTA MAIN CLASSIC": {"cabin": "economy", "confidence": 0.97, "observations": 0, "airlines": ["DL"]},
-    "MAIN CABIN": {"cabin": "economy", "confidence": 0.95, "observations": 0, "airlines": ["AA", "DL"]},
-    "MAIN CABIN EXTRA": {"cabin": "economy", "confidence": 0.93, "observations": 0, "airlines": ["AA"]},
-    "MAIN CLASSIC": {"cabin": "economy", "confidence": 0.93, "observations": 0, "airlines": ["DL"]},
-    "BASIC ECONOMY": {"cabin": "economy", "confidence": 0.97, "observations": 0, "airlines": ["UA", "AA"]},
-    "ECONOMY": {"cabin": "economy", "confidence": 0.95, "observations": 0, "airlines": []},
-    "ECONOMY PLUS": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": ["UA"]},
-    "ECONOMY FULLY REFUNDABLE": {"cabin": "economy", "confidence": 0.93, "observations": 0, "airlines": []},
-    "COMFORT+": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": ["DL"]},
-    "COMFORT PLUS": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": ["DL"]},
-    "COACH": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": []},
-    "STANDARD": {"cabin": "economy", "confidence": 0.90, "observations": 0, "airlines": []},
-    "BUSINESS": {"cabin": "business", "confidence": 0.95, "observations": 0, "airlines": []},
-    "FIRST": {"cabin": "first", "confidence": 0.95, "observations": 0, "airlines": []}
+    "AM PLUS": {
+      "cabin": "economy",
+      "confidence": 0.7,
+      "observations": 1,
+      "airlines": [
+        "AM"
+      ]
+    },
+    "AM PLUS FLEX": {
+      "cabin": "economy",
+      "confidence": 0.53,
+      "observations": 1,
+      "airlines": [
+        "AM"
+      ]
+    },
+    "BASIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "IB",
+        "WN"
+      ]
+    },
+    "BASIC ECONOMY": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 7,
+      "airlines": [
+        "AA",
+        "AY",
+        "BA",
+        "NH",
+        "UA",
+        "multi"
+      ]
+    },
+    "BASIC FARE": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "F9"
+      ]
+    },
+    "BASICA": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "AM"
+      ]
+    },
+    "BLUE": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "B6"
+      ]
+    },
+    "BLUE BASIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "B6"
+      ]
+    },
+    "BLUE EXTRA": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "B6"
+      ]
+    },
+    "BUSINESS FLEX": {
+      "cabin": "business",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "TK"
+      ]
+    },
+    "CHOICE": {
+      "cabin": "economy",
+      "confidence": 0.69,
+      "observations": 1,
+      "airlines": [
+        "WN"
+      ]
+    },
+    "CHOICE PREFERRED": {
+      "cabin": "economy",
+      "confidence": 0.07,
+      "observations": 1,
+      "airlines": [
+        "WN"
+      ]
+    },
+    "CLASICA": {
+      "cabin": "economy",
+      "confidence": 0.88,
+      "observations": 1,
+      "airlines": [
+        "AM"
+      ]
+    },
+    "CLASICA FLEX": {
+      "cabin": "economy",
+      "confidence": 0.76,
+      "observations": 1,
+      "airlines": [
+        "AM"
+      ]
+    },
+    "COMFORT": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "AC",
+        "IB"
+      ]
+    },
+    "DELTA COMFORT CLASSIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "DL"
+      ]
+    },
+    "DELTA MAIN BASIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "DL"
+      ]
+    },
+    "DELTA MAIN CLASSIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "DL"
+      ]
+    },
+    "ECONO": {
+      "cabin": "economy",
+      "confidence": 0.85,
+      "observations": 1,
+      "airlines": [
+        "WS"
+      ]
+    },
+    "ECONOFLEX": {
+      "cabin": "economy",
+      "confidence": 0.64,
+      "observations": 1,
+      "airlines": [
+        "WS"
+      ]
+    },
+    "ECONOMY": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "NH",
+        "UA"
+      ]
+    },
+    "ECONOMY BUNDLE": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "F9"
+      ]
+    },
+    "ECONOMY CLASSIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "VS"
+      ]
+    },
+    "ECONOMY CLASSIC FLEX": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "VS"
+      ]
+    },
+    "ECONOMY DELIGHT": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "VS"
+      ]
+    },
+    "ECONOMY DELIGHT FLEX": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "VS"
+      ]
+    },
+    "ECONOMY FLEX": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 4,
+      "airlines": [
+        "AZ",
+        "FI",
+        "KE",
+        "QF"
+      ]
+    },
+    "ECONOMY FULLY REFUNDABLE": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "NH",
+        "UA"
+      ]
+    },
+    "ECONOMY LIGHT": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 3,
+      "airlines": [
+        "AZ",
+        "FI",
+        "VS"
+      ]
+    },
+    "ECONOMY PLUS": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "UA"
+      ]
+    },
+    "ECONOMY SAVER": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "AZ",
+        "QF"
+      ]
+    },
+    "ECONOMY STANDARD": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "FI",
+        "KE"
+      ]
+    },
+    "EVEN MORE": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "B6"
+      ]
+    },
+    "FIRST": {
+      "cabin": "first",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "AS"
+      ]
+    },
+    "FLEX": {
+      "cabin": "economy",
+      "confidence": 0.84,
+      "observations": 1,
+      "airlines": [
+        "AC"
+      ]
+    },
+    "FLEXIBLE": {
+      "cabin": "economy",
+      "confidence": 0.54,
+      "observations": 2,
+      "airlines": [
+        "IB",
+        "TK"
+      ]
+    },
+    "MAIN": {
+      "cabin": "economy",
+      "confidence": 0.74,
+      "observations": 1,
+      "airlines": [
+        "AS"
+      ]
+    },
+    "MAIN CABIN": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 3,
+      "airlines": [
+        "AA",
+        "AY",
+        "multi"
+      ]
+    },
+    "MAIN PLUS": {
+      "cabin": "economy",
+      "confidence": 0.35,
+      "observations": 2,
+      "airlines": [
+        "AA",
+        "AY"
+      ]
+    },
+    "MAIN SELECT": {
+      "cabin": "economy",
+      "confidence": 0.0,
+      "observations": 1,
+      "airlines": [
+        "AA"
+      ]
+    },
+    "OPTIMA": {
+      "cabin": "economy",
+      "confidence": 0.81,
+      "observations": 1,
+      "airlines": [
+        "IB"
+      ]
+    },
+    "PREMIUM ECONOMY": {
+      "cabin": "premium-economy",
+      "confidence": 0.95,
+      "observations": 4,
+      "airlines": [
+        "AY",
+        "BA",
+        "multi"
+      ]
+    },
+    "PREMIUM ECONOMY FLEX": {
+      "cabin": "premium-economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "QF"
+      ]
+    },
+    "PREMIUM ECONOMY SALE": {
+      "cabin": "premium-economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "QF"
+      ]
+    },
+    "PREMIUM ECONOMY SAVER": {
+      "cabin": "premium-economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "QF"
+      ]
+    },
+    "PRESTIGE STANDARD": {
+      "cabin": "business",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "KE"
+      ]
+    },
+    "RESTRICTED": {
+      "cabin": "economy",
+      "confidence": 1.0,
+      "observations": 1,
+      "airlines": [
+        "TK"
+      ]
+    },
+    "SAVER": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "AS"
+      ]
+    },
+    "STANDARD": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "AC"
+      ]
+    },
+    "STANDARD ECONOMY": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 2,
+      "airlines": [
+        "BA",
+        "multi"
+      ]
+    },
+    "ULTRABASIC": {
+      "cabin": "economy",
+      "confidence": 0.95,
+      "observations": 1,
+      "airlines": [
+        "WS"
+      ]
+    }
   },
   "unmapped": []
 }

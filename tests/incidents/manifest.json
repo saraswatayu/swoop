@@ -25,6 +25,12 @@
       "category": "decoder-degradation",
       "summary": "Malformed nested response fields should degrade safely instead of crashing or returning invalid shapes.",
       "test_ref": "tests/test_chaos.py::TestCorruptLayover::test_various_malformed_layovers[data0]"
+    },
+    {
+      "id": "pricing_business_unknown_fallback",
+      "category": "pricing-cabin",
+      "summary": "Unknown cabin bucket fallback leaked economy brands into business/first/premium-economy pricing.",
+      "test_ref": "tests/test_selection.py::TestExactPricing::test_eligible_returns_empty_for_unknown_on_business"
     }
   ]
 }

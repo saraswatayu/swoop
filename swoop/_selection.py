@@ -253,9 +253,7 @@ def _eligible_booking_options(
     if exact_bucket:
         return exact_bucket
 
-    return [
-        option for option in priced if option._cabin_bucket == "unknown"
-    ]
+    return []
 
 
 def correct_trip_option_prices(

@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-12",
+  "version": "2026-03-16",
   "shopping": [
     {
       "id": "shopping_domestic_oneway_v1",
@@ -63,8 +63,8 @@
       "expected": {
         "prices": [159, 204, 239, 383],
         "brands": ["Blue Basic", "Blue", "Blue Extra", "Even More"],
-        "cabin_buckets": ["economy", "unknown", "unknown", "unknown"],
-        "fare_families": ["basic", "unknown", "unknown", "unknown"]
+        "cabin_buckets": ["economy", "economy", "economy", "economy"],
+        "fare_families": ["basic", "standard", "enhanced", "enhanced"]
       }
     }
   ]

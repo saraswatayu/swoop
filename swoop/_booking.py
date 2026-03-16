@@ -6,8 +6,10 @@ cohesion — this module handles response parsing, not request building.
 """
 
 import base64
+import functools
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from .builders import ItinerarySummary
@@ -282,13 +284,37 @@ def _classify_fare_family(brand_code: str, brand_label: str, *, is_basic: bool) 
         return "standard"
     if " ECONOMY " in f" {haystack} " and "PLUS" not in haystack:
         return "standard"
+    # Bare "MAIN" (Alaska), bare "BLUE" (JetBlue) → standard
+    stripped = haystack.strip()
+    if stripped in ("MAIN MAIN", "BLUE BLUE"):
+        return "standard"
     if any(token in haystack for token in ("PLUS", "SELECT", "COMFORT")):
+        return "enhanced"
+    # JetBlue enhanced tiers
+    if any(token in haystack for token in ("BLUE EXTRA", "EVEN MORE")):
         return "enhanced"
     return "unknown"
 
 
+@functools.lru_cache(maxsize=1)
+def _load_cabin_brand_registry() -> dict[str, str]:
+    """Load cabin brand mappings from cabin_brands.json."""
+    path = Path(__file__).parent / "cabin_brands.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+        return {k: v["cabin"] for k, v in data.get("brands", {}).items()}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return {}
+
+
 def _classify_cabin_bucket(brand_code: str, brand_label: str) -> str:
     """Classify the requested cabin represented by a booking-option brand.
+
+    Uses a 2-layer approach:
+    1. Data-driven lookup from cabin_brands.json registry
+    2. Pattern-matching fallback for brands not in registry
 
     Checks run highest-cabin-first so that e.g. "ECONOMY PLUS" matches
     premium-economy before the broader "ECONOMY" rule in the economy tier.
@@ -297,35 +323,39 @@ def _classify_cabin_bucket(brand_code: str, brand_label: str) -> str:
     if not haystack:
         return "unknown"
 
+    # Layer 1: Data-driven lookup from registry
+    registry = _load_cabin_brand_registry()
+    brand_key = brand_code.upper().strip()
+    if brand_key and brand_key in registry:
+        return registry[brand_key]
+    if haystack in registry:
+        return registry[haystack]
+
+    # Layer 2: Pattern-matching fallback
+    # Check named business suites BEFORE generic "SUITE" → first
+    if any(token in haystack for token in (
+        "CLUB SUITE", "QSUITE", "Q SUITE", "PRESTIGE SUITE",
+        "SKY SUITE", "THE ROOM",
+    )):
+        return "business"
     if any(token in haystack for token in ("FIRST", "LA PREMIERE", "SUITE")):
         return "first"
-    if any(token in haystack for token in ("BUSINESS", "DELTA ONE", "POLARIS", "UPPER CLASS", "MINT")):
+    if any(token in haystack for token in (
+        "BUSINESS", "DELTA ONE", "POLARIS", "UPPER CLASS", "MINT",
+        "CLUB WORLD", "PRESTIGE",
+    )):
         return "business"
-    if any(
-        token in haystack
-        for token in (
-            "PREMIUM ECONOMY",
-            "PREMIUM SELECT",
-            "PREMIUM PLUS",
-            "PREM ECON",
-        )
-    ):
+    if any(token in haystack for token in (
+        "PREMIUM ECONOMY", "PREMIUM SELECT", "PREMIUM PLUS",
+        "PREM ECON", "WORLD TRAVELLER PLUS",
+    )):
         return "premium-economy"
-    if any(
-        token in haystack
-        for token in (
-            "BASIC",
-            "MAIN CABIN",
-            "MAIN CLASSIC",
-            "MAIN CABIN EXTRA",
-            "ECONOMY",
-            "ECONOMY PLUS",
-            "COMFORT+",
-            "COMFORT PLUS",
-            "COACH",
-            "STANDARD",
-        )
-    ):
+    if any(token in haystack for token in (
+        "BASIC", "MAIN CABIN", "MAIN CLASSIC", "MAIN CABIN EXTRA",
+        "ECONOMY", "ECONOMY PLUS", "COMFORT+", "COMFORT PLUS",
+        "COACH", "STANDARD", "MAIN", "BLUE", "EVEN MORE",
+        "SAVER", "VALUE",
+    )):
         return "economy"
     return "unknown"
 

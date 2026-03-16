@@ -663,6 +663,41 @@ class TestExactPricing:
         )
         assert len(result) == 1
 
+    def test_price_selected_trip_skips_booking_on_seat_type_mismatch(self, monkeypatch):
+        """All segments have seat_type=1 (economy) but cabin=business → skip booking, use base_price."""
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+            {"origin": "LAX", "destination": "JFK", "date": "2026-04-20"},
+        ]
+        outbound = _make_itinerary(
+            origin="JFK", destination="LAX", date="2026-04-15",
+            airline="DL", flight_number="2300", price=449,
+            booking_token="token-out",
+        )
+        return_itin = _make_itinerary(
+            origin="LAX", destination="JFK", date="2026-04-20",
+            airline="DL", flight_number="2301", price=1990,
+            booking_token="token-return",
+        )
+        # Set seat_type=1 (economy) on all flights
+        for itin in (outbound, return_itin):
+            for flight in itin.flights:
+                object.__setattr__(flight, "seat_type", 1)
+
+        booking_called = []
+        monkeypatch.setattr(
+            selection, "fetch_trip_booking_options",
+            lambda *_a, **_kw: booking_called.append(True) or [],
+        )
+
+        result = selection.price_selected_trip(
+            request_legs, [outbound, return_itin],
+            cabin="business", include_basic_economy=False,
+        )
+        assert result is not None
+        assert result.price == 1990
+        assert booking_called == []  # booking call was skipped
+
     def test_price_selected_trip_does_not_treat_extra_legroom_economy_as_premium(self, monkeypatch):
         request_legs = [
             {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
@@ -702,3 +737,43 @@ class TestExactPricing:
         assert result.price == 1199
         assert result.fare_brand is None
         assert result.booking_options == options
+
+
+class TestSeatTypeValidation:
+    """seat_type-based cabin validation before booking call."""
+
+    def test_seat_types_match_cabin_economy(self):
+        itin = _make_itinerary(
+            origin="JFK", destination="LAX", date="2026-04-15",
+            airline="DL", flight_number="2300", price=300, booking_token="t",
+        )
+        for flight in itin.flights:
+            object.__setattr__(flight, "seat_type", 1)
+        assert selection._seat_types_match_cabin([itin], "economy") is True
+
+    def test_seat_types_match_cabin_business(self):
+        itin = _make_itinerary(
+            origin="JFK", destination="LAX", date="2026-04-15",
+            airline="DL", flight_number="2300", price=1500, booking_token="t",
+        )
+        for flight in itin.flights:
+            object.__setattr__(flight, "seat_type", 4)
+        assert selection._seat_types_match_cabin([itin], "business") is True
+
+    def test_seat_types_mismatch_economy_for_business(self):
+        itin = _make_itinerary(
+            origin="JFK", destination="LAX", date="2026-04-15",
+            airline="DL", flight_number="2300", price=300, booking_token="t",
+        )
+        for flight in itin.flights:
+            object.__setattr__(flight, "seat_type", 1)
+        assert selection._seat_types_match_cabin([itin], "business") is False
+
+    def test_seat_types_match_returns_true_when_no_data(self):
+        itin = _make_itinerary(
+            origin="JFK", destination="LAX", date="2026-04-15",
+            airline="DL", flight_number="2300", price=300, booking_token="t",
+        )
+        for flight in itin.flights:
+            object.__setattr__(flight, "seat_type", None)
+        assert selection._seat_types_match_cabin([itin], "business") is True

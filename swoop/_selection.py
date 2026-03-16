@@ -23,6 +23,29 @@ from .rpc import (
 
 logger = logging.getLogger(__name__)
 
+_SEAT_TYPE_BY_CABIN: dict[str, set[int]] = {
+    "economy": {1, 2, 3},
+    "premium-economy": {3},
+    "business": {4, 5, 6, 9},
+    "first": {4, 5, 6, 9},
+}
+
+
+def _seat_types_match_cabin(itineraries: list, cabin: str) -> bool:
+    """True if any segment seat_type matches cabin, or if no data exists."""
+    expected = _SEAT_TYPE_BY_CABIN.get(cabin)
+    if not expected:
+        return True
+    has_any = False
+    for itin in itineraries:
+        for f in itin.flights:
+            if f.seat_type is not None:
+                has_any = True
+                if f.seat_type in expected:
+                    return True
+    return not has_any  # no data = don't block
+
+
 TARGET_RESULTS = 10
 BEAM_WIDTH = 15
 TIME_BUDGET_SECONDS = 90
@@ -509,6 +532,18 @@ def price_selected_trip(
     final_itinerary = itineraries[-1]
     base_price = final_itinerary.price
     if len(itineraries) == 1:
+        if base_price is None or base_price <= 0:
+            return None
+        return PriceResult(
+            price=base_price,
+            itinerary=final_itinerary,
+            resolved_legs=resolved_legs,
+            rpc_calls=rpc_calls,
+        )
+
+    # seat_type validation: if ALL segments indicate wrong cabin, skip booking
+    if cabin != "economy" and not _seat_types_match_cabin(itineraries, cabin):
+        logger.debug("seat_type mismatch for cabin=%s, skipping booking call", cabin)
         if base_price is None or base_price <= 0:
             return None
         return PriceResult(

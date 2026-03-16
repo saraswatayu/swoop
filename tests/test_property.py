@@ -18,6 +18,8 @@ from swoop.decoder import (
     decode_result,
     SearchResult,
 )
+from swoop._booking import _classify_cabin_bucket
+from swoop._selection import _eligible_booking_options
 from swoop._validate import (
     validate_cabin,
     validate_iata_code,
@@ -165,3 +167,25 @@ class TestValidatorProperties:
             validate_adults(value)
         except ValueError:
             pass
+
+
+class TestCabinClassifierProperties:
+    """Property-based tests for cabin classification pipeline."""
+
+    @given(text=st.text(max_size=50))
+    @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+    def test_classify_cabin_bucket_never_crashes(self, text):
+        result = _classify_cabin_bucket(text, text)
+        assert result in ("economy", "premium-economy", "business", "first", "unknown")
+
+    @given(brand_label=st.sampled_from(["Main", "Blue", "Blue Extra", "Even More", "Saver", "Value"]))
+    @settings(max_examples=50)
+    def test_known_economy_brands_never_leak_to_business(self, brand_label):
+        from swoop.decoder import BookingOption
+        code = brand_label.upper()
+        bucket = _classify_cabin_bucket(code, brand_label)
+        option = BookingOption(
+            price=300, brand_label=brand_label, brand_code=code, _cabin_bucket=bucket,
+        )
+        result = _eligible_booking_options([option], True, cabin="business")
+        assert result == []

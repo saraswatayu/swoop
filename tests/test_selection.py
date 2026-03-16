@@ -581,6 +581,56 @@ class TestExactPricing:
         assert result.fare_brand is None
         assert result.booking_options == options
 
+    def test_eligible_returns_empty_for_unknown_on_business(self):
+        options = [_booking_option(500, "Mystery Brand", "unknown")]
+        result = selection._eligible_booking_options(options, True, cabin="business")
+        assert result == []
+
+    def test_eligible_returns_empty_for_unknown_on_first(self):
+        options = [_booking_option(500, "Mystery Brand", "unknown")]
+        result = selection._eligible_booking_options(options, True, cabin="first")
+        assert result == []
+
+    def test_eligible_returns_empty_for_unknown_on_premium_economy(self):
+        options = [_booking_option(500, "Mystery Brand", "unknown")]
+        result = selection._eligible_booking_options(options, True, cabin="premium-economy")
+        assert result == []
+
+    def test_eligible_still_includes_unknown_for_economy(self):
+        options = [_booking_option(500, "Mystery Brand", "unknown")]
+        result = selection._eligible_booking_options(options, True, cabin="economy")
+        assert len(result) == 1
+
+    def test_price_selected_trip_business_falls_back_with_unknown_only(self, monkeypatch):
+        """Only unknown-bucket booking options → result must use base_price."""
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+            {"origin": "LAX", "destination": "JFK", "date": "2026-04-20"},
+        ]
+        itineraries = [
+            _make_itinerary(
+                origin="JFK", destination="LAX", date="2026-04-15",
+                airline="DL", flight_number="2300", price=449,
+                booking_token="token-out",
+            ),
+            _make_itinerary(
+                origin="LAX", destination="JFK", date="2026-04-20",
+                airline="DL", flight_number="2301", price=1990,
+                booking_token="token-return",
+            ),
+        ]
+        options = [_booking_option(485, "Main", "unknown")]
+        monkeypatch.setattr(selection, "fetch_trip_booking_options",
+                            lambda *_a, **_kw: options)
+
+        result = selection.price_selected_trip(
+            request_legs, itineraries,
+            cabin="business", include_basic_economy=False,
+        )
+        assert result is not None
+        assert result.price == 1990
+        assert result.fare_brand is None
+
     def test_price_selected_trip_does_not_treat_extra_legroom_economy_as_premium(self, monkeypatch):
         request_legs = [
             {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},

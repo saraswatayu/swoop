@@ -363,6 +363,54 @@ class TestCheckPriceRoundtrip:
         assert result.price == 650  # Fell back to direct_price
 
 
+class TestCheckPriceUnknownCabinBucket:
+    """Unknown cabin bucket must not be accepted for non-economy cabins."""
+
+    def test_roundtrip_business_does_not_accept_unknown_cabin_bucket(self):
+        outbound_itin = Itinerary(
+            flights=[Flight(
+                airline="AS", flight_number="12",
+                departure_airport_code="SEA", arrival_airport_code="JFK",
+                departure_date=(2026, 6, 15), departure_time=(8, 30),
+                arrival_date=(2026, 6, 15), arrival_time=(16, 45),
+            )],
+            direct_price=900,
+            booking_token="outbound-token",
+        )
+        return_itin = Itinerary(
+            flights=[Flight(
+                airline="AS", flight_number="13",
+                departure_airport_code="JFK", arrival_airport_code="SEA",
+                departure_date=(2026, 6, 22), departure_time=(14, 0),
+                arrival_date=(2026, 6, 22), arrival_time=(17, 15),
+            )],
+            direct_price=1990,
+            booking_token="return-token",
+        )
+        outbound_result = SearchResult(_raw=[], best=[outbound_itin], other=[])
+        return_result = SearchResult(_raw=[], best=[return_itin], other=[])
+        booking_options = [
+            BookingOption(price=485, brand_label="Main", is_basic=False, _cabin_bucket="unknown"),
+        ]
+
+        def mock_search_from_legs(legs, **kwargs):
+            if legs[0].get("selected_legs") is not None:
+                return return_result
+            return outbound_result
+
+        with patch("swoop._selection._search_from_legs", side_effect=mock_search_from_legs), \
+             patch("swoop._selection.fetch_trip_booking_options", return_value=booking_options):
+            result = check_price(
+                "AS12", origin="SEA", destination="JFK", date="2026-06-15",
+                return_flight_number="AS13", return_date="2026-06-22",
+                cabin="business",
+            )
+
+        assert result is not None
+        assert result.price == 1990  # base_price, NOT the economy $485
+        assert result.fare_brand is None
+
+
 class TestCheckPriceRetryDefault:
     """check_price inherits the retries=2 default."""
 

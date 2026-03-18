@@ -407,7 +407,7 @@ class TestSelectedTripResolution:
 
 class TestExactPricing:
     @pytest.mark.parametrize(
-        ("cabin", "options", "expected_price", "expected_brand"),
+        ("cabin", "options", "return_price", "expected_price", "expected_brand"),
         [
             (
                 "business",
@@ -415,6 +415,7 @@ class TestExactPricing:
                     _booking_option(319, "Main Cabin", "economy"),
                     _booking_option(689, "Delta One", "business"),
                 ],
+                689,
                 689,
                 "Delta One",
             ),
@@ -425,6 +426,7 @@ class TestExactPricing:
                     _booking_option(459, "Premium Select", "premium-economy"),
                 ],
                 459,
+                459,
                 "Premium Select",
             ),
             (
@@ -433,6 +435,7 @@ class TestExactPricing:
                     _booking_option(689, "Delta One", "business"),
                     _booking_option(1299, "First", "first"),
                 ],
+                1299,
                 1299,
                 "First",
             ),
@@ -443,6 +446,7 @@ class TestExactPricing:
         monkeypatch,
         cabin,
         options,
+        return_price,
         expected_price,
         expected_brand,
     ):
@@ -466,7 +470,7 @@ class TestExactPricing:
                 date="2026-04-20",
                 airline="DL",
                 flight_number="2301",
-                price=799,
+                price=return_price,
                 booking_token="token-return",
             ),
         ]
@@ -485,16 +489,17 @@ class TestExactPricing:
         assert result.rpc_calls == 1
 
     @pytest.mark.parametrize(
-        ("include_basic_economy", "expected_price", "expected_basic"),
+        ("include_basic_economy", "return_price", "expected_price", "expected_basic"),
         [
-            (False, 249, False),
-            (True, 199, True),
+            (False, 249, 249, False),
+            (True, 199, 199, True),
         ],
     )
     def test_price_selected_trip_only_uses_include_basic_for_economy(
         self,
         monkeypatch,
         include_basic_economy,
+        return_price,
         expected_price,
         expected_basic,
     ):
@@ -518,7 +523,7 @@ class TestExactPricing:
                 date="2026-04-20",
                 airline="DL",
                 flight_number="2301",
-                price=299,
+                price=return_price,
                 booking_token="token-return",
             ),
         ]
@@ -598,7 +603,7 @@ class TestExactPricing:
 
     def test_eligible_still_includes_unknown_for_economy(self):
         options = [_booking_option(500, "Mystery Brand", "unknown")]
-        result = selection._eligible_booking_options(options, True, cabin="economy")
+        result = selection._eligible_booking_options(options, True, cabin="economy", base_price=500)
         assert len(result) == 1
 
     def test_price_selected_trip_business_falls_back_with_unknown_only(self, monkeypatch):
@@ -639,29 +644,29 @@ class TestExactPricing:
         )
         assert result == []
 
-    def test_eligible_accepts_reasonable_business(self):
-        """$500 option classified as business, base=$1000 → accepted."""
+    def test_eligible_accepts_price_matched_business(self):
+        """$500 option at base_price=$500 → accepted via price match."""
         options = [_booking_option(500, "Delta One", "business")]
         result = selection._eligible_booking_options(
-            options, True, cabin="business", base_price=1000,
+            options, True, cabin="business", base_price=500,
         )
         assert len(result) == 1
 
-    def test_eligible_no_sanity_check_for_economy(self):
-        """Economy options are not subject to price sanity check."""
+    def test_eligible_economy_matches_by_price(self):
+        """Economy option at base_price is selected via price match."""
         options = [_booking_option(50, "Basic Economy", "economy")]
         result = selection._eligible_booking_options(
-            options, True, cabin="economy", base_price=1000,
+            options, True, cabin="economy", base_price=50,
         )
         assert len(result) == 1
 
-    def test_eligible_no_sanity_check_without_base_price(self):
-        """No base_price → no sanity check."""
+    def test_eligible_no_base_price_returns_empty(self):
+        """No base_price → no matching possible, returns empty."""
         options = [_booking_option(200, "Delta One", "business")]
         result = selection._eligible_booking_options(
             options, True, cabin="business",
         )
-        assert len(result) == 1
+        assert result == []
 
     def test_price_selected_trip_skips_booking_on_seat_type_mismatch(self, monkeypatch):
         """All segments have seat_type=1 (economy) but cabin=business → skip booking, use base_price."""
@@ -737,6 +742,76 @@ class TestExactPricing:
         assert result.price == 1199
         assert result.fare_brand is None
         assert result.booking_options == options
+
+
+class TestPriceMatchedEligibility:
+    """Price-pairing: booking option at base_price ±$1 is the same cabin."""
+
+    def test_exact_price_match_selected(self):
+        """Option at exactly base_price is selected."""
+        options = [_booking_option(300, "Basic Economy", "economy"),
+                   _booking_option(1400, "Delta One", "business")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business", base_price=1400)
+        assert len(result) == 1
+        assert result[0].price == 1400
+
+    def test_price_match_within_one_dollar_tolerance(self):
+        """Option within ±$1 of base_price is selected (Google rounding)."""
+        options = [_booking_option(605, "Economy Standard", "economy")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="economy", base_price=604)
+        assert len(result) == 1
+        assert result[0].price == 605
+
+    def test_no_match_falls_back_to_empty(self):
+        """When no option matches base_price ±$1, return empty (caller uses base_price)."""
+        options = [_booking_option(300, "Main Cabin", "economy"),
+                   _booking_option(4000, "First", "first")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business", base_price=1400)
+        assert result == []
+
+    def test_basic_economy_excluded_before_matching(self):
+        """With include_basic=False, basic options filtered before price match."""
+        options = [_booking_option(300, "Basic Economy", "economy", is_basic=True),
+                   _booking_option(300, "Main Cabin", "economy")]
+        result = selection._eligible_booking_options(
+            options, False, cabin="economy", base_price=300)
+        assert len(result) == 1
+        assert result[0].brand_label == "Main Cabin"
+
+    def test_uniform_across_all_cabins(self):
+        """Same logic works for economy, premium-economy, business, first."""
+        for cabin, price in [("economy", 300), ("premium-economy", 800),
+                             ("business", 1400), ("first", 4000)]:
+            options = [_booking_option(price, f"Brand {cabin}", cabin)]
+            result = selection._eligible_booking_options(
+                options, True, cabin=cabin, base_price=price)
+            assert len(result) == 1, f"Failed for {cabin}"
+
+    def test_cabin_bucket_not_used_for_filtering(self):
+        """Even if _cabin_bucket is wrong, price match still works."""
+        # Option classified as "economy" but at business price
+        options = [_booking_option(1400, "Mystery Brand", "economy")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business", base_price=1400)
+        assert len(result) == 1  # Matched by price, not cabin_bucket
+
+    def test_economy_brand_at_economy_price_not_selected_for_business(self):
+        """$300 economy option is NOT selected when base_price is $1400 (business)."""
+        options = [_booking_option(300, "Main Cabin", "economy")]
+        result = selection._eligible_booking_options(
+            options, True, cabin="business", base_price=1400)
+        assert result == []
+
+    def test_no_base_price_returns_empty(self):
+        """Without base_price, no matching possible."""
+        options = [_booking_option(500, "Brand", "economy")]
+        assert selection._eligible_booking_options(
+            options, True, cabin="economy", base_price=None) == []
+        assert selection._eligible_booking_options(
+            options, True, cabin="economy", base_price=0) == []
 
 
 class TestSeatTypeValidation:

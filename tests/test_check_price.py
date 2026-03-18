@@ -235,7 +235,7 @@ class TestCheckPriceRoundtrip:
                 departure_date=(2026, 6, 22), departure_time=(14, 0),
                 arrival_date=(2026, 6, 22), arrival_time=(22, 15),
             )],
-            direct_price=684,
+            direct_price=580,
             booking_token="return-token",
         )
 
@@ -282,7 +282,7 @@ class TestCheckPriceRoundtrip:
                 departure_date=(2026, 6, 22), departure_time=(14, 0),
                 arrival_date=(2026, 6, 22), arrival_time=(22, 15),
             )],
-            direct_price=1400,
+            direct_price=1450,
             booking_token="return-token",
         )
         outbound_result = SearchResult(_raw=[], best=[outbound_itin], other=[])

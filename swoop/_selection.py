@@ -249,6 +249,10 @@ def fetch_trip_booking_options(
     )
 
 
+# ±$1 tolerance for known Google rounding between search and booking RPCs
+_PRICE_MATCH_TOLERANCE = 1
+
+
 def _eligible_booking_options(
     options: list,
     include_basic_economy: bool,
@@ -256,34 +260,27 @@ def _eligible_booking_options(
     cabin: str,
     base_price: int | None = None,
 ) -> list:
+    """Select the booking option that matches base_price from the search RPC.
+
+    The search RPC returns a cabin-correct base_price. The booking option
+    at that price (±$1 for Google's known rounding discrepancy between
+    search and booking endpoints) IS the same cabin.
+
+    If no exact match, falls back to empty (caller uses base_price).
+    """
     priced = [option for option in options if option.price > 0]
-    if cabin == "economy":
-        if include_basic_economy:
-            return [
-                option
-                for option in priced
-                if option._cabin_bucket in ("", "economy", "unknown")
-            ]
-        return [
-            option
-            for option in priced
-            if not option.is_basic
-            and option._cabin_bucket in ("", "economy", "unknown")
-        ]
+    if not priced or base_price is None or base_price <= 0:
+        return []
 
-    exact_bucket = [
-        option for option in priced if option._cabin_bucket == cabin
-    ]
-    if exact_bucket:
-        # Price sanity check: reject options below 40% of base_price
-        if base_price and base_price > 0 and cabin != "economy":
-            sane = [opt for opt in exact_bucket if opt.price >= base_price * 0.4]
-            if sane:
-                return sane
-            return []  # all suspiciously cheap → fall back to base_price
-        return exact_bucket
+    if not include_basic_economy:
+        non_basic = [opt for opt in priced if not opt.is_basic]
+        if non_basic:
+            priced = non_basic
 
-    return []
+    # Exact match with ±$1 tolerance for known Google rounding
+    matched = [opt for opt in priced
+               if abs(opt.price - base_price) <= _PRICE_MATCH_TOLERANCE]
+    return matched
 
 
 def correct_trip_option_prices(
@@ -319,6 +316,7 @@ def correct_trip_option_prices(
             booking_options,
             include_basic_economy,
             cabin=cabin,
+            base_price=option.price,
         )
         if not eligible:
             continue

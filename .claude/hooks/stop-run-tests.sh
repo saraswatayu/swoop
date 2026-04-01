@@ -12,7 +12,7 @@ fi
 
 PROJECT_DIR="$CLAUDE_PROJECT_DIR"
 
-RESULT=$(cd "$PROJECT_DIR" && python -m pytest tests/ -q -m 'not live' 2>&1)
+RESULT=$(cd "$PROJECT_DIR" && .venv/bin/python -m pytest tests/ -q -m 'not live' 2>&1)
 EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then

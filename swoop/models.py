@@ -130,6 +130,62 @@ class ResolvedLeg:
 
 
 @dataclass
+class Deal:
+    """A single flight deal from Google Flights deals discovery.
+
+    ``price`` and ``typical_price`` are in the currency's major unit
+    (e.g. 342 for $342 USD).
+    """
+
+    origin: str
+    destination: str
+    destination_city: str
+    destination_country: str
+    departure_date: str
+    return_date: Optional[str]
+    price: int
+    typical_price: Optional[int]
+    discount_pct: Optional[int]
+    airline_code: str
+    airline_name: str
+    duration_minutes: Optional[int]
+    stops: int
+    trip_days: Optional[int]
+    currency: Optional[str] = None
+    booking_url: Optional[str] = None
+
+    def __repr__(self) -> str:
+        parts = [f"{self.origin}->{self.destination}"]
+        if self.destination_city:
+            parts.append(self.destination_city)
+        if self.price is not None:
+            parts.append(f"price={self.price}")
+        if self.discount_pct is not None:
+            parts.append(f"{self.discount_pct}% off")
+        return f"Deal({' '.join(parts)})"
+
+
+@dataclass
+class DealsResult:
+    """Result of a deals discovery query."""
+
+    deals: list[Deal] = field(default_factory=list)
+    origin: str = ""
+
+    @property
+    def currency(self) -> Optional[str]:
+        """ISO 4217 currency code derived from the first deal, or None."""
+        return self.deals[0].currency if self.deals else None
+
+    def __repr__(self) -> str:
+        n = len(self.deals)
+        parts = [f"{n} deal{'s' if n != 1 else ''}"]
+        if self.origin:
+            parts.append(f"from {self.origin}")
+        return f"DealsResult({', '.join(parts)})"
+
+
+@dataclass
 class PriceResult:
     """Result of a targeted price check for a specific trip.
 

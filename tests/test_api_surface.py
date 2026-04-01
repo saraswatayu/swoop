@@ -10,7 +10,7 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Passengers, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import Deal, DealsResult, Passengers, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -41,6 +41,7 @@ class TestFrozenExports:
         "check_price",
         "price_selector",
         "price_legs",
+        "deals",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -49,6 +50,8 @@ class TestFrozenExports:
         "itinerary_matches_flight",
         # Types
         "CabinClass",
+        "Deal",
+        "DealsResult",
         "Passengers",
         "TransportConfig",
         "PriceResult",
@@ -219,6 +222,23 @@ class TestFrozenDataclassFields:
         expected = {"selector", "price", "currency", "legs"}
         assert self._field_names(TripOption) == expected
 
+    def test_deal_fields(self):
+        expected = {
+            "origin", "destination", "destination_city", "destination_country",
+            "departure_date", "return_date", "price", "typical_price",
+            "discount_pct", "airline_code", "airline_name",
+            "duration_minutes", "stops", "trip_days", "currency", "booking_url",
+        }
+        assert self._field_names(Deal) == expected
+
+    def test_deals_result_fields(self):
+        expected = {"deals", "origin"}
+        assert self._field_names(DealsResult) == expected
+
+    def test_deals_result_currency_property(self):
+        dr = DealsResult()
+        assert dr.currency is None
+
 
 class TestSearchSignature:
     """Verify search() accepts the expected parameters."""
@@ -291,6 +311,12 @@ class TestSearchSignature:
         sig = inspect.signature(swoop.price_selector)
         param_names = list(sig.parameters.keys())
         expected = ["selector", "transport"]
+        assert param_names == expected
+
+    def test_deals_params(self):
+        sig = inspect.signature(swoop.deals)
+        param_names = list(sig.parameters.keys())
+        expected = ["origin", "cabin", "max_stops", "passengers", "transport"]
         assert param_names == expected
 
 

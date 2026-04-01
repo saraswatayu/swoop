@@ -661,3 +661,168 @@ def format_price_brief(
     trip_type = f"{len(query_legs or result.resolved_legs or [])}-leg"
     brand = f" ({result.fare_brand})" if result.fare_brand else ""
     print(f"{_format_price(result.price, result.currency)}{brand} {trip_type}")
+
+
+# ---------------------------------------------------------------------------
+# Deals formatters
+# ---------------------------------------------------------------------------
+
+
+def _deals_stops_text(stops: int) -> Text:
+    """Colored stop count for deals."""
+    if stops == 0:
+        return Text("Nonstop", style="green")
+    label = f"{stops} stop{'s' if stops != 1 else ''}"
+    return Text(label, style="yellow" if stops == 1 else "red")
+
+
+def _deals_date_range(deal) -> str:
+    """Format departure-return date range compactly."""
+    dep = deal.departure_date
+    ret = deal.return_date
+    if not dep:
+        return "\u2014"
+    try:
+        from datetime import date as _date
+        d = _date.fromisoformat(dep)
+        dep_str = d.strftime("%b %-d")
+    except (ValueError, TypeError):
+        dep_str = dep
+    if not ret:
+        return dep_str
+    try:
+        r = _date.fromisoformat(ret)
+        if d.month == r.month:
+            ret_str = str(r.day)
+        else:
+            ret_str = r.strftime("%b %-d")
+    except (ValueError, TypeError):
+        ret_str = ret
+    return f"{dep_str}\u2013{ret_str}"
+
+
+def format_deals_table(
+    result,
+    *,
+    cabin: str = "economy",
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals as a Rich table to stdout."""
+    console = _stdout_console(no_color=no_color)
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    currency = result.currency
+
+    table = Table(title=f"Deals from {result.origin} ({cabin})", show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Destination", min_width=20)
+    table.add_column("Dates", min_width=12)
+    table.add_column("Price", justify="right")
+    table.add_column("Typical", justify="right", style="dim")
+    table.add_column("Savings", justify="right")
+    table.add_column("Airline")
+    table.add_column("Stops")
+    table.add_column("Duration", justify="right")
+
+    for i, deal in enumerate(deals, 1):
+        city = deal.destination_city
+        if deal.destination_country:
+            city += f", {deal.destination_country}"
+        dest_text = f"{city} ({deal.destination})"
+
+        savings = Text("")
+        if deal.discount_pct is not None:
+            savings = Text(f"{deal.discount_pct}% off", style="bold green")
+
+        dur = format_duration(deal.duration_minutes) if deal.duration_minutes else "\u2014"
+
+        table.add_row(
+            str(i),
+            dest_text,
+            _deals_date_range(deal),
+            _format_price(deal.price, currency),
+            _format_price(deal.typical_price, currency),
+            savings,
+            deal.airline_name or deal.airline_code,
+            _deals_stops_text(deal.stops),
+            dur,
+        )
+
+    console.print(table)
+
+
+def format_deals_json(
+    result,
+    *,
+    cabin: str = "economy",
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals as JSON to stdout."""
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    output = {
+        "query": {"origin": result.origin, "cabin": cabin},
+        "currency": result.currency,
+        "total_deals": len(result.deals),
+        "deals": [
+            {
+                "index": i,
+                "origin": d.origin,
+                "destination": d.destination,
+                "destination_city": d.destination_city,
+                "destination_country": d.destination_country,
+                "departure_date": d.departure_date,
+                "return_date": d.return_date,
+                "price": d.price,
+                "typical_price": d.typical_price,
+                "discount_pct": d.discount_pct,
+                "airline_code": d.airline_code,
+                "airline_name": d.airline_name,
+                "duration_minutes": d.duration_minutes,
+                "stops": d.stops,
+                "trip_days": d.trip_days,
+                "booking_url": d.booking_url,
+            }
+            for i, d in enumerate(deals, 1)
+        ],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_deals_csv(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals as CSV to stdout."""
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "origin", "destination", "destination_city", "destination_country",
+        "departure_date", "return_date", "price", "typical_price",
+        "discount_pct", "airline_code", "airline_name",
+        "duration_minutes", "stops", "trip_days",
+    ])
+    for d in deals:
+        writer.writerow([
+            d.origin, d.destination, d.destination_city, d.destination_country,
+            d.departure_date, d.return_date or "", d.price,
+            d.typical_price or "", d.discount_pct or "",
+            d.airline_code, d.airline_name,
+            d.duration_minutes or "", d.stops, d.trip_days or "",
+        ])
+
+
+def format_deals_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals in compact one-line-per-deal format to stdout."""
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    currency = result.currency
+    for i, d in enumerate(deals, 1):
+        price_str = _format_price(d.price, currency)
+        savings = f"  {d.discount_pct}% off" if d.discount_pct else ""
+        stops = "Nonstop" if d.stops == 0 else f"{d.stops} stop{'s' if d.stops != 1 else ''}"
+        dates = _deals_date_range(d)
+        print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {d.airline_name}")

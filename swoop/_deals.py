@@ -1,0 +1,358 @@
+"""Google Flights deals endpoint client.
+
+Fetches the best flight deals from a given origin airport via the
+GetFlightDealsStreaming RPC endpoint. Requires a session established
+by first loading the deals page (for cookies).
+"""
+
+import json
+import logging
+import random
+import time
+import urllib.parse
+from datetime import date, timedelta
+from typing import Any, Optional
+
+from .builders import CABIN_CLASS_MAP, CabinClass
+from .decoder import _safe_get
+from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+from .models import Deal, DealsResult, Passengers, TransportConfig
+from .rpc import _apply_country, _encode_f_req_payload, _get_client
+
+logger = logging.getLogger(__name__)
+
+DEALS_PAGE_URL = "https://www.google.com/travel/flights/deals"
+
+DEALS_RPC_URL = (
+    "https://www.google.com/_/FlightsFrontendUi/data/"
+    "travel.frontend.flights.FlightsFrontendService/GetFlightDealsStreaming"
+)
+
+
+# ---------------------------------------------------------------------------
+# Session
+# ---------------------------------------------------------------------------
+
+def _establish_session(
+    client: Any,
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> None:
+    """GET the deals page to establish session cookies on the client."""
+    url = _apply_country(DEALS_PAGE_URL, transport.country)
+    logger.debug("Establishing deals session via GET %s", url)
+    client.get(
+        url,
+        headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
+        timeout=transport.timeout,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Payload
+# ---------------------------------------------------------------------------
+
+def _build_deals_payload(
+    origin: str,
+    *,
+    cabin: CabinClass = "economy",
+    max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
+) -> str:
+    """Build and encode the deals request payload."""
+    cabin_code = CABIN_CLASS_MAP.get(cabin, 1)
+
+    if max_stops is None:
+        stops_val = 0  # any
+    else:
+        stops_val = max_stops + 1  # 0 -> 1 (nonstop), 1 -> 2, etc.
+
+    # Dates are required by the format but ignored by the server.
+    tomorrow = date.today() + timedelta(days=1)
+    date_out = tomorrow.isoformat()
+    date_ret = (tomorrow + timedelta(days=7)).isoformat()
+
+    payload = [
+        [],
+        [
+            None, None,
+            1,           # trip type: roundtrip
+            None, [],
+            cabin_code,
+            [passengers.adults, passengers.children,
+             passengers.infants_in_seat, passengers.infants_on_lap],
+            None, None, None, None, None, None,
+            [
+                # Outbound segment
+                [
+                    [[[origin, 0]]],  # origin IATA
+                    [],               # destination: anywhere
+                    None,
+                    stops_val,
+                    None, None,
+                    date_out,
+                ],
+                # Return segment
+                [
+                    [],
+                    [[[origin, 0]]],
+                    None,
+                    stops_val,
+                    None, None,
+                    date_ret,
+                ],
+            ],
+            None, None, None,
+            1,  # roundtrip flag
+            None, None, None, None, None, None, None,
+            None, None, None, None, None,
+            [None, None, None, None, None, 1, None, None, 1],
+            3,
+        ],
+        "",    # query (empty = no AI search)
+        "c1",  # session token
+    ]
+    return _encode_f_req_payload(payload)
+
+
+# ---------------------------------------------------------------------------
+# Streaming response parser
+# ---------------------------------------------------------------------------
+
+def _extract_deals_from_entries(entries: list[Any]) -> list[Any]:
+    """Scan a list of wrb.fr entries for the one containing deals."""
+    for entry in entries:
+        inner_str = _safe_get(entry, [2])
+        if not isinstance(inner_str, str) or len(inner_str) < 500:
+            continue
+        try:
+            data = json.loads(inner_str)
+        except json.JSONDecodeError:
+            continue
+        items = _safe_get(data, [3, 9])
+        if isinstance(items, list) and len(items) > 0:
+            return items
+    return []
+
+
+def _parse_streaming_response(text: str) -> list[Any]:
+    """Parse the deals streaming response and extract deal items.
+
+    Handles two response formats:
+    1. **Flat array** (primp): ``[["wrb.fr",...], ["wrb.fr",...], ...]``
+       — multiple entries in one JSON array, deals in the largest entry.
+    2. **Length-prefixed lines** (raw/browser): alternating length prefix
+       and JSON line — each line is a separate ``[["wrb.fr",...]]`` chunk.
+    """
+    if text.startswith(")]}'"):
+        text = text[4:]
+    text = text.strip()
+
+    if not text:
+        return []
+
+    # Try format 1: single JSON array with multiple entries
+    try:
+        outer = json.loads(text)
+        if isinstance(outer, list) and len(outer) > 1:
+            return _extract_deals_from_entries(outer)
+    except json.JSONDecodeError:
+        pass
+
+    # Format 2: length-prefixed lines
+    deals: list[Any] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or len(line) < 100:
+            continue
+        try:
+            chunk = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        # Each chunk is [["wrb.fr", null, "<inner JSON>", ...]]
+        inner_str = _safe_get(chunk, [0, 2])
+        if not isinstance(inner_str, str) or len(inner_str) < 500:
+            continue
+        try:
+            data = json.loads(inner_str)
+        except json.JSONDecodeError:
+            continue
+        items = _safe_get(data, [3, 9])
+        if isinstance(items, list) and len(items) > 0:
+            deals = items
+            break
+
+    return deals
+
+
+# ---------------------------------------------------------------------------
+# Deal item parser
+# ---------------------------------------------------------------------------
+
+def _format_date(raw: Any) -> Optional[str]:
+    """Convert [year, month, day] to YYYY-MM-DD string."""
+    if not isinstance(raw, list) or len(raw) < 3:
+        return None
+    try:
+        return f"{raw[0]:04d}-{raw[1]:02d}-{raw[2]:02d}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_deal(item: list[Any], currency: Optional[str] = None) -> Optional[Deal]:
+    """Parse a single deal item from the response."""
+    try:
+        departure_date = _format_date(_safe_get(item, [1]))
+        return_date = _format_date(_safe_get(item, [2]))
+        price = _safe_get(item, [3, 0, 1])
+        typical_price = _safe_get(item, [4, 0, 1])
+        discount_pct = _safe_get(item, [5])
+        booking_path = _safe_get(item, [6, 2])
+        duration_minutes = _safe_get(item, [7])
+        stops = _safe_get(item, [8])
+        airline_code = _safe_get(item, [10])
+        airline_name = _safe_get(item, [11])
+        dest_info = _safe_get(item, [13])
+        trip_days = _safe_get(item, [16])
+        origin = _safe_get(item, [17])
+        destination = _safe_get(item, [18])
+
+        dest_city = dest_info[0] if isinstance(dest_info, list) and len(dest_info) > 0 else ""
+        dest_country = dest_info[1] if isinstance(dest_info, list) and len(dest_info) > 1 else ""
+
+        if price is None or destination is None:
+            return None
+
+        booking_url = None
+        if isinstance(booking_path, str) and booking_path:
+            booking_url = "https://www.google.com" + booking_path
+
+        return Deal(
+            origin=origin or "",
+            destination=destination or "",
+            destination_city=dest_city,
+            destination_country=dest_country,
+            departure_date=departure_date or "",
+            return_date=return_date,
+            price=int(price),
+            typical_price=int(typical_price) if typical_price is not None else None,
+            discount_pct=int(discount_pct) if discount_pct is not None else None,
+            airline_code=airline_code or "",
+            airline_name=airline_name or "",
+            duration_minutes=int(duration_minutes) if duration_minutes is not None else None,
+            stops=int(stops) if stops is not None else 0,
+            trip_days=int(trip_days) if trip_days is not None else None,
+            currency=currency,
+            booking_url=booking_url,
+        )
+    except (TypeError, IndexError, ValueError) as exc:
+        logger.debug("Failed to parse deal item: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Currency header
+# ---------------------------------------------------------------------------
+
+_COUNTRY_CURRENCY: dict[str, str] = {
+    "US": "USD", "GB": "GBP", "CA": "CAD", "AU": "AUD", "NZ": "NZD",
+    "JP": "JPY", "KR": "KRW", "CN": "CNY", "IN": "INR", "SG": "SGD",
+    "HK": "HKD", "TW": "TWD", "TH": "THB", "MY": "MYR", "PH": "PHP",
+    "ID": "IDR", "VN": "VND", "MX": "MXN", "BR": "BRL", "AR": "ARS",
+    "CL": "CLP", "CO": "COP", "PE": "PEN", "ZA": "ZAR", "AE": "AED",
+    "SA": "SAR", "IL": "ILS", "TR": "TRY", "RU": "RUB", "UA": "UAH",
+    "PL": "PLN", "CZ": "CZK", "HU": "HUF", "RO": "RON", "SE": "SEK",
+    "NO": "NOK", "DK": "DKK", "CH": "CHF", "EG": "EGP", "NG": "NGN",
+    "KE": "KES", "PA": "USD",
+}
+
+# EUR countries
+for _cc in ("DE", "FR", "IT", "ES", "NL", "BE", "AT", "PT", "IE", "FI",
+            "GR", "LT", "LV", "EE", "SK", "SI", "LU", "MT", "CY", "HR"):
+    _COUNTRY_CURRENCY[_cc] = "EUR"
+
+
+def _currency_header(country: Optional[str]) -> str:
+    """Build the x-goog-ext-259736195-jspb header value."""
+    cc = (country or "US").upper()
+    curr = _COUNTRY_CURRENCY.get(cc, "USD")
+    return json.dumps(["en", cc, curr, 1, None, [300], None, None, 7, []])
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+def fetch_deals(
+    origin: str,
+    *,
+    cabin: CabinClass = "economy",
+    max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
+    transport: TransportConfig = TransportConfig(),
+) -> DealsResult:
+    """Fetch flight deals from Google Flights.
+
+    Establishes a session, builds the request, and parses the streaming
+    response into a :class:`DealsResult`.
+    """
+    client = _get_client(transport.proxy)
+
+    # Step 1: Establish session cookies
+    _establish_session(client, transport=transport)
+
+    # Step 2: Build and send request
+    encoded_payload = _build_deals_payload(
+        origin, cabin=cabin, max_stops=max_stops, passengers=passengers,
+    )
+    url = _apply_country(DEALS_RPC_URL, transport.country)
+    body = f"f.req={encoded_payload}".encode()
+
+    headers = {
+        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "x-same-domain": "1",
+        "x-goog-ext-259736195-jspb": _currency_header(transport.country),
+        "referer": "https://www.google.com/travel/flights/deals",
+    }
+
+    logger.debug(
+        "fetch_deals %s (cabin=%s, max_stops=%s)",
+        origin, cabin, max_stops,
+    )
+
+    # Retry loop (mirrors rpc._http_post)
+    for attempt in range(1 + transport.retries):
+        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+        if res.status_code == 200:
+            break
+        if res.status_code == 429 and attempt < transport.retries:
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            logger.info(
+                "HTTP 429, retrying in %.1fs (attempt %d/%d)",
+                delay, attempt + 1, transport.retries,
+            )
+            time.sleep(delay)
+            continue
+        if res.status_code == 429:
+            raise SwoopRateLimitError()
+        raise SwoopHTTPError(res.status_code)
+
+    # Step 3: Parse streaming response
+    raw_deals = _parse_streaming_response(res.text)
+    if not raw_deals:
+        logger.debug("No deals found in response")
+        return DealsResult(deals=[], origin=origin)
+
+    # Determine currency from country
+    cc = (transport.country or "US").upper()
+    currency = _COUNTRY_CURRENCY.get(cc, "USD")
+
+    # Step 4: Parse individual deals
+    deals: list[Deal] = []
+    for item in raw_deals:
+        deal = _parse_deal(item, currency=currency)
+        if deal is not None:
+            deals.append(deal)
+
+    logger.debug("Parsed %d deals from %s", len(deals), origin)
+    return DealsResult(deals=deals, origin=origin)

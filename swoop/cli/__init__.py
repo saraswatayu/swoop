@@ -2,7 +2,7 @@
 
 import click
 
-from .commands import price_cmd, search_cmd
+from .commands import deals_cmd, price_cmd, search_cmd
 
 
 @click.group(invoke_without_command=True)
@@ -16,3 +16,4 @@ def main(ctx: click.Context) -> None:
 
 main.add_command(search_cmd)
 main.add_command(price_cmd)
+main.add_command(deals_cmd)

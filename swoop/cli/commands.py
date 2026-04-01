@@ -638,3 +638,86 @@ def price_cmd(
         format_price_brief(result, query_legs=query_legs)
     else:
         format_price_table(result, query_legs=query_legs, no_color=no_color)
+
+
+@click.command("deals")
+@click.argument("origin", type=IATA_CODE)
+@click.option("-c", "--cabin", type=click.Choice(CABIN_CHOICES, case_sensitive=False),
+              default="economy", show_default=True, help="Cabin class.")
+@click.option("-n", "--nonstop", is_flag=True, default=False, help="Nonstop flights only.")
+@click.option("--max-stops", type=click.IntRange(0, 2), default=None, help="Max stops (0, 1, or 2).")
+@click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
+@click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
+@click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
+@click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
+@click.option("-l", "--limit", type=int, default=None, help="Max deals to display.")
+@_output_options(["table", "json", "csv", "brief"])
+@click.pass_context
+def deals_cmd(
+    ctx, origin, cabin, nonstop, max_stops, passengers,
+    country, proxy, timeout, retries,
+    limit, output_format, no_color, quiet,
+):
+    """Discover the best flight deals from an airport.
+
+    \b
+    Examples:
+      swoop deals JFK
+      swoop deals JFK --nonstop --cabin business
+      swoop deals JFK -o json -q | jq '.deals[0]'
+    """
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+
+    from .formatters import (
+        format_deals_brief,
+        format_deals_csv,
+        format_deals_json,
+        format_deals_table,
+    )
+
+    import swoop
+
+    err = _err_console(no_color)
+
+    stops = max_stops
+    if nonstop:
+        stops = 0
+
+    pax = swoop.Passengers(adults=passengers)
+    transport = swoop.TransportConfig(
+        timeout=timeout, retries=retries, country=country, proxy=proxy,
+    )
+
+    spinner = err.status("[bold]Searching deals...[/bold]") if (not quiet and output_format == "table") else nullcontext()
+    with spinner:
+        try:
+            result = swoop.deals(
+                origin, cabin=cabin, max_stops=stops,
+                passengers=pax, transport=transport,
+            )
+        except ValueError as e:
+            err.print(f"[red]Error: {e}[/red]")
+            ctx.exit(2)
+        except SwoopRateLimitError:
+            err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+            ctx.exit(3)
+        except SwoopHTTPError as e:
+            err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
+            ctx.exit(3)
+        except SwoopParseError:
+            err.print("[red]Could not parse Google Flights response[/red]")
+            ctx.exit(4)
+
+    if not result.deals:
+        err.print(f"[yellow]No deals found from {origin}.[/yellow]")
+        ctx.exit(1)
+
+    if output_format == "table":
+        format_deals_table(result, cabin=cabin, no_color=no_color, limit=limit)
+    elif output_format == "json":
+        format_deals_json(result, cabin=cabin, limit=limit)
+    elif output_format == "csv":
+        format_deals_csv(result, limit=limit)
+    elif output_format == "brief":
+        format_deals_brief(result, limit=limit)

@@ -39,7 +39,7 @@ from .decoder import (
 )
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
-from .models import Passengers, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import Deal, DealsResult, Passengers, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -584,6 +584,58 @@ def check_price(
     )
 
 
+# ---------------------------------------------------------------------------
+# deals() — discover the best flight deals from an origin airport.
+# ---------------------------------------------------------------------------
+
+
+def deals(
+    origin: str,
+    *,
+    cabin: CabinClass = "economy",
+    max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
+    transport: TransportConfig = TransportConfig(),
+) -> DealsResult:
+    """Discover the best flight deals from an origin airport.
+
+    Returns up to 30 deals that Google Flights considers the best
+    value from the given origin. Each deal includes destination, dates,
+    price, and discount percentage.
+
+    Args:
+        origin: Origin airport IATA code (e.g. ``"JFK"``).
+        cabin: Cabin class (default ``"economy"``).
+        max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
+        passengers: Passenger counts (default ``Passengers()``).
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`DealsResult` containing up to 30 :class:`Deal` objects.
+
+    Example::
+
+        from swoop import deals
+
+        result = deals("JFK", cabin="business", max_stops=0)
+        for deal in result.deals:
+            print(f"{deal.destination_city} ${deal.price} ({deal.discount_pct}% off)")
+    """
+    validate_iata_code(origin, "origin")
+    validate_cabin(cabin)
+    validate_adults(passengers.adults)
+
+    from ._deals import fetch_deals
+
+    return fetch_deals(
+        origin,
+        cabin=cabin,
+        max_stops=max_stops,
+        passengers=passengers,
+        transport=transport,
+    )
+
+
 __all__ = [
     # Functions
     "search",
@@ -591,6 +643,7 @@ __all__ = [
     "check_price",
     "price_selector",
     "price_legs",
+    "deals",
     "get_booking_results",
     "search_raw",
     "set_country",
@@ -599,6 +652,8 @@ __all__ = [
     "itinerary_matches_flight",
     # Types
     "CabinClass",
+    "Deal",
+    "DealsResult",
     "Passengers",
     "TransportConfig",
     "PriceResult",

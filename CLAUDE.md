@@ -30,7 +30,7 @@ Every feature or bug fix that touches logic must include tests. Run `python -m p
 Never commit `.env` files, API keys, or tokens.
 
 ### 4. Frozen API Surface
-Public fields on `SearchResult`, `RawSearchResult`, `TripOption`, `TripLeg`, `PriceResult`, `BookingOption`, `Itinerary`, `Segment`, `Layover`, `Codeshare`, and `CarbonEmissions` are part of the public API. When adding or renaming public fields, update `tests/test_api_surface.py`.
+Public fields on `SearchResult`, `RawSearchResult`, `TripOption`, `TripLeg`, `PriceResult`, `BookingOption`, `Itinerary`, `Segment`, `Layover`, `Codeshare`, `CarbonEmissions`, `Deal`, and `DealsResult` are part of the public API. When adding or renaming public fields, update `tests/test_api_surface.py`.
 
 `_`-prefixed fields on `BookingOption` and `RawSearchResult` are internal — not public API, not covered by the surface test.
 
@@ -54,13 +54,14 @@ One commit per task/phase — not one giant commit at the end. Format: `<type>: 
 
 ```
 swoop/
-├── __init__.py       # Public API: search(), search_legs(), check_price(), price_selector(), price_legs(), dataclasses, version
+├── __init__.py       # Public API: search(), search_legs(), check_price(), price_selector(), price_legs(), deals(), dataclasses, version
 ├── __main__.py       # `python -m swoop` entry point
-├── models.py         # Public trip-level result models (SearchResult, TripOption, TripLeg, PriceResult)
+├── models.py         # Public trip-level result models (SearchResult, TripOption, TripLeg, PriceResult, Deal, DealsResult)
 ├── rpc.py            # HTTP client — builds requests, calls Google Flights RPC
 ├── _selection.py     # Staged trip search, selector encoding, selector-based trip pricing helpers
 ├── builders.py       # Protobuf request builders (filters, segments, SearchLeg)
 ├── decoder.py        # Response decoder — nested lists → dataclasses
+├── _deals.py         # Deals endpoint — session, payload, streaming response parser
 ├── _booking.py       # Booking option parsing (GetBookingResults)
 ├── _validate.py      # IATA code validation (optional airportsdata)
 ├── exceptions.py     # Custom exceptions
@@ -68,7 +69,7 @@ swoop/
 ├── flights_pb2.py    # Generated protobuf code
 └── cli/
     ├── __init__.py   # Click group, main() entry point
-    ├── commands.py   # search_cmd, price_cmd definitions
+    ├── commands.py   # search_cmd, price_cmd, deals_cmd definitions
     ├── formatters.py # Table/JSON/CSV/brief output renderers
     └── utils.py      # Custom Click types, time/date helpers
 ```
@@ -81,21 +82,24 @@ swoop/
 
 **Price flow:** `swoop price` → `commands.price_cmd()` → `swoop.check_price()` / `swoop.price_selector()` / `swoop.price_legs()` → `formatters.format_price_table()`
 
+**Deals flow:** `swoop deals` → `commands.deals_cmd()` → `swoop.deals()` → `_deals.fetch_deals()` → `formatters.format_deals_table()`
+
 ## File Map
 
 | File | Purpose |
 |------|---------|
-| `models.py` | Public trip-level dataclasses: `SearchResult`, `TripOption`, `TripLeg`, `PriceResult`, etc. |
+| `models.py` | Public trip-level dataclasses: `SearchResult`, `TripOption`, `TripLeg`, `PriceResult`, `Deal`, `DealsResult`, etc. |
 | `_selection.py` | Staged multi-leg expansion, selector encode/decode, selector-based trip pricing |
 | `rpc.py` | RPC client, HTTP transport, request building |
 | `builders.py` | Protobuf filter/segment builders |
 | `decoder.py` | Response decoding and low-level `RawSearchResult` / itinerary dataclasses |
+| `_deals.py` | Deals endpoint client — session, payload builder, streaming response parser |
 | `_booking.py` | `parse_booking_payload()` — booking option extraction |
 | `_validate.py` | `validate_iata()` with optional airportsdata |
 | `exceptions.py` | `SwoopError`, `SwoopRPCError`, `SwoopValidationError` |
-| `__init__.py` | Public re-exports: `search`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `RawSearchResult`, `SearchResult`, `TripOption`, `TripLeg`, etc. |
+| `__init__.py` | Public re-exports: `search`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `deals`, `RawSearchResult`, `SearchResult`, `TripOption`, `TripLeg`, `Deal`, `DealsResult`, etc. |
 | `cli/__init__.py` | Click group + `main()` entry point |
-| `cli/commands.py` | `search_cmd`, `price_cmd` |
+| `cli/commands.py` | `search_cmd`, `price_cmd`, `deals_cmd` |
 | `cli/formatters.py` | Trip-level table, JSON, CSV, and brief formatters |
 | `cli/utils.py` | `IATACodeType`, `DateType`, `format_time()`, `format_duration()` |
 | `__main__.py` | `python -m swoop` with graceful ImportError |

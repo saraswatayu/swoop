@@ -133,6 +133,14 @@ class TestSafeTuple:
     def test_none_input(self):
         assert _safe_tuple(None, 3, [0, 0, 0]) == (0, 0, 0)
 
+    def test_none_element_within_list(self):
+        # Google Flights omits the leading-zero hour for midnight times,
+        # encoding 00:05 as [None, 5]. The decoder must substitute the
+        # default rather than propagate the None to formatters.
+        assert _safe_tuple([None, 5], 2, [0, 0]) == (0, 5)
+        assert _safe_tuple([14, None], 2, [0, 0]) == (14, 0)
+        assert _safe_tuple([None, None, 15], 3, [0, 0, 0]) == (0, 0, 15)
+
 
 # ---------------------------------------------------------------------------
 # Edge-case tests (synthetic — testing error handling)

@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "swoop-flights"
 dynamic = ["version"]
-description = "Search Google Flights programmatically. Real prices, typed results, no API key."
+description = "Search Google Flights and Google Travel Hotels programmatically. Real prices, typed results, no API key."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [{ name = "Ayush Saraswat" }]
-keywords = ["google-flights", "flights", "travel", "rpc", "search", "prices"]
+keywords = ["google-flights", "google-hotels", "flights", "hotels", "travel", "rpc", "search", "prices"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

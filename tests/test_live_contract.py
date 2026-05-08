@@ -336,3 +336,81 @@ class TestBookingContract:
 
         report = _booking_report("booking_jfk_lax", itinerary, options, len(rpc_captures))
         _record_booking_artifacts("booking_jfk_lax", rpc_captures, report)
+
+
+class TestHotelsContract:
+    def test_selected_hotel_prices_and_reviews_parseable_and_artifacted(self):
+        check_in = _future_date(30)
+        check_out = _future_date(32)
+        transport = swoop.TransportConfig(timeout=30, retries=1)
+
+        result = swoop.hotels(
+            "HI New York City Hostel",
+            check_in,
+            check_out,
+            transport=transport,
+        )
+
+        assert result.hotels, "Expected at least one live hotel result"
+        assert result.is_complete is True
+
+        hotel = result.hotels[0]
+        assert hotel.name == "HI New York City Hostel"
+        assert hotel.booking_token, "Expected selected hotel search to expose a pricing token"
+        assert hotel.price is not None and hotel.price > 0
+
+        priced = swoop.hotel_prices(
+            hotel.booking_token,
+            query=hotel.name,
+            check_in=check_in,
+            check_out=check_out,
+            transport=transport,
+        )
+        assert priced.name == hotel.name
+        assert priced.booking_token == hotel.booking_token
+        assert priced.providers, "Expected at least one live hotel provider"
+        assert any(provider.url for provider in priced.providers)
+        assert all(provider.price is None or provider.price > 0 for provider in priced.providers)
+
+        reviews = swoop.hotel_reviews(hotel.booking_token, transport=transport)
+        assert reviews.reviews, "Expected at least one live hotel review"
+        assert any(review.text for review in reviews.reviews)
+
+        _record_json_artifact(
+            "hotels_hi_new_york_city_hostel",
+            {
+                "query": result.query,
+                "check_in": check_in,
+                "check_out": check_out,
+                "hotel": {
+                    "name": hotel.name,
+                    "hotel_id": hotel.hotel_id,
+                    "price": hotel.price,
+                    "total_price": hotel.total_price,
+                    "currency": hotel.currency,
+                    "rating": hotel.rating,
+                    "review_count": hotel.review_count,
+                    "has_booking_token": bool(hotel.booking_token),
+                },
+                "providers": [
+                    {
+                        "name": provider.name,
+                        "price": provider.price,
+                        "total_price": provider.total_price,
+                        "currency": provider.currency,
+                        "has_url": bool(provider.url),
+                    }
+                    for provider in priced.providers[:10]
+                ],
+                "reviews": [
+                    {
+                        "source": review.source,
+                        "rating": review.rating,
+                        "max_rating": review.max_rating,
+                        "relative_date": review.relative_date,
+                        "has_text": bool(review.text),
+                    }
+                    for review in reviews.reviews[:10]
+                ],
+            },
+        )

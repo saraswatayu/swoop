@@ -1,7 +1,7 @@
-"""Swoop — Search Google Flights programmatically.
+"""Swoop — Search Google Flights and Google Travel Hotels programmatically.
 
-Calls Google Flights' internal RPC endpoints with TLS impersonation
-and decodes the nested-list responses into typed Python dataclasses.
+Calls Google Travel's internal RPC endpoints with TLS impersonation and
+decodes the nested-list responses into typed Python dataclasses.
 
 Basic usage::
 

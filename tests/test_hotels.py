@@ -15,11 +15,14 @@ from swoop._hotels import (
     _build_universal_search_payload,
     _encode_travel_f_req,
     _extract_context_from_universal,
+    _merge_seed_hotel,
     _parse_batchexecute_response,
     parse_hotel_prices_payload,
     parse_hotel_reviews_payload,
     parse_hotels_payload,
+    fetch_hotels,
 )
+from swoop.models import Hotel
 
 
 def _batchexecute(rpc_id: str, inner: list[object]) -> str:
@@ -148,6 +151,13 @@ def test_parse_hotels_payload_extracts_hotel_cards():
     assert hotel.place_id == "ChIJOwc3aCT2wokRZGbII0D83Mk"
 
 
+def test_parse_hotels_payload_attaches_selected_hotel_token_to_single_result():
+    result = parse_hotels_payload(_universal_payload(), query="HI New York City Hostel", currency="USD")
+
+    assert len(result.hotels) == 1
+    assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
+
+
 def test_build_hotel_detail_payload_uses_token_and_entity_filter():
     context = _extract_context_from_universal(_universal_payload())
     payload = _build_hotel_detail_payload(
@@ -188,6 +198,56 @@ def test_parse_hotel_prices_payload_extracts_providers():
     assert provider.price == 73
     assert provider.total_price == 147
     assert provider.is_free_cancellation is True
+
+
+def test_merge_seed_hotel_preserves_detail_prices_and_fills_identity():
+    seed = _raw_hotel()
+    seed_hotel = parse_hotels_payload([None, seed], currency="USD").hotels[0]
+    detail = Hotel(hotel_id="", name="", price=147, currency="USD")
+    merged = _merge_seed_hotel(
+        detail,
+        seed_hotel,
+        hotel_token="ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ",
+    )
+
+    assert merged.hotel_id == "5960741009900747244"
+    assert merged.name == "HI New York City Hostel"
+    assert merged.price == 147
+    assert merged.total_price == 130
+    assert merged.rating == 4.4
+    assert merged.booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
+
+
+def test_fetch_hotels_single_selected_hotel_returns_complete_without_results_rpc(monkeypatch):
+    class Response:
+        def __init__(self, text: str):
+            self.status_code = 200
+            self.text = text
+
+    class Client:
+        def __init__(self):
+            self.posts = []
+
+        def get(self, *args, **kwargs):
+            return Response('"cfb2h":"bl-test","FdrFJe":"sid-test"')
+
+        def post(self, url, *, content, headers, timeout):
+            self.posts.append((url, content))
+            return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _universal_payload()))
+
+    client = Client()
+    monkeypatch.setattr("swoop._hotels._get_client", lambda *args: client)
+
+    result = fetch_hotels(
+        "HI New York City Hostel",
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+    )
+
+    assert result.is_complete is True
+    assert len(result.hotels) == 1
+    assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
+    assert len(client.posts) == 1
 
 
 def test_parse_hotel_reviews_payload_extracts_reviews():

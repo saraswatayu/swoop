@@ -371,7 +371,7 @@ def _build_hotels_results_payload(
         destination_name = context.get("destination_name")
         if not isinstance(bounds, list) or not isinstance(place_id, str):
             return None
-        filters = [None] * 19
+        filters: list[Any] = [None] * 19
         filters[0] = [300, 0]
         filters[3] = currency
         filters[16] = bounds
@@ -408,7 +408,7 @@ def _build_hotel_detail_payload(
         entity_id = context.get("entity_id")
         if not isinstance(place_id, str):
             return None
-        filters = [None] * 19
+        filters: list[Any] = [None] * 19
         filters[3] = currency
         filters[18] = [place_id, destination_name, entity_id]
 
@@ -535,6 +535,14 @@ def parse_hotels_payload(
         seen.add(key)
         hotels.append(hotel)
 
+    hotel_token = context.get("hotel_token")
+    if isinstance(hotel_token, str):
+        for hotel in hotels:
+            if hotel.booking_token is not None:
+                continue
+            if len(hotels) == 1 or hotel.name == destination_name:
+                hotel.booking_token = hotel_token
+
     return HotelSearchResult(
         hotels=hotels,
         query=query,
@@ -610,6 +618,36 @@ def parse_hotel_prices_payload(data: list[Any], *, currency: Optional[str] = Non
             if provider is not None:
                 providers.append(provider)
     hotel.providers = providers
+    return hotel
+
+
+def _merge_seed_hotel(
+    hotel: Hotel,
+    seed_hotel: Optional[Hotel],
+    *,
+    hotel_token: str,
+) -> Hotel:
+    if not hotel.hotel_id:
+        hotel.hotel_id = seed_hotel.hotel_id if seed_hotel is not None else hotel_token
+    if seed_hotel is not None:
+        for field_name in (
+            "name",
+            "total_price",
+            "rating",
+            "review_count",
+            "hotel_class",
+            "hotel_class_label",
+            "latitude",
+            "longitude",
+            "address",
+            "image_url",
+            "distance",
+            "place_id",
+            "entity_id",
+        ):
+            if getattr(hotel, field_name) is None or getattr(hotel, field_name) == "":
+                setattr(hotel, field_name, getattr(seed_hotel, field_name))
+    hotel.booking_token = hotel_token
     return hotel
 
 
@@ -733,6 +771,9 @@ def fetch_hotels(
         destination_name=context.get("destination_name") if isinstance(context.get("destination_name"), str) else None,
         is_complete=False,
     )
+    if context.get("hotel_token") and len(seed_result.hotels) == 1:
+        seed_result.is_complete = True
+        return seed_result
 
     results_payload = _build_hotels_results_payload(
         context,
@@ -812,9 +853,11 @@ def fetch_hotel_prices(
     context = _extract_context_from_universal(universal_data)
     seed_result = parse_hotels_payload(universal_data, query=query, currency=currency, is_complete=False)
 
+    seed_hotel = None
     hotel_entity_id = None
     for hotel in seed_result.hotels:
         if hotel.booking_token == hotel_token or hotel.hotel_id == hotel_token:
+            seed_hotel = hotel
             hotel_entity_id = hotel.entity_id
             break
 
@@ -840,9 +883,7 @@ def fetch_hotel_prices(
         transport=transport,
     )
     hotel = parse_hotel_prices_payload(data, currency=currency)
-    if not hotel.hotel_id:
-        hotel.hotel_id = hotel_token
-    return hotel
+    return _merge_seed_hotel(hotel, seed_hotel, hotel_token=hotel_token)
 
 
 def fetch_hotel_reviews(

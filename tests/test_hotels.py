@@ -211,6 +211,7 @@ def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
         adults=2,
         rooms=1,
         currency="USD",
+        min_price=100,
         max_price=150,
         min_rating=4,
         min_hotel_class=4,
@@ -237,7 +238,7 @@ def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
     assert filter_block[0][10] == [14, 16]
     assert filter_block[1] is None
     assert filter_block[2] == []
-    assert filter_block[3] == [None, [None, 150], 1]
+    assert filter_block[3] == [[None, 100], [None, 150], 1]
     assert filter_block[4] == 8
     assert filter_block[5] == 1
     assert payload[2] == [1, None, None, None, None, None, 13, None, 0]

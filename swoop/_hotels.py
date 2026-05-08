@@ -498,6 +498,7 @@ def _build_filtered_universal_search_payload(
     rooms: int = 1,
     currency: str = "USD",
     sort_by: str = HOTEL_SORT_DEFAULT,
+    min_price: Optional[int] = None,
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
@@ -550,6 +551,8 @@ def _build_filtered_universal_search_payload(
         set_slot(currency_filter, 10, [HOTEL_PROPERTY_TYPE_CODES[value] for value in property_types])
 
     price_filter: list[Any] = [None, None, 1]
+    if min_price is not None:
+        price_filter[0] = [None, min_price]
     if max_price is not None:
         price_filter[1] = [None, max_price]
 
@@ -561,6 +564,7 @@ def _build_filtered_universal_search_payload(
             HOTEL_SORT_RATING,
             HOTEL_SORT_MOST_REVIEWED,
         }
+        or min_price is not None
         or max_price is not None
         or has_pool
         or special_offers
@@ -599,6 +603,7 @@ def _build_filtered_universal_search_payload(
 def _should_use_server_hotel_controls(
     *,
     sort_by: str = HOTEL_SORT_DEFAULT,
+    min_price: Optional[int] = None,
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
@@ -614,6 +619,7 @@ def _should_use_server_hotel_controls(
     return (
         sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE, HOTEL_SORT_RATING}
         or sort_by == HOTEL_SORT_MOST_REVIEWED
+        or min_price is not None
         or max_price is not None
         or _hotel_rating_filter_code(min_rating) is not None
         or (min_hotel_class is not None and min_hotel_class >= 4)
@@ -1367,6 +1373,7 @@ def fetch_hotels(
 
     if _should_use_server_hotel_controls(
         sort_by=sort_by,
+        min_price=min_price,
         max_price=max_price,
         min_rating=min_rating,
         min_hotel_class=min_hotel_class,
@@ -1389,6 +1396,7 @@ def fetch_hotels(
             rooms=rooms,
             currency=currency,
             sort_by=sort_by,
+            min_price=min_price,
             max_price=max_price,
             min_rating=min_rating,
             min_hotel_class=min_hotel_class,

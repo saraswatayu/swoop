@@ -741,3 +741,298 @@ def format_price_csv(
             _b(result.is_basic_economy),
             "", "", "", "", "", "", "", "", "", "",
         ])
+
+
+# ---------------------------------------------------------------------------
+# Hotel formatters
+# ---------------------------------------------------------------------------
+
+
+def _provider_to_dict(provider) -> dict:
+    return {
+        "name": provider.name,
+        "price": provider.price,
+        "total_price": provider.total_price,
+        "currency": provider.currency,
+        "url": provider.url,
+        "logo_url": provider.logo_url,
+        "room_name": provider.room_name,
+        "is_free_cancellation": provider.is_free_cancellation,
+    }
+
+
+def _hotel_to_dict(hotel, *, include_providers: bool = True) -> dict:
+    data = {
+        "hotel_id": hotel.hotel_id,
+        "name": hotel.name,
+        "price": hotel.price,
+        "total_price": hotel.total_price,
+        "currency": hotel.currency,
+        "rating": hotel.rating,
+        "review_count": hotel.review_count,
+        "hotel_class": hotel.hotel_class,
+        "hotel_class_label": hotel.hotel_class_label,
+        "latitude": hotel.latitude,
+        "longitude": hotel.longitude,
+        "address": hotel.address,
+        "image_url": hotel.image_url,
+        "distance": hotel.distance,
+        "booking_token": hotel.booking_token,
+        "price_token": hotel.price_token,
+        "place_id": hotel.place_id,
+        "entity_id": hotel.entity_id,
+    }
+    if include_providers:
+        data["providers"] = [_provider_to_dict(provider) for provider in hotel.providers]
+    return data
+
+
+def _review_to_dict(review) -> dict:
+    return {
+        "source": review.source,
+        "author": review.author,
+        "rating": review.rating,
+        "max_rating": review.max_rating,
+        "relative_date": review.relative_date,
+        "text": review.text,
+        "url": review.url,
+    }
+
+
+def _token_text(token: Optional[str]) -> Text:
+    return Text("Yes", style="green") if token else Text("No", style="dim")
+
+
+def format_hotels_table(
+    result,
+    *,
+    check_in: str,
+    check_out: str,
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel search results as a Rich table."""
+    console = _stdout_console(no_color=no_color)
+    hotels = list(result.hotels[:limit]) if limit else list(result.hotels)
+
+    title = f"Hotels: {result.query} ({check_in} to {check_out})"
+    table = Table(title=title, show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Hotel", min_width=26)
+    table.add_column("Nightly", justify="right")
+    table.add_column("Total", justify="right")
+    table.add_column("Rating", justify="right")
+    table.add_column("Class", justify="right")
+    table.add_column("Token", justify="center")
+
+    for i, hotel in enumerate(hotels, 1):
+        name = Text(hotel.name)
+        if hotel.distance:
+            name.append(f"\n{hotel.distance}", style="dim")
+        rating = f"{hotel.rating:.1f}" if hotel.rating is not None else "\u2014"
+        if hotel.review_count:
+            rating += f" ({hotel.review_count:,})"
+        table.add_row(
+            str(i),
+            name,
+            _format_price(hotel.price, hotel.currency or result.currency),
+            _format_price(hotel.total_price, hotel.currency or result.currency),
+            rating,
+            str(hotel.hotel_class) if hotel.hotel_class is not None else "\u2014",
+            _token_text(hotel.booking_token),
+        )
+
+    console.print(table)
+    if not result.is_complete:
+        console.print("[dim]Results may be incomplete because Google did not return a parseable list follow-up.[/dim]")
+
+
+def format_hotels_json(
+    result,
+    *,
+    check_in: str,
+    check_out: str,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel search results as JSON."""
+    hotels = list(result.hotels[:limit]) if limit else list(result.hotels)
+    output = {
+        "query": {
+            "text": result.query,
+            "check_in": check_in,
+            "check_out": check_out,
+        },
+        "destination_name": result.destination_name,
+        "currency": result.currency,
+        "is_complete": result.is_complete,
+        "total_hotels": len(result.hotels),
+        "hotels": [_hotel_to_dict(hotel, include_providers=False) for hotel in hotels],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_hotels_csv(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel search results as CSV."""
+    # CSV-injection guard: spreadsheet apps treat a cell beginning with
+    # =, +, -, @, tab, or CR as a formula. Hotel names/addresses come from
+    # Google's RPC opaquely, so prefix any such value with a quote to
+    # neutralize it while keeping the cell human-readable.
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value) -> str:
+        if value is None or value == "":
+            return ""
+        text = str(value)
+        if text.startswith(_DANGEROUS_PREFIXES):
+            return "'" + text
+        return text
+
+    hotels = list(result.hotels[:limit]) if limit else list(result.hotels)
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "hotel_id", "name", "price", "total_price", "currency", "rating",
+        "review_count", "hotel_class", "distance", "booking_token",
+        "place_id", "entity_id",
+    ])
+    for hotel in hotels:
+        writer.writerow([
+            _s(hotel.hotel_id), _s(hotel.name), hotel.price or "", hotel.total_price or "",
+            _s(hotel.currency or result.currency), hotel.rating or "",
+            hotel.review_count or "", hotel.hotel_class or "", _s(hotel.distance),
+            _s(hotel.booking_token), _s(hotel.place_id), _s(hotel.entity_id),
+        ])
+
+
+def format_hotels_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel search results in compact one-line-per-hotel format."""
+    hotels = list(result.hotels[:limit]) if limit else list(result.hotels)
+    for i, hotel in enumerate(hotels, 1):
+        price = _format_price(hotel.total_price or hotel.price, hotel.currency or result.currency)
+        rating = f"{hotel.rating:.1f}" if hotel.rating is not None else "\u2014"
+        token = "token" if hotel.booking_token else "no-token"
+        print(f"{i:3d}  {price:>10s}  {rating:>4s}  {token:8s}  {hotel.name}")
+
+
+def format_hotel_prices_table(
+    hotel,
+    *,
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel provider prices as a Rich table."""
+    console = _stdout_console(no_color=no_color)
+    providers = list(hotel.providers[:limit]) if limit else list(hotel.providers)
+    title = hotel.name or hotel.hotel_id or "Hotel prices"
+    table = Table(title=title, show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Provider", min_width=22)
+    table.add_column("Nightly", justify="right")
+    table.add_column("Total", justify="right")
+    table.add_column("Room", min_width=16)
+    table.add_column("Cancel", justify="center")
+    table.add_column("URL", min_width=12)
+
+    for i, provider in enumerate(providers, 1):
+        table.add_row(
+            str(i),
+            provider.name,
+            _format_price(provider.price, provider.currency or hotel.currency),
+            _format_price(provider.total_price, provider.currency or hotel.currency),
+            provider.room_name or "\u2014",
+            "Free" if provider.is_free_cancellation else "\u2014",
+            provider.url or "\u2014",
+        )
+    console.print(table)
+
+
+def format_hotel_prices_json(
+    hotel,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel provider prices as JSON."""
+    output = _hotel_to_dict(hotel, include_providers=False)
+    providers = list(hotel.providers[:limit]) if limit else list(hotel.providers)
+    output["providers"] = [_provider_to_dict(provider) for provider in providers]
+    print(json.dumps(output, indent=2))
+
+
+def format_hotel_prices_brief(
+    hotel,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel provider prices in compact one-line-per-provider format."""
+    providers = list(hotel.providers[:limit]) if limit else list(hotel.providers)
+    for i, provider in enumerate(providers, 1):
+        price = _format_price(provider.total_price or provider.price, provider.currency or hotel.currency)
+        print(f"{i:3d}  {price:>10s}  {provider.name}")
+
+
+def format_hotel_reviews_table(
+    result,
+    *,
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel reviews as a Rich table."""
+    console = _stdout_console(no_color=no_color)
+    reviews = list(result.reviews[:limit]) if limit else list(result.reviews)
+    table = Table(title="Hotel reviews", show_lines=True)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Source", min_width=12)
+    table.add_column("Rating", justify="right", width=8)
+    table.add_column("Date", min_width=10)
+    table.add_column("Text", min_width=40)
+    for i, review in enumerate(reviews, 1):
+        rating = "\u2014"
+        if review.rating is not None:
+            rating = str(review.rating)
+            if review.max_rating is not None:
+                rating += f"/{review.max_rating:g}"
+        table.add_row(
+            str(i),
+            review.source,
+            rating,
+            review.relative_date or "\u2014",
+            review.text or "\u2014",
+        )
+    console.print(table)
+
+
+def format_hotel_reviews_json(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel reviews as JSON."""
+    reviews = list(result.reviews[:limit]) if limit else list(result.reviews)
+    output = {
+        "hotel_token": result.hotel_token,
+        "total_reviews": len(result.reviews),
+        "reviews": [_review_to_dict(review) for review in reviews],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_hotel_reviews_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render hotel reviews in compact one-line-per-review format."""
+    reviews = list(result.reviews[:limit]) if limit else list(result.reviews)
+    for i, review in enumerate(reviews, 1):
+        rating = f"{review.rating:g}" if review.rating is not None else "\u2014"
+        text = (review.text or "").replace("\n", " ")
+        if len(text) > 120:
+            text = text[:117] + "..."
+        print(f"{i:3d}  {rating:>4s}  {review.source:<14s} {text}")

@@ -6,7 +6,17 @@ import pytest
 from click.testing import CliRunner
 
 from swoop.cli import main
-from swoop import PriceResult, SearchResult, TripLeg, TripOption
+from swoop import (
+    Hotel,
+    HotelProvider,
+    HotelReview,
+    HotelReviewsResult,
+    HotelSearchResult,
+    PriceResult,
+    SearchResult,
+    TripLeg,
+    TripOption,
+)
 from swoop.cli.commands import search_cmd, price_cmd
 from swoop.cli.utils import format_time, format_duration, format_date_display, format_route, check_past_date, IATACodeType, DateType
 from swoop.decoder import (
@@ -148,6 +158,72 @@ def _make_booking_options() -> list[BookingOption]:
     ]
 
 
+def _make_hotel_result() -> HotelSearchResult:
+    return HotelSearchResult(
+        query="New York",
+        destination_name="New York",
+        currency="USD",
+        is_complete=False,
+        hotels=[
+            Hotel(
+                hotel_id="hotel-1",
+                name="HI New York City Hostel",
+                price=65,
+                total_price=130,
+                currency="USD",
+                rating=4.4,
+                review_count=4584,
+                hotel_class=3,
+                distance="3.5 mi away",
+                booking_token="hotel-token-1",
+            ),
+            Hotel(
+                hotel_id="hotel-2",
+                name="Second Test Hotel",
+                price=120,
+                total_price=240,
+                currency="USD",
+            ),
+        ],
+    )
+
+
+def _make_priced_hotel() -> Hotel:
+    return Hotel(
+        hotel_id="hotel-1",
+        name="HI New York City Hostel",
+        currency="USD",
+        booking_token="hotel-token-1",
+        providers=[
+            HotelProvider(
+                name="Booking.com",
+                price=70,
+                total_price=140,
+                currency="USD",
+                url="https://example.com/book",
+                room_name="Private room",
+                is_free_cancellation=True,
+            )
+        ],
+    )
+
+
+def _make_reviews_result() -> HotelReviewsResult:
+    return HotelReviewsResult(
+        hotel_token="hotel-token-1",
+        reviews=[
+            HotelReview(
+                source="Google",
+                author="A. Guest",
+                rating=5,
+                max_rating=5,
+                relative_date="a month ago",
+                text="Clean and close to transit.",
+            )
+        ],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Utils tests
 # ---------------------------------------------------------------------------
@@ -248,6 +324,7 @@ class TestMainGroup:
         assert result.exit_code == 0
         assert "search" in result.output
         assert "price" in result.output
+        assert "hotels" in result.output
         assert "\n  book" not in result.output
 
     def test_no_subcommand_shows_help(self):
@@ -1073,6 +1150,127 @@ class TestPriceCommand:
         assert result.exit_code == 0
         from swoop.models import TransportConfig
         mock_price_selector.assert_called_once_with("selector-1", transport=TransportConfig(timeout=90, retries=2, country=None, proxy=None))
+
+
+# ---------------------------------------------------------------------------
+# Hotel command tests
+# ---------------------------------------------------------------------------
+
+
+class TestHotelsCommand:
+    @patch("swoop.hotels")
+    def test_hotels_json_output_and_options(self, mock_hotels):
+        mock_hotels.return_value = _make_hotel_result()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotels", "New York", "2026-06-01", "2026-06-03",
+            "--include-booking-tokens", "--token-enrichment-limit", "1",
+            "--child-age", "9", "-o", "json", "-q",
+        ])
+
+        assert result.exit_code == 0
+        import json
+        data = json.loads(result.output)
+        assert data["query"]["text"] == "New York"
+        assert data["is_complete"] is False
+        assert data["hotels"][0]["booking_token"] == "hotel-token-1"
+        args, kwargs = mock_hotels.call_args
+        assert args == ("New York", "2026-06-01", "2026-06-03")
+        assert kwargs["include_booking_tokens"] is True
+        assert kwargs["token_enrichment_limit"] == 1
+        assert kwargs["child_ages"] == [9]
+
+    @patch("swoop.hotels")
+    def test_hotels_brief_output(self, mock_hotels):
+        mock_hotels.return_value = _make_hotel_result()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotels", "New York", "2026-06-01", "2026-06-03",
+            "-o", "brief", "-q",
+        ])
+
+        assert result.exit_code == 0
+        assert "$130" in result.output
+        assert "HI New York City Hostel" in result.output
+        assert "token" in result.output
+
+    @patch("swoop.hotels")
+    def test_hotels_no_results(self, mock_hotels):
+        mock_hotels.return_value = HotelSearchResult(query="Nowhere", hotels=[])
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotels", "Nowhere", "2026-06-01", "2026-06-03", "-q",
+        ])
+
+        assert result.exit_code == 1
+        assert "No hotels found" in result.stderr
+
+
+class TestHotelPricesCommand:
+    @patch("swoop.hotel_prices")
+    def test_hotel_prices_json_output(self, mock_prices):
+        mock_prices.return_value = _make_priced_hotel()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotel-prices", "hotel-token-1",
+            "--query", "HI New York City Hostel",
+            "--check-in", "2026-06-01",
+            "--check-out", "2026-06-03",
+            "-o", "json", "-q",
+        ])
+
+        assert result.exit_code == 0
+        import json
+        data = json.loads(result.output)
+        assert data["booking_token"] == "hotel-token-1"
+        assert data["providers"][0]["name"] == "Booking.com"
+        assert data["providers"][0]["total_price"] == 140
+        args, kwargs = mock_prices.call_args
+        assert args == ("hotel-token-1",)
+        assert kwargs["query"] == "HI New York City Hostel"
+
+    @patch("swoop.hotel_prices")
+    def test_hotel_prices_brief_output(self, mock_prices):
+        mock_prices.return_value = _make_priced_hotel()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotel-prices", "hotel-token-1",
+            "--check-in", "2026-06-01",
+            "--check-out", "2026-06-03",
+            "-o", "brief", "-q",
+        ])
+
+        assert result.exit_code == 0
+        assert "$140" in result.output
+        assert "Booking.com" in result.output
+
+
+class TestHotelReviewsCommand:
+    @patch("swoop.hotel_reviews")
+    def test_hotel_reviews_json_output(self, mock_reviews):
+        mock_reviews.return_value = _make_reviews_result()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotel-reviews", "hotel-token-1", "-o", "json", "-q",
+        ])
+
+        assert result.exit_code == 0
+        import json
+        data = json.loads(result.output)
+        assert data["hotel_token"] == "hotel-token-1"
+        assert data["reviews"][0]["source"] == "Google"
+        assert data["reviews"][0]["text"] == "Clean and close to transit."
+
+    @patch("swoop.hotel_reviews")
+    def test_hotel_reviews_no_results(self, mock_reviews):
+        mock_reviews.return_value = HotelReviewsResult(hotel_token="hotel-token-1", reviews=[])
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "hotel-reviews", "hotel-token-1", "-q",
+        ])
+
+        assert result.exit_code == 1
+        assert "No hotel reviews found" in result.stderr
 
 
 # ---------------------------------------------------------------------------

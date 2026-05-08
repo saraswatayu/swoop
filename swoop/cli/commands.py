@@ -702,3 +702,213 @@ def price_cmd(
         format_price_brief(result, query_legs=query_legs)
     else:
         format_price_table(result, query_legs=query_legs, no_color=no_color)
+
+
+def _hotel_transport(swoop, *, timeout, retries, country, proxy):
+    return swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
+
+
+def _hotel_error(ctx, err, exc) -> None:
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+
+    if isinstance(exc, ValueError):
+        err.print(f"[red]Error: {exc}[/red]")
+        ctx.exit(2)
+    if isinstance(exc, SwoopRateLimitError):
+        err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+        ctx.exit(3)
+    if isinstance(exc, SwoopHTTPError):
+        err.print(f"[red]Google Hotels returned HTTP {exc.status_code}[/red]")
+        ctx.exit(3)
+    if isinstance(exc, SwoopParseError):
+        err.print("[red]Could not parse Google Hotels response[/red]")
+        ctx.exit(4)
+    raise exc
+
+
+@click.command("hotels")
+@click.argument("query", type=str)
+@click.argument("check_in", type=DATE)
+@click.argument("check_out", type=DATE)
+@click.option("-p", "--adults", type=int, default=2, show_default=True, help="Number of adults.")
+@click.option("--child-age", "child_ages", type=click.IntRange(0, 17), multiple=True, help="Child age (repeatable).")
+@click.option("--rooms", type=click.IntRange(1), default=1, show_default=True, help="Room count.")
+@click.option("--currency", type=str, default="USD", show_default=True, help="Requested ISO 4217 currency.")
+@click.option("--include-booking-tokens", is_flag=True, default=False, help="Run exact follow-up searches to attach pricing/review tokens.")
+@click.option("--token-enrichment-limit", type=click.IntRange(0), default=None, help="Maximum number of hotel cards to enrich.")
+@click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
+@click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
+@click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
+@click.option("-l", "--limit", type=int, default=None, help="Max hotels to display.")
+@_output_options(["table", "json", "csv", "brief"])
+@click.pass_context
+def hotels_cmd(
+    ctx, query, check_in, check_out,
+    adults, child_ages, rooms, currency,
+    include_booking_tokens, token_enrichment_limit,
+    country, proxy, timeout, retries,
+    limit, output_format, no_color, quiet, verbose,
+):
+    """Search Google Travel Hotels.
+
+    \b
+    Examples:
+      swoop hotels "New York" 2026-06-01 2026-06-03
+      swoop hotels "New York" 2026-06-01 2026-06-03 --include-booking-tokens --token-enrichment-limit 3
+      swoop hotels "HI New York City Hostel" 2026-06-01 2026-06-03 -o json -q
+    """
+    import swoop
+
+    from .formatters import (
+        format_hotels_brief,
+        format_hotels_csv,
+        format_hotels_json,
+        format_hotels_table,
+    )
+
+    err = _err_console(no_color)
+
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
+
+    warning = check_past_date(check_in)
+    if warning:
+        err.print(f"[yellow]{warning}[/yellow]")
+
+    spinner = err.status("[bold]Searching hotels...[/bold]") if (not quiet and output_format == "table") else nullcontext()
+    with spinner:
+        try:
+            result = swoop.hotels(
+                query,
+                check_in,
+                check_out,
+                adults=adults,
+                child_ages=list(child_ages) or None,
+                rooms=rooms,
+                currency=currency,
+                include_booking_tokens=include_booking_tokens,
+                token_enrichment_limit=token_enrichment_limit,
+                transport=_hotel_transport(swoop, timeout=timeout, retries=retries, country=country, proxy=proxy),
+            )
+        except Exception as exc:
+            _hotel_error(ctx, err, exc)
+            return
+
+    if not result.hotels:
+        err.print(f"[yellow]No hotels found for {query}.[/yellow]")
+        ctx.exit(1)
+
+    if output_format == "table":
+        format_hotels_table(result, check_in=check_in, check_out=check_out, no_color=no_color, limit=limit)
+    elif output_format == "json":
+        format_hotels_json(result, check_in=check_in, check_out=check_out, limit=limit)
+    elif output_format == "csv":
+        format_hotels_csv(result, limit=limit)
+    elif output_format == "brief":
+        format_hotels_brief(result, limit=limit)
+
+
+@click.command("hotel-prices")
+@click.argument("hotel_token", type=str)
+@click.option("--query", type=str, default="", help="Original hotel name/query for destination context.")
+@click.option("--check-in", type=DATE, required=True, help="Check-in date.")
+@click.option("--check-out", type=DATE, required=True, help="Check-out date.")
+@click.option("-p", "--adults", type=int, default=2, show_default=True, help="Number of adults.")
+@click.option("--child-age", "child_ages", type=click.IntRange(0, 17), multiple=True, help="Child age (repeatable).")
+@click.option("--rooms", type=click.IntRange(1), default=1, show_default=True, help="Room count.")
+@click.option("--currency", type=str, default="USD", show_default=True, help="Requested ISO 4217 currency.")
+@click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
+@click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
+@click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
+@click.option("-l", "--limit", type=int, default=None, help="Max providers to display.")
+@_output_options(["table", "json", "brief"])
+@click.pass_context
+def hotel_prices_cmd(
+    ctx, hotel_token, query, check_in, check_out,
+    adults, child_ages, rooms, currency,
+    country, proxy, timeout, retries,
+    limit, output_format, no_color, quiet, verbose,
+):
+    """Fetch provider prices for a Google Travel hotel token."""
+    import swoop
+
+    from .formatters import format_hotel_prices_brief, format_hotel_prices_json, format_hotel_prices_table
+
+    err = _err_console(no_color)
+
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
+
+    spinner = err.status("[bold]Checking hotel prices...[/bold]") if (not quiet and output_format == "table") else nullcontext()
+    with spinner:
+        try:
+            hotel = swoop.hotel_prices(
+                hotel_token,
+                query=query,
+                check_in=check_in,
+                check_out=check_out,
+                adults=adults,
+                child_ages=list(child_ages) or None,
+                rooms=rooms,
+                currency=currency,
+                transport=_hotel_transport(swoop, timeout=timeout, retries=retries, country=country, proxy=proxy),
+            )
+        except Exception as exc:
+            _hotel_error(ctx, err, exc)
+            return
+
+    if output_format == "table":
+        format_hotel_prices_table(hotel, no_color=no_color, limit=limit)
+    elif output_format == "json":
+        format_hotel_prices_json(hotel, limit=limit)
+    elif output_format == "brief":
+        format_hotel_prices_brief(hotel, limit=limit)
+
+
+@click.command("hotel-reviews")
+@click.argument("hotel_token", type=str)
+@click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
+@click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
+@click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
+@click.option("-l", "--limit", type=int, default=10, show_default=True, help="Max reviews to display.")
+@_output_options(["table", "json", "brief"])
+@click.pass_context
+def hotel_reviews_cmd(
+    ctx, hotel_token,
+    country, proxy, timeout, retries,
+    limit, output_format, no_color, quiet, verbose,
+):
+    """Fetch reviews for a Google Travel hotel token."""
+    import swoop
+
+    from .formatters import format_hotel_reviews_brief, format_hotel_reviews_json, format_hotel_reviews_table
+
+    err = _err_console(no_color)
+
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
+
+    spinner = err.status("[bold]Fetching hotel reviews...[/bold]") if (not quiet and output_format == "table") else nullcontext()
+    with spinner:
+        try:
+            result = swoop.hotel_reviews(
+                hotel_token,
+                transport=_hotel_transport(swoop, timeout=timeout, retries=retries, country=country, proxy=proxy),
+            )
+        except Exception as exc:
+            _hotel_error(ctx, err, exc)
+            return
+
+    if not result.reviews:
+        err.print("[yellow]No hotel reviews found.[/yellow]")
+        ctx.exit(1)
+
+    if output_format == "table":
+        format_hotel_reviews_table(result, no_color=no_color, limit=limit)
+    elif output_format == "json":
+        format_hotel_reviews_json(result, limit=limit)
+    elif output_format == "brief":
+        format_hotel_reviews_brief(result, limit=limit)

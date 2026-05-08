@@ -651,6 +651,90 @@ def _merge_seed_hotel(
     return hotel
 
 
+def _same_hotel(left: Hotel, right: Hotel) -> bool:
+    for field_name in ("entity_id", "place_id", "hotel_id"):
+        left_value = getattr(left, field_name)
+        right_value = getattr(right, field_name)
+        if left_value and right_value and left_value == right_value:
+            return True
+    return bool(left.name and right.name and left.name.casefold() == right.name.casefold())
+
+
+def _enrich_booking_tokens(
+    client: Any,
+    result: HotelSearchResult,
+    *,
+    check_in: str,
+    check_out: str,
+    adults: int = 2,
+    child_ages: Optional[list[int]] = None,
+    rooms: int = 1,
+    currency: str = "USD",
+    page_url: str,
+    browser_params: Optional[dict[str, str]] = None,
+    transport: TransportConfig = TransportConfig(),
+    limit: Optional[int] = None,
+) -> HotelSearchResult:
+    remaining = len(result.hotels) if limit is None else max(0, limit)
+    if remaining == 0:
+        return result
+
+    for hotel in result.hotels:
+        if hotel.booking_token:
+            continue
+        if not hotel.name:
+            continue
+        if remaining <= 0:
+            break
+
+        remaining -= 1
+        try:
+            exact_data = _post_travel_rpc(
+                client,
+                UNIVERSAL_SEARCH_RPC,
+                _build_universal_search_payload(
+                    hotel.name,
+                    check_in=check_in,
+                    check_out=check_out,
+                    adults=adults,
+                    child_ages=child_ages,
+                    rooms=rooms,
+                    currency=currency,
+                ),
+                page_url=page_url,
+                browser_params=browser_params,
+                transport=transport,
+            )
+        except (SwoopHTTPError, SwoopParseError, SwoopRateLimitError):
+            logger.debug("Hotel token enrichment failed for %s", hotel.name, exc_info=True)
+            continue
+
+        context = _extract_context_from_universal(exact_data)
+        hotel_token = context.get("hotel_token")
+        if not isinstance(hotel_token, str):
+            continue
+
+        exact_result = parse_hotels_payload(
+            exact_data,
+            query=hotel.name,
+            currency=currency,
+            is_complete=False,
+        )
+        if not exact_result.hotels:
+            hotel.booking_token = hotel_token
+            continue
+
+        for exact_hotel in exact_result.hotels:
+            if _same_hotel(hotel, exact_hotel):
+                _merge_seed_hotel(hotel, exact_hotel, hotel_token=hotel_token)
+                break
+        else:
+            if len(exact_result.hotels) == 1:
+                _merge_seed_hotel(hotel, exact_result.hotels[0], hotel_token=hotel_token)
+
+    return result
+
+
 def _review_text(value: Any) -> Optional[str]:
     parts: list[str] = []
 
@@ -731,6 +815,8 @@ def fetch_hotels(
     child_ages: Optional[list[int]] = None,
     rooms: int = 1,
     currency: str = "USD",
+    include_booking_tokens: bool = False,
+    token_enrichment_limit: Optional[int] = None,
     transport: TransportConfig = TransportConfig(),
 ) -> HotelSearchResult:
     """Fetch Google Travel hotel search results."""
@@ -798,6 +884,21 @@ def fetch_hotels(
         )
     except SwoopParseError:
         logger.debug("Hotel results RPC did not return parseable results", exc_info=True)
+        if include_booking_tokens:
+            return _enrich_booking_tokens(
+                client,
+                seed_result,
+                check_in=check_in,
+                check_out=check_out,
+                adults=adults,
+                child_ages=child_ages,
+                rooms=rooms,
+                currency=currency,
+                page_url=page_url,
+                browser_params=browser_params,
+                transport=transport,
+                limit=token_enrichment_limit,
+            )
         return seed_result
 
     result = parse_hotels_payload(
@@ -807,7 +908,23 @@ def fetch_hotels(
         destination_name=context.get("destination_name") if isinstance(context.get("destination_name"), str) else None,
         is_complete=True,
     )
-    return result if result.hotels else seed_result
+    final_result = result if result.hotels else seed_result
+    if include_booking_tokens:
+        return _enrich_booking_tokens(
+            client,
+            final_result,
+            check_in=check_in,
+            check_out=check_out,
+            adults=adults,
+            child_ages=child_ages,
+            rooms=rooms,
+            currency=currency,
+            page_url=page_url,
+            browser_params=browser_params,
+            transport=transport,
+            limit=token_enrichment_limit,
+        )
+    return final_result
 
 
 def fetch_hotel_prices(

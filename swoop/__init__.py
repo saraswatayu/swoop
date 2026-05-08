@@ -632,6 +632,8 @@ def hotels(
     child_ages: Optional[list[int]] = None,
     rooms: int = 1,
     currency: str = "USD",
+    include_booking_tokens: bool = False,
+    token_enrichment_limit: Optional[int] = None,
     transport: TransportConfig = TransportConfig(),
 ) -> HotelSearchResult:
     """Search Google Travel Hotels.
@@ -645,12 +647,18 @@ def hotels(
             Google Hotels' occupancy payloads.
         rooms: Room count.
         currency: ISO 4217 currency code requested from Google.
+        include_booking_tokens: Whether to run exact hotel follow-up searches
+            to attach provider pricing/review tokens to broad destination cards.
+        token_enrichment_limit: Maximum number of hotels to enrich. ``None``
+            means all hotels when enrichment is enabled.
         transport: HTTP transport configuration.
 
     Returns:
         A :class:`HotelSearchResult` containing hotel cards.
     """
     _validate_hotel_inputs(query, check_in, check_out, adults, child_ages, rooms)
+    if token_enrichment_limit is not None and token_enrichment_limit < 0:
+        raise ValueError("token_enrichment_limit must be non-negative")
 
     from ._hotels import fetch_hotels
 
@@ -662,6 +670,8 @@ def hotels(
         child_ages=child_ages,
         rooms=rooms,
         currency=currency,
+        include_booking_tokens=include_booking_tokens,
+        token_enrichment_limit=token_enrichment_limit,
         transport=transport,
     )
 

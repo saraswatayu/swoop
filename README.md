@@ -249,6 +249,9 @@ if hotel.booking_token:
 ```
 
 Exact hotel queries can return a selected-hotel `booking_token` for provider prices and reviews. Broad destination queries return hotel cards when Google includes them in the first response, but may be marked `is_complete=False` because Google's follow-up list RPC can reject direct non-browser calls.
+
+For broad destination searches, pass `include_booking_tokens=True` to run exact follow-up searches for each returned card and attach tokens when Google resolves the hotel. Use `token_enrichment_limit` to cap the number of extra requests.
+
 ### Booking details (fare options)
 
 ```python
@@ -392,6 +395,8 @@ Search Google Travel Hotels and return a `HotelSearchResult`.
 | `child_ages` | `list[int] \| None` | `None` | Ages for child guests |
 | `rooms` | `int` | `1` | Room count |
 | `currency` | `str` | `"USD"` | Requested ISO 4217 currency |
+| `include_booking_tokens` | `bool` | `False` | Run exact hotel follow-up searches to attach provider pricing/review tokens to broad result cards |
+| `token_enrichment_limit` | `int \| None` | `None` | Maximum number of hotel cards to enrich when token enrichment is enabled |
 | `transport` | `TransportConfig` | `TransportConfig()` | HTTP transport configuration |
 
 Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`.

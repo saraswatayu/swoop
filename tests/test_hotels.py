@@ -58,6 +58,15 @@ def _raw_hotel() -> list[object]:
     return record
 
 
+def _raw_hotel_without_token(name: str, entity_id: str) -> list[object]:
+    record = _raw_hotel()
+    record[1] = name
+    record[9] = entity_id
+    record[18] = None
+    record[22] = entity_id
+    return record
+
+
 def _context() -> list[object]:
     context: list[object] = [None] * 19
     context[3] = "USD"
@@ -75,6 +84,24 @@ def _universal_payload() -> list[object]:
     root[7] = {
         "404340221": [_context()],
         "441552390": _raw_hotel(),
+    }
+    return [None, root, None]
+
+
+def _broad_universal_payload() -> list[object]:
+    root: list[object] = [None] * 8
+    root[1] = "New York"
+    root[5] = ["/m/02_286", None, None, None, None, "0x89c24fa5d33f083b:0xc80b8f06e177fe62"]
+    root[7] = {
+        "404340221": [_context()],
+        "hotel_a": _raw_hotel_without_token(
+            "HI New York City Hostel",
+            "0x89c2f6246837073b:0xc9dcfc4023c86664",
+        ),
+        "hotel_b": _raw_hotel_without_token(
+            "Second Test Hotel",
+            "0x89c2f6246837073b:0x0000000000000002",
+        ),
     }
     return [None, root, None]
 
@@ -248,6 +275,48 @@ def test_fetch_hotels_single_selected_hotel_returns_complete_without_results_rpc
     assert len(result.hotels) == 1
     assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
     assert len(client.posts) == 1
+
+
+def test_fetch_hotels_can_enrich_broad_results_with_booking_tokens(monkeypatch):
+    class Response:
+        def __init__(self, text: str):
+            self.status_code = 200
+            self.text = text
+
+    class Client:
+        def __init__(self):
+            self.queries = []
+
+        def get(self, *args, **kwargs):
+            return Response('"cfb2h":"bl-test","FdrFJe":"sid-test"')
+
+        def post(self, url, *, content, headers, timeout):
+            parsed = urllib.parse.parse_qs(content.decode())
+            outer = json.loads(urllib.parse.unquote(parsed["f.req"][0]))
+            rpc_id = outer[0][0][0]
+            payload = json.loads(outer[0][0][1])
+            if rpc_id == UNIVERSAL_SEARCH_RPC:
+                self.queries.append(payload[0])
+                if payload[0] == "HI New York City Hostel":
+                    return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _universal_payload()))
+                return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _broad_universal_payload()))
+            return Response(_batchexecute(HOTEL_RESULTS_RPC, [None]))
+
+    client = Client()
+    monkeypatch.setattr("swoop._hotels._get_client", lambda *args: client)
+
+    result = fetch_hotels(
+        "New York",
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        include_booking_tokens=True,
+        token_enrichment_limit=1,
+    )
+
+    assert len(result.hotels) == 2
+    assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
+    assert result.hotels[1].booking_token is None
+    assert client.queries == ["New York", "HI New York City Hostel"]
 
 
 def test_parse_hotel_reviews_payload_extracts_reviews():

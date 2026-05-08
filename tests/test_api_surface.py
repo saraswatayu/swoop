@@ -418,6 +418,9 @@ class TestSearchSignature:
         expected = [
             "query", "check_in", "check_out",
             "adults", "child_ages", "rooms", "currency",
+            "sort_by", "min_price", "max_price",
+            "min_total_price", "max_total_price",
+            "min_rating", "min_hotel_class", "require_booking_token",
             "include_booking_tokens", "token_enrichment_limit", "transport",
         ]
         assert param_names == expected

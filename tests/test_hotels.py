@@ -15,6 +15,7 @@ from swoop._hotels import (
     _build_universal_search_payload,
     _encode_travel_f_req,
     _extract_context_from_universal,
+    _filter_and_sort_hotels,
     _merge_seed_hotel,
     _parse_batchexecute_response,
     parse_hotel_prices_payload,
@@ -58,12 +59,24 @@ def _raw_hotel() -> list[object]:
     return record
 
 
-def _raw_hotel_without_token(name: str, entity_id: str) -> list[object]:
+def _raw_hotel_without_token(
+    name: str,
+    entity_id: str,
+    *,
+    nightly: int = 65,
+    total: int = 130,
+    rating: float = 4.4,
+    hotel_class: int = 3,
+) -> list[object]:
     record = _raw_hotel()
     record[1] = name
     record[9] = entity_id
     record[18] = None
     record[22] = entity_id
+    record[3] = [f"{hotel_class}-star hotel", hotel_class]
+    record[6][2][1] = _price(f"${nightly}", nightly)
+    record[6][2][8] = _price(f"${total}", total)
+    record[7] = [[rating, 1000]]
     return record
 
 
@@ -101,6 +114,10 @@ def _broad_universal_payload() -> list[object]:
         "hotel_b": _raw_hotel_without_token(
             "Second Test Hotel",
             "0x89c2f6246837073b:0x0000000000000002",
+            nightly=120,
+            total=240,
+            rating=3.8,
+            hotel_class=4,
         ),
     }
     return [None, root, None]
@@ -317,6 +334,33 @@ def test_fetch_hotels_can_enrich_broad_results_with_booking_tokens(monkeypatch):
     assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
     assert result.hotels[1].booking_token is None
     assert client.queries == ["New York", "HI New York City Hostel"]
+
+
+def test_filter_and_sort_hotels_applies_client_side_controls():
+    result = parse_hotels_payload(_broad_universal_payload(), query="New York", currency="USD")
+
+    filtered = _filter_and_sort_hotels(
+        result,
+        sort_by="total-price",
+        min_rating=3.5,
+        min_hotel_class=3,
+        max_total_price=200,
+    )
+
+    assert [hotel.name for hotel in filtered.hotels] == ["HI New York City Hostel"]
+
+
+def test_filter_and_sort_hotels_can_require_booking_tokens_and_sort_rating():
+    result = parse_hotels_payload(_broad_universal_payload(), query="New York", currency="USD")
+    result.hotels[1].booking_token = "second-token"
+
+    filtered = _filter_and_sort_hotels(
+        result,
+        sort_by="rating",
+        require_booking_token=True,
+    )
+
+    assert [hotel.name for hotel in filtered.hotels] == ["Second Test Hotel"]
 
 
 def test_parse_hotel_reviews_payload_extracts_reviews():

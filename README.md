@@ -63,6 +63,9 @@ swoop search JFK LAX 2026-06-15 --show-price-commands
 # Search hotels
 swoop hotels "New York" 2026-06-01 2026-06-03
 
+# Filter/sort returned hotel cards
+swoop hotels "New York" 2026-06-01 2026-06-03 --sort rating --min-rating 4 --max-total-price 500
+
 # Enrich broad hotel cards with pricing/review tokens
 swoop hotels "New York" 2026-06-01 2026-06-03 --include-booking-tokens --token-enrichment-limit 3
 
@@ -406,11 +409,17 @@ Search Google Travel Hotels and return a `HotelSearchResult`.
 | `child_ages` | `list[int] \| None` | `None` | Ages for child guests |
 | `rooms` | `int` | `1` | Room count |
 | `currency` | `str` | `"USD"` | Requested ISO 4217 currency |
+| `sort_by` | `str` | `"default"` | Client-side sort for returned cards: `"default"`, `"price"`, `"total-price"`, `"rating"`, `"class"`, or `"name"` |
+| `min_price` / `max_price` | `int \| None` | `None` | Client-side nightly price bounds for returned cards |
+| `min_total_price` / `max_total_price` | `int \| None` | `None` | Client-side total stay price bounds for returned cards |
+| `min_rating` | `float \| None` | `None` | Client-side minimum Google rating |
+| `min_hotel_class` | `int \| None` | `None` | Client-side minimum hotel class/star count |
+| `require_booking_token` | `bool` | `False` | Keep only returned cards with provider pricing/review tokens |
 | `include_booking_tokens` | `bool` | `False` | Run exact hotel follow-up searches to attach provider pricing/review tokens to broad result cards |
 | `token_enrichment_limit` | `int \| None` | `None` | Maximum number of hotel cards to enrich when token enrichment is enabled |
 | `transport` | `TransportConfig` | `TransportConfig()` | HTTP transport configuration |
 
-Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`.
+Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Hotel sort/filter controls are applied to the cards Google returns to swoop; when `is_complete=False`, they should be read as filters over a partial result set.
 
 ### `hotel_prices(hotel_token, **kwargs)`
 

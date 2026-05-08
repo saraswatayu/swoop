@@ -1165,6 +1165,8 @@ class TestHotelsCommand:
         result = runner.invoke(main, [
             "hotels", "New York", "2026-06-01", "2026-06-03",
             "--include-booking-tokens", "--token-enrichment-limit", "1",
+            "--sort", "rating", "--min-rating", "4",
+            "--max-total-price", "250", "--require-booking-token",
             "--child-age", "9", "-o", "json", "-q",
         ])
 
@@ -1179,6 +1181,10 @@ class TestHotelsCommand:
         assert kwargs["include_booking_tokens"] is True
         assert kwargs["token_enrichment_limit"] == 1
         assert kwargs["child_ages"] == [9]
+        assert kwargs["sort_by"] == "rating"
+        assert kwargs["min_rating"] == 4.0
+        assert kwargs["max_total_price"] == 250
+        assert kwargs["require_booking_token"] is True
 
     @patch("swoop.hotels")
     def test_hotels_brief_output(self, mock_hotels):

@@ -734,6 +734,14 @@ def _hotel_error(ctx, err, exc) -> None:
 @click.option("--child-age", "child_ages", type=click.IntRange(0, 17), multiple=True, help="Child age (repeatable).")
 @click.option("--rooms", type=click.IntRange(1), default=1, show_default=True, help="Room count.")
 @click.option("--currency", type=str, default="USD", show_default=True, help="Requested ISO 4217 currency.")
+@click.option("--sort", "sort_by", type=click.Choice(["default", "price", "total-price", "rating", "class", "name"], case_sensitive=False), default="default", show_default=True, help="Client-side sort for returned hotel cards.")
+@click.option("--min-price", type=click.IntRange(0), default=None, help="Minimum nightly price.")
+@click.option("--max-price", type=click.IntRange(0), default=None, help="Maximum nightly price.")
+@click.option("--min-total-price", type=click.IntRange(0), default=None, help="Minimum total stay price.")
+@click.option("--max-total-price", type=click.IntRange(0), default=None, help="Maximum total stay price.")
+@click.option("--min-rating", type=click.FloatRange(0, 5), default=None, help="Minimum Google rating.")
+@click.option("--min-class", "min_hotel_class", type=click.IntRange(0, 5), default=None, help="Minimum hotel class/star count.")
+@click.option("--require-booking-token", is_flag=True, default=False, help="Show only hotels with pricing/review tokens.")
 @click.option("--include-booking-tokens", is_flag=True, default=False, help="Run exact follow-up searches to attach pricing/review tokens.")
 @click.option("--token-enrichment-limit", type=click.IntRange(0), default=None, help="Maximum number of hotel cards to enrich.")
 @click.option("--country", type=str, default=None, help="Point-of-sale country code.")
@@ -746,6 +754,9 @@ def _hotel_error(ctx, err, exc) -> None:
 def hotels_cmd(
     ctx, query, check_in, check_out,
     adults, child_ages, rooms, currency,
+    sort_by, min_price, max_price,
+    min_total_price, max_total_price,
+    min_rating, min_hotel_class, require_booking_token,
     include_booking_tokens, token_enrichment_limit,
     country, proxy, timeout, retries,
     limit, output_format, no_color, quiet, verbose,
@@ -755,6 +766,7 @@ def hotels_cmd(
     \b
     Examples:
       swoop hotels "New York" 2026-06-01 2026-06-03
+      swoop hotels "New York" 2026-06-01 2026-06-03 --sort rating --min-rating 4
       swoop hotels "New York" 2026-06-01 2026-06-03 --include-booking-tokens --token-enrichment-limit 3
       swoop hotels "HI New York City Hostel" 2026-06-01 2026-06-03 -o json -q
     """
@@ -787,6 +799,14 @@ def hotels_cmd(
                 child_ages=list(child_ages) or None,
                 rooms=rooms,
                 currency=currency,
+                sort_by=sort_by,
+                min_price=min_price,
+                max_price=max_price,
+                min_total_price=min_total_price,
+                max_total_price=max_total_price,
+                min_rating=min_rating,
+                min_hotel_class=min_hotel_class,
+                require_booking_token=require_booking_token,
                 include_booking_tokens=include_booking_tokens,
                 token_enrichment_limit=token_enrichment_limit,
                 transport=_hotel_transport(swoop, timeout=timeout, retries=retries, country=country, proxy=proxy),

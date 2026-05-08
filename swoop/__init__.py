@@ -632,6 +632,14 @@ def hotels(
     child_ages: Optional[list[int]] = None,
     rooms: int = 1,
     currency: str = "USD",
+    sort_by: str = "default",
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    min_total_price: Optional[int] = None,
+    max_total_price: Optional[int] = None,
+    min_rating: Optional[float] = None,
+    min_hotel_class: Optional[int] = None,
+    require_booking_token: bool = False,
     include_booking_tokens: bool = False,
     token_enrichment_limit: Optional[int] = None,
     transport: TransportConfig = TransportConfig(),
@@ -647,6 +655,17 @@ def hotels(
             Google Hotels' occupancy payloads.
         rooms: Room count.
         currency: ISO 4217 currency code requested from Google.
+        sort_by: Client-side sort for returned hotel cards. Supported values:
+            ``"default"``, ``"price"``, ``"total-price"``, ``"rating"``,
+            ``"class"``, and ``"name"``.
+        min_price: Minimum nightly price to keep.
+        max_price: Maximum nightly price to keep.
+        min_total_price: Minimum total stay price to keep.
+        max_total_price: Maximum total stay price to keep.
+        min_rating: Minimum Google rating to keep.
+        min_hotel_class: Minimum hotel class/star count to keep.
+        require_booking_token: Keep only hotels with provider pricing/review
+            tokens. Pair with ``include_booking_tokens=True`` for broad searches.
         include_booking_tokens: Whether to run exact hotel follow-up searches
             to attach provider pricing/review tokens to broad destination cards.
         token_enrichment_limit: Maximum number of hotels to enrich. ``None``
@@ -657,6 +676,30 @@ def hotels(
         A :class:`HotelSearchResult` containing hotel cards.
     """
     _validate_hotel_inputs(query, check_in, check_out, adults, child_ages, rooms)
+    from ._hotels import HOTEL_SORT_VALUES
+
+    if sort_by not in HOTEL_SORT_VALUES:
+        raise ValueError(f"sort_by must be one of {sorted(HOTEL_SORT_VALUES)}")
+    for name, value in (
+        ("min_price", min_price),
+        ("max_price", max_price),
+        ("min_total_price", min_total_price),
+        ("max_total_price", max_total_price),
+    ):
+        if value is not None and value < 0:
+            raise ValueError(f"{name} must be non-negative")
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise ValueError("min_price cannot exceed max_price")
+    if (
+        min_total_price is not None
+        and max_total_price is not None
+        and min_total_price > max_total_price
+    ):
+        raise ValueError("min_total_price cannot exceed max_total_price")
+    if min_rating is not None and (min_rating < 0 or min_rating > 5):
+        raise ValueError("min_rating must be between 0 and 5")
+    if min_hotel_class is not None and (min_hotel_class < 0 or min_hotel_class > 5):
+        raise ValueError("min_hotel_class must be between 0 and 5")
     if token_enrichment_limit is not None and token_enrichment_limit < 0:
         raise ValueError("token_enrichment_limit must be non-negative")
 
@@ -670,6 +713,14 @@ def hotels(
         child_ages=child_ages,
         rooms=rooms,
         currency=currency,
+        sort_by=sort_by,
+        min_price=min_price,
+        max_price=max_price,
+        min_total_price=min_total_price,
+        max_total_price=max_total_price,
+        min_rating=min_rating,
+        min_hotel_class=min_hotel_class,
+        require_booking_token=require_booking_token,
         include_booking_tokens=include_booking_tokens,
         token_enrichment_limit=token_enrichment_limit,
         transport=transport,

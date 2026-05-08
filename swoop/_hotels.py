@@ -30,6 +30,22 @@ UNIVERSAL_SEARCH_RPC = "AtySUc"
 HOTEL_RESULTS_RPC = "M0CRd"
 HOTEL_REVIEWS_RPC = "ocp93e"
 
+HOTEL_SORT_DEFAULT = "default"
+HOTEL_SORT_PRICE = "price"
+HOTEL_SORT_TOTAL_PRICE = "total-price"
+HOTEL_SORT_RATING = "rating"
+HOTEL_SORT_CLASS = "class"
+HOTEL_SORT_NAME = "name"
+
+HOTEL_SORT_VALUES = {
+    HOTEL_SORT_DEFAULT,
+    HOTEL_SORT_PRICE,
+    HOTEL_SORT_TOTAL_PRICE,
+    HOTEL_SORT_RATING,
+    HOTEL_SORT_CLASS,
+    HOTEL_SORT_NAME,
+}
+
 
 def _safe_get(data: Any, path: list[Any], default: Any = None) -> Any:
     current = data
@@ -552,6 +568,83 @@ def parse_hotels_payload(
     )
 
 
+def _hotel_price_for_filter(hotel: Hotel, *, use_total: bool = False) -> Optional[int]:
+    if use_total:
+        return hotel.total_price if hotel.total_price is not None else hotel.price
+    return hotel.price if hotel.price is not None else hotel.total_price
+
+
+def _hotel_sort_key(hotel: Hotel, sort_by: str) -> tuple[Any, ...]:
+    if sort_by == HOTEL_SORT_PRICE:
+        value = _hotel_price_for_filter(hotel)
+        return (value is None, value if value is not None else 0, hotel.name.casefold())
+    if sort_by == HOTEL_SORT_TOTAL_PRICE:
+        value = _hotel_price_for_filter(hotel, use_total=True)
+        return (value is None, value if value is not None else 0, hotel.name.casefold())
+    if sort_by == HOTEL_SORT_RATING:
+        value = hotel.rating
+        return (value is None, -(value if value is not None else 0.0), hotel.name.casefold())
+    if sort_by == HOTEL_SORT_CLASS:
+        value = hotel.hotel_class
+        return (value is None, -(value if value is not None else 0), hotel.name.casefold())
+    if sort_by == HOTEL_SORT_NAME:
+        return (hotel.name.casefold(),)
+    return ()
+
+
+def _filter_and_sort_hotels(
+    result: HotelSearchResult,
+    *,
+    sort_by: str = HOTEL_SORT_DEFAULT,
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    min_total_price: Optional[int] = None,
+    max_total_price: Optional[int] = None,
+    min_rating: Optional[float] = None,
+    min_hotel_class: Optional[int] = None,
+    require_booking_token: bool = False,
+) -> HotelSearchResult:
+    hotels = list(result.hotels)
+
+    if min_price is not None:
+        hotels = [
+            hotel for hotel in hotels
+            if (price := _hotel_price_for_filter(hotel)) is not None and price >= min_price
+        ]
+    if max_price is not None:
+        hotels = [
+            hotel for hotel in hotels
+            if (price := _hotel_price_for_filter(hotel)) is not None and price <= max_price
+        ]
+    if min_total_price is not None:
+        hotels = [
+            hotel for hotel in hotels
+            if (price := _hotel_price_for_filter(hotel, use_total=True)) is not None
+            and price >= min_total_price
+        ]
+    if max_total_price is not None:
+        hotels = [
+            hotel for hotel in hotels
+            if (price := _hotel_price_for_filter(hotel, use_total=True)) is not None
+            and price <= max_total_price
+        ]
+    if min_rating is not None:
+        hotels = [hotel for hotel in hotels if hotel.rating is not None and hotel.rating >= min_rating]
+    if min_hotel_class is not None:
+        hotels = [
+            hotel for hotel in hotels
+            if hotel.hotel_class is not None and hotel.hotel_class >= min_hotel_class
+        ]
+    if require_booking_token:
+        hotels = [hotel for hotel in hotels if hotel.booking_token]
+
+    if sort_by != HOTEL_SORT_DEFAULT:
+        hotels.sort(key=lambda hotel: _hotel_sort_key(hotel, sort_by))
+
+    result.hotels = hotels
+    return result
+
+
 def _provider_price_container(row: list[Any]) -> Any:
     for idx in (12, 13):
         value = _safe_get(row, [idx])
@@ -815,6 +908,14 @@ def fetch_hotels(
     child_ages: Optional[list[int]] = None,
     rooms: int = 1,
     currency: str = "USD",
+    sort_by: str = HOTEL_SORT_DEFAULT,
+    min_price: Optional[int] = None,
+    max_price: Optional[int] = None,
+    min_total_price: Optional[int] = None,
+    max_total_price: Optional[int] = None,
+    min_rating: Optional[float] = None,
+    min_hotel_class: Optional[int] = None,
+    require_booking_token: bool = False,
     include_booking_tokens: bool = False,
     token_enrichment_limit: Optional[int] = None,
     transport: TransportConfig = TransportConfig(),
@@ -859,7 +960,17 @@ def fetch_hotels(
     )
     if context.get("hotel_token") and len(seed_result.hotels) == 1:
         seed_result.is_complete = True
-        return seed_result
+        return _filter_and_sort_hotels(
+            seed_result,
+            sort_by=sort_by,
+            min_price=min_price,
+            max_price=max_price,
+            min_total_price=min_total_price,
+            max_total_price=max_total_price,
+            min_rating=min_rating,
+            min_hotel_class=min_hotel_class,
+            require_booking_token=require_booking_token,
+        )
 
     results_payload = _build_hotels_results_payload(
         context,
@@ -871,7 +982,17 @@ def fetch_hotels(
         currency=currency,
     )
     if results_payload is None:
-        return seed_result
+        return _filter_and_sort_hotels(
+            seed_result,
+            sort_by=sort_by,
+            min_price=min_price,
+            max_price=max_price,
+            min_total_price=min_total_price,
+            max_total_price=max_total_price,
+            min_rating=min_rating,
+            min_hotel_class=min_hotel_class,
+            require_booking_token=require_booking_token,
+        )
 
     try:
         results_data = _post_travel_rpc(
@@ -885,7 +1006,7 @@ def fetch_hotels(
     except SwoopParseError:
         logger.debug("Hotel results RPC did not return parseable results", exc_info=True)
         if include_booking_tokens:
-            return _enrich_booking_tokens(
+            seed_result = _enrich_booking_tokens(
                 client,
                 seed_result,
                 check_in=check_in,
@@ -899,7 +1020,17 @@ def fetch_hotels(
                 transport=transport,
                 limit=token_enrichment_limit,
             )
-        return seed_result
+        return _filter_and_sort_hotels(
+            seed_result,
+            sort_by=sort_by,
+            min_price=min_price,
+            max_price=max_price,
+            min_total_price=min_total_price,
+            max_total_price=max_total_price,
+            min_rating=min_rating,
+            min_hotel_class=min_hotel_class,
+            require_booking_token=require_booking_token,
+        )
 
     result = parse_hotels_payload(
         results_data,
@@ -910,7 +1041,7 @@ def fetch_hotels(
     )
     final_result = result if result.hotels else seed_result
     if include_booking_tokens:
-        return _enrich_booking_tokens(
+        final_result = _enrich_booking_tokens(
             client,
             final_result,
             check_in=check_in,
@@ -924,7 +1055,17 @@ def fetch_hotels(
             transport=transport,
             limit=token_enrichment_limit,
         )
-    return final_result
+    return _filter_and_sort_hotels(
+        final_result,
+        sort_by=sort_by,
+        min_price=min_price,
+        max_price=max_price,
+        min_total_price=min_total_price,
+        max_total_price=max_total_price,
+        min_rating=min_rating,
+        min_hotel_class=min_hotel_class,
+        require_booking_token=require_booking_token,
+    )
 
 
 def fetch_hotel_prices(

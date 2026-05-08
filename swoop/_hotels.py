@@ -97,6 +97,7 @@ HOTEL_BRAND_FILTERS = {
     "accor_live_limitless": [[33, [8, 84]]],
     "best_western_international": [[18, [155, 104, 105, 254, 255, 107]]],
     "choice_hotels": [[20, [63, 112, 27, 113, 82, 78, 23]]],
+    "extended_stay_america": [[446, [444]]],
     "four_seasons": [[289]],
     "hilton_honors": [[28, [7, 151, 81, 88, 115, 71, 95, 54, 36, 77, 295, 285, 286, 41]]],
     "hyatt": [[37, [116, 412, 288, 119, 120, 121, 122, 349, 118, 346, 262]]],

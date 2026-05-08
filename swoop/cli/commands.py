@@ -53,6 +53,7 @@ HOTEL_BRAND_CHOICES = [
     "accor-live-limitless",
     "best-western-international",
     "choice-hotels",
+    "extended-stay-america",
     "four-seasons",
     "hilton-honors",
     "hyatt",

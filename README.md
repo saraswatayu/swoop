@@ -420,7 +420,7 @@ Search Google Travel Hotels and return a `HotelSearchResult`.
 | `hotel_classes` | `list[int] \| None` | `None` | Exact server-side hotel class filters (`2`, `3`, `4`, `5`) |
 | `amenities` | `list[str] \| None` | `None` | Server-side amenity filters: `"free_parking"`, `"parking"`, `"indoor_pool"`, `"outdoor_pool"`, `"pool"`, `"fitness_center"`, `"restaurant"`, `"free_breakfast"`, `"spa"`, `"beach_access"`, `"kid_friendly"`, `"bar"`, `"pet_friendly"`, `"room_service"`, `"free_wifi"`, `"air_conditioned"`, `"all_inclusive_available"`, `"wheelchair_accessible"`, `"ev_charger"` |
 | `property_types` | `list[str] \| None` | `None` | Server-side property type filters: `"beach_hotels"`, `"boutique_hotels"`, `"hostels"`, `"inns"`, `"motels"`, `"resorts"`, `"spa_hotels"`, `"bed_and_breakfasts"`, `"other"`, `"apartment_hotels"` |
-| `brands` | `list[str] \| None` | `None` | Captured server-side brand filters such as `"hilton_honors"`, `"marriott_bonvoy"`, `"ihg_hotels_resorts"`, `"hyatt"`, `"choice_hotels"`, `"wyndham_hotels_resorts"` |
+| `brands` | `list[str] \| None` | `None` | Captured server-side brand filters such as `"hilton_honors"`, `"marriott_bonvoy"`, `"ihg_hotels_resorts"`, `"hyatt"`, `"choice_hotels"`, `"extended_stay_america"`, `"wyndham_hotels_resorts"` |
 | `has_pool` | `bool` | `False` | Request hotels with a pool |
 | `free_cancellation` | `bool` | `False` | Request hotels with free cancellation offers |
 | `special_offers` | `bool` | `False` | Request hotels with special offers |

@@ -409,17 +409,17 @@ Search Google Travel Hotels and return a `HotelSearchResult`.
 | `child_ages` | `list[int] \| None` | `None` | Ages for child guests |
 | `rooms` | `int` | `1` | Room count |
 | `currency` | `str` | `"USD"` | Requested ISO 4217 currency |
-| `sort_by` | `str` | `"default"` | Client-side sort for returned cards: `"default"`, `"price"`, `"total-price"`, `"rating"`, `"class"`, or `"name"` |
-| `min_price` / `max_price` | `int \| None` | `None` | Client-side nightly price bounds for returned cards |
-| `min_total_price` / `max_total_price` | `int \| None` | `None` | Client-side total stay price bounds for returned cards |
-| `min_rating` | `float \| None` | `None` | Client-side minimum Google rating |
-| `min_hotel_class` | `int \| None` | `None` | Client-side minimum hotel class/star count |
+| `sort_by` | `str` | `"default"` | Sort for returned cards: `"default"`, `"price"`, `"total-price"`, `"rating"`, `"class"`, or `"name"` |
+| `min_price` / `max_price` | `int \| None` | `None` | Nightly price bounds for returned cards |
+| `min_total_price` / `max_total_price` | `int \| None` | `None` | Total stay price bounds for returned cards |
+| `min_rating` | `float \| None` | `None` | Minimum Google rating |
+| `min_hotel_class` | `int \| None` | `None` | Minimum hotel class/star count |
 | `require_booking_token` | `bool` | `False` | Keep only returned cards with provider pricing/review tokens |
 | `include_booking_tokens` | `bool` | `False` | Run exact hotel follow-up searches to attach provider pricing/review tokens to broad result cards |
 | `token_enrichment_limit` | `int \| None` | `None` | Maximum number of hotel cards to enrich when token enrichment is enabled |
 | `transport` | `TransportConfig` | `TransportConfig()` | HTTP transport configuration |
 
-Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Hotel sort/filter controls are applied to the cards Google returns to swoop; when `is_complete=False`, they should be read as filters over a partial result set.
+Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Swoop uses captured Google Hotels filter payloads for supported quick filters (`max_price`, `min_rating >= 4`, `min_hotel_class >= 4`) and applies a final local filter/sort pass to the returned cards. When `is_complete=False`, results should still be read as a filtered partial set.
 
 ### `hotel_prices(hotel_token, **kwargs)`
 

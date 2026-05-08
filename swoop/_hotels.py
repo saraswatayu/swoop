@@ -46,6 +46,8 @@ HOTEL_SORT_VALUES = {
     HOTEL_SORT_NAME,
 }
 
+HOTEL_FILTER_MIN_RATING_4 = 8
+
 
 def _safe_get(data: Any, path: list[Any], default: Any = None) -> Any:
     current = data
@@ -205,6 +207,117 @@ def _extract_browser_params(page_html: str) -> dict[str, str]:
     return params
 
 
+def _extract_af_init_data(page_html: str) -> list[tuple[str, list[Any]]]:
+    """Extract JSON payloads embedded in AF_initDataCallback blocks."""
+    blocks: list[tuple[str, list[Any]]] = []
+    pattern = re.compile(
+        r"AF_initDataCallback\(\{key:\s*['\"]([^'\"]+)['\"].*?\bdata\s*:",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(page_html):
+        index = match.end()
+        while index < len(page_html) and page_html[index].isspace():
+            index += 1
+        if index >= len(page_html) or page_html[index] not in "[{":
+            continue
+
+        start = index
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(page_html)):
+            char = page_html[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char in "[{":
+                depth += 1
+            elif char in "]}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        payload = json.loads(page_html[start:index + 1])
+                    except json.JSONDecodeError:
+                        logger.debug("Failed to parse AF_initData block %s", match.group(1), exc_info=True)
+                        break
+                    if isinstance(payload, list):
+                        blocks.append((match.group(1), payload))
+                    break
+    return blocks
+
+
+def _page_payload_matches_request(
+    data: list[Any],
+    *,
+    check_in: str,
+    check_out: str,
+    currency: str,
+) -> bool:
+    context = _extract_context_from_universal(data)
+    context_currency = context.get("currency")
+    if isinstance(context_currency, str) and context_currency != currency:
+        return False
+
+    m0crd_context = context.get("m0crd_context")
+    if not isinstance(m0crd_context, list):
+        return False
+
+    dates = _safe_get(m0crd_context, [4])
+    return (
+        _safe_get(dates, [0]) == _date_triplet(check_in)
+        and _safe_get(dates, [1]) == _date_triplet(check_out)
+    )
+
+
+def _parse_hotels_page_html(
+    page_html: str,
+    *,
+    query: str,
+    check_in: str,
+    check_out: str,
+    currency: str,
+) -> Optional[HotelSearchResult]:
+    """Parse server-rendered Google Hotels cards when they match the request."""
+    best: Optional[HotelSearchResult] = None
+    for _, data in _extract_af_init_data(page_html):
+        if not _page_payload_matches_request(
+            data,
+            check_in=check_in,
+            check_out=check_out,
+            currency=currency,
+        ):
+            continue
+        result = parse_hotels_payload(
+            data,
+            query=query,
+            currency=currency,
+            is_complete=False,
+        )
+        if best is None or len(result.hotels) > len(best.hotels):
+            best = result
+    return best
+
+
+def _prefer_page_result(
+    primary: HotelSearchResult,
+    page_result: Optional[HotelSearchResult],
+) -> HotelSearchResult:
+    if (
+        page_result is not None
+        and not primary.is_complete
+        and len(page_result.hotels) > len(primary.hotels)
+    ):
+        return page_result
+    return primary
+
+
 def _travel_rpc_url(
     rpc_id: str,
     *,
@@ -302,6 +415,75 @@ def _build_universal_search_payload(
         [],
         [],
     ]
+
+
+def _build_filtered_universal_search_payload(
+    query: str,
+    context: dict[str, Any],
+    *,
+    check_in: str,
+    check_out: str,
+    adults: int = 2,
+    child_ages: Optional[list[int]] = None,
+    rooms: int = 1,
+    currency: str = "USD",
+    max_price: Optional[int] = None,
+    min_rating: Optional[float] = None,
+    min_hotel_class: Optional[int] = None,
+) -> Optional[list[Any]]:
+    place_id = context.get("place_id")
+    destination_name = context.get("destination_name")
+    entity_id = context.get("entity_id")
+    if not isinstance(place_id, str):
+        return None
+
+    currency_filter: list[Any] = [None, None, None, None, None, None, currency]
+    if min_hotel_class is not None and min_hotel_class >= 4:
+        currency_filter[1] = list(range(min_hotel_class, 6))
+
+    price_filter: list[Any] = [None, None, 1]
+    if max_price is not None:
+        price_filter[1] = [None, max_price]
+
+    filter_block: list[Any] = [currency_filter, None, [], price_filter]
+    if min_rating is not None and min_rating >= 4:
+        filter_block.append(HOTEL_FILTER_MIN_RATING_4)
+
+    destination = [place_id, None, None, None, None, entity_id, destination_name]
+    return [
+        query,
+        [
+            1,
+            _build_occupancy(adults, child_ages, 0),
+            [
+                [None, [destination], []],
+                [
+                    None,
+                    [_date_triplet(check_in), _date_triplet(check_out), rooms],
+                    None,
+                    None,
+                    None,
+                    [None, 0],
+                ],
+            ],
+            None,
+            filter_block,
+        ],
+        [1, None, None, None, None, None, 13, None, 0],
+    ]
+
+
+def _should_use_server_hotel_filters(
+    *,
+    max_price: Optional[int] = None,
+    min_rating: Optional[float] = None,
+    min_hotel_class: Optional[int] = None,
+) -> bool:
+    return (
+        max_price is not None
+        or (min_rating is not None and min_rating >= 4)
+        or (min_hotel_class is not None and min_hotel_class >= 4)
+    )
 
 
 def _extract_context_from_universal(data: list[Any]) -> dict[str, Any]:
@@ -922,8 +1104,15 @@ def fetch_hotels(
 ) -> HotelSearchResult:
     """Fetch Google Travel hotel search results."""
     client = _get_client(transport.proxy, transport.impersonate)
+    page_params = {
+        "q": query,
+        "check_in_date": check_in,
+        "check_out_date": check_out,
+        "adults": adults,
+        "currency": currency,
+    }
     page_url = _apply_country(
-        f"{HOTELS_PAGE_URL}?{urllib.parse.urlencode({'q': query})}",
+        f"{HOTELS_PAGE_URL}?{urllib.parse.urlencode(page_params)}",
         transport.country,
     )
     page_res = client.get(
@@ -932,6 +1121,13 @@ def fetch_hotels(
         timeout=transport.timeout,
     )
     browser_params = _extract_browser_params(page_res.text)
+    page_result = _parse_hotels_page_html(
+        page_res.text,
+        query=query,
+        check_in=check_in,
+        check_out=check_out,
+        currency=currency,
+    )
 
     universal_payload = _build_universal_search_payload(
         query,
@@ -972,6 +1168,49 @@ def fetch_hotels(
             require_booking_token=require_booking_token,
         )
 
+    if _should_use_server_hotel_filters(
+        max_price=max_price,
+        min_rating=min_rating,
+        min_hotel_class=min_hotel_class,
+    ):
+        filtered_payload = _build_filtered_universal_search_payload(
+            query,
+            context,
+            check_in=check_in,
+            check_out=check_out,
+            adults=adults,
+            child_ages=child_ages,
+            rooms=rooms,
+            currency=currency,
+            max_price=max_price,
+            min_rating=min_rating,
+            min_hotel_class=min_hotel_class,
+        )
+        if filtered_payload is not None:
+            try:
+                filtered_data = _post_travel_rpc(
+                    client,
+                    UNIVERSAL_SEARCH_RPC,
+                    filtered_payload,
+                    page_url=page_url,
+                    browser_params=browser_params,
+                    transport=transport,
+                )
+            except (SwoopHTTPError, SwoopParseError, SwoopRateLimitError):
+                logger.debug("Hotel filtered search RPC failed", exc_info=True)
+            else:
+                filtered_result = parse_hotels_payload(
+                    filtered_data,
+                    query=query,
+                    currency=currency,
+                    destination_name=context.get("destination_name")
+                    if isinstance(context.get("destination_name"), str)
+                    else None,
+                    is_complete=False,
+                )
+                if filtered_result.hotels:
+                    seed_result = filtered_result
+
     results_payload = _build_hotels_results_payload(
         context,
         check_in=check_in,
@@ -982,6 +1221,7 @@ def fetch_hotels(
         currency=currency,
     )
     if results_payload is None:
+        seed_result = _prefer_page_result(seed_result, page_result)
         return _filter_and_sort_hotels(
             seed_result,
             sort_by=sort_by,
@@ -1005,6 +1245,7 @@ def fetch_hotels(
         )
     except SwoopParseError:
         logger.debug("Hotel results RPC did not return parseable results", exc_info=True)
+        seed_result = _prefer_page_result(seed_result, page_result)
         if include_booking_tokens:
             seed_result = _enrich_booking_tokens(
                 client,
@@ -1040,6 +1281,7 @@ def fetch_hotels(
         is_complete=True,
     )
     final_result = result if result.hotels else seed_result
+    final_result = _prefer_page_result(final_result, page_result)
     if include_booking_tokens:
         final_result = _enrich_booking_tokens(
             client,

@@ -10,14 +10,17 @@ from swoop._hotels import (
     HOTEL_REVIEWS_RPC,
     UNIVERSAL_SEARCH_RPC,
     _build_hotel_detail_payload,
+    _build_filtered_universal_search_payload,
     _build_hotels_results_payload,
     _build_reviews_payload,
     _build_universal_search_payload,
     _encode_travel_f_req,
     _extract_context_from_universal,
+    _extract_af_init_data,
     _filter_and_sort_hotels,
     _merge_seed_hotel,
     _parse_batchexecute_response,
+    _parse_hotels_page_html,
     parse_hotel_prices_payload,
     parse_hotel_reviews_payload,
     parse_hotels_payload,
@@ -30,6 +33,13 @@ def _batchexecute(rpc_id: str, inner: list[object]) -> str:
     payload = [["wrb.fr", rpc_id, json.dumps(inner), None, None, [], "generic"]]
     line = json.dumps(payload)
     return f")]}}'\n\n{len(line)}\n{line}\n"
+
+
+def _af_init_data(key: str, payload: list[object]) -> str:
+    return (
+        "<script>AF_initDataCallback({key: "
+        f"{key!r}, hash: '1', data:{json.dumps(payload)}, sideChannel: {{}}}});</script>"
+    )
 
 
 def _price(label: str, amount: int) -> list[object]:
@@ -123,6 +133,24 @@ def _broad_universal_payload() -> list[object]:
     return [None, root, None]
 
 
+def _filtered_class_payload() -> list[object]:
+    root: list[object] = [None] * 8
+    root[1] = "New York"
+    root[5] = ["/m/02_286", None, None, None, None, "0x89c24fa5d33f083b:0xc80b8f06e177fe62"]
+    root[7] = {
+        "404340221": [_context()],
+        "hotel_b": _raw_hotel_without_token(
+            "Second Test Hotel",
+            "0x89c2f6246837073b:0x0000000000000002",
+            nightly=120,
+            total=240,
+            rating=3.8,
+            hotel_class=4,
+        ),
+    }
+    return [None, root, None]
+
+
 def test_encode_travel_f_req_roundtrips():
     encoded = _encode_travel_f_req(UNIVERSAL_SEARCH_RPC, ["New York"])
     outer = json.loads(urllib.parse.unquote(encoded))
@@ -172,6 +200,35 @@ def test_extract_context_and_build_results_payload():
     assert payload[1][18][1] == "New York"
 
 
+def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
+    context = _extract_context_from_universal(_broad_universal_payload())
+
+    payload = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        adults=2,
+        rooms=1,
+        currency="USD",
+        max_price=150,
+        min_rating=4,
+        min_hotel_class=4,
+    )
+
+    assert payload is not None
+    assert payload[1][2][0][1][0][0] == "/m/02_286"
+    assert payload[1][2][1][1] == [[2026, 6, 1], [2026, 6, 3], 1]
+    assert payload[1][4] == [
+        [None, [4, 5], None, None, None, None, "USD"],
+        None,
+        [],
+        [None, [None, 150], 1],
+        8,
+    ]
+    assert payload[2] == [1, None, None, None, None, None, 13, None, 0]
+
+
 def test_parse_hotels_payload_extracts_hotel_cards():
     payload = [None, None, None, None, None, [None] * 10]
     payload[5][9] = [[1, {"179305178": _raw_hotel()}]]
@@ -200,6 +257,41 @@ def test_parse_hotels_payload_attaches_selected_hotel_token_to_single_result():
 
     assert len(result.hotels) == 1
     assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
+
+
+def test_extract_af_init_data_extracts_server_rendered_payloads():
+    html = _af_init_data("ds:0", _broad_universal_payload())
+
+    blocks = _extract_af_init_data(html)
+
+    assert blocks == [("ds:0", _broad_universal_payload())]
+
+
+def test_parse_hotels_page_html_requires_matching_dates_and_currency():
+    html = _af_init_data("ds:0", _broad_universal_payload())
+
+    result = _parse_hotels_page_html(
+        html,
+        query="New York",
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+    )
+    stale_result = _parse_hotels_page_html(
+        html,
+        query="New York",
+        check_in="2026-06-02",
+        check_out="2026-06-04",
+        currency="USD",
+    )
+
+    assert result is not None
+    assert result.is_complete is False
+    assert [hotel.name for hotel in result.hotels] == [
+        "HI New York City Hostel",
+        "Second Test Hotel",
+    ]
+    assert stale_result is None
 
 
 def test_build_hotel_detail_payload_uses_token_and_entity_filter():
@@ -334,6 +426,53 @@ def test_fetch_hotels_can_enrich_broad_results_with_booking_tokens(monkeypatch):
     assert result.hotels[0].booking_token == "ChgI5MyhnoKIv-7JARoLL2cvMXdrN3J0MmIQAQ"
     assert result.hotels[1].booking_token is None
     assert client.queries == ["New York", "HI New York City Hostel"]
+
+
+def test_fetch_hotels_uses_captured_server_filter_payload(monkeypatch):
+    class Response:
+        def __init__(self, text: str):
+            self.status_code = 200
+            self.text = text
+
+    class Client:
+        def __init__(self):
+            self.payloads = []
+
+        def get(self, *args, **kwargs):
+            return Response('"cfb2h":"bl-test","FdrFJe":"sid-test"')
+
+        def post(self, url, *, content, headers, timeout):
+            parsed = urllib.parse.parse_qs(content.decode())
+            outer = json.loads(urllib.parse.unquote(parsed["f.req"][0]))
+            rpc_id = outer[0][0][0]
+            payload = json.loads(outer[0][0][1])
+            self.payloads.append((rpc_id, payload))
+            if (
+                rpc_id == UNIVERSAL_SEARCH_RPC
+                and len(payload) > 2
+                and isinstance(payload[2], list)
+                and payload[2]
+                and payload[2][0] == 1
+            ):
+                return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _filtered_class_payload()))
+            if rpc_id == UNIVERSAL_SEARCH_RPC:
+                return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _broad_universal_payload()))
+            return Response("not-json")
+
+    client = Client()
+    monkeypatch.setattr("swoop._hotels._get_client", lambda *args: client)
+
+    result = fetch_hotels(
+        "New York",
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        min_hotel_class=4,
+    )
+
+    assert [hotel.name for hotel in result.hotels] == ["Second Test Hotel"]
+    filtered_payload = client.payloads[1][1]
+    assert filtered_payload[1][4][0][1] == [4, 5]
+    assert filtered_payload[2][0] == 1
 
 
 def test_filter_and_sort_hotels_applies_client_side_controls():

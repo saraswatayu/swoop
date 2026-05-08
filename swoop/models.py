@@ -353,6 +353,52 @@ class DealsDiff:
 
 
 @dataclass
+class ExploreDestination:
+    """A destination recommendation from Google Flights Explore."""
+
+    place_id: str
+    name: str
+    country: str
+    latitude: Optional[float]
+    longitude: Optional[float]
+    airport_code: Optional[str]
+    departure_date: Optional[str]
+    return_date: Optional[str]
+    image_url: Optional[str] = None
+    secondary_image_url: Optional[str] = None
+    distance: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    parent_place_id: Optional[str] = None
+
+    def __repr__(self) -> str:
+        parts = [self.name]
+        if self.airport_code:
+            parts.append(self.airport_code)
+        if self.departure_date:
+            parts.append(self.departure_date)
+        return f"ExploreDestination({' '.join(parts)})"
+
+
+@dataclass
+class ExploreResult:
+    """Result of a Google Flights Explore destination query."""
+
+    destinations: list[ExploreDestination] = field(default_factory=list)
+    origin: str = ""
+    origin_name: Optional[str] = None
+    origin_place_id: Optional[str] = None
+    origin_latitude: Optional[float] = None
+    origin_longitude: Optional[float] = None
+
+    def __repr__(self) -> str:
+        n = len(self.destinations)
+        parts = [f"{n} destination{'s' if n != 1 else ''}"]
+        if self.origin:
+            parts.append(f"from {self.origin}")
+        return f"ExploreResult({', '.join(parts)})"
+
+
+@dataclass
 class PriceResult:
     """Result of a targeted price check for a specific trip.
 

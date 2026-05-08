@@ -40,7 +40,7 @@ from .decoder import (
 from ._regions import Region
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
-from .models import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -903,6 +903,46 @@ def deals(
     return result
 
 
+# ---------------------------------------------------------------------------
+# explore() — discover flexible destination ideas from an origin airport.
+# ---------------------------------------------------------------------------
+
+
+def explore(
+    origin: str,
+    *,
+    cabin: CabinClass = "economy",
+    max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
+    transport: TransportConfig = TransportConfig(),
+) -> ExploreResult:
+    """Discover flexible destination ideas from Google Flights Explore.
+
+    Args:
+        origin: Origin airport IATA code (e.g. ``"JFK"``).
+        cabin: Cabin class (default ``"economy"``).
+        max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
+        passengers: Passenger counts (default ``Passengers()``).
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        An :class:`ExploreResult` containing destination recommendations.
+    """
+    validate_iata_code(origin, "origin")
+    validate_cabin(cabin)
+    validate_adults(passengers.adults)
+
+    from ._explore import fetch_explore
+
+    return fetch_explore(
+        origin,
+        cabin=cabin,
+        max_stops=max_stops,
+        passengers=passengers,
+        transport=transport,
+    )
+
+
 __all__ = [
     # Functions
     "search",
@@ -915,6 +955,7 @@ __all__ = [
     "price_deal",
     "watch_deals",
     "diff_deals",
+    "explore",
     "get_booking_results",
     "search_raw",
     "set_country",
@@ -928,6 +969,8 @@ __all__ = [
     "DealsResult",
     "PriceChange",
     "Region",
+    "ExploreDestination",
+    "ExploreResult",
     "Passengers",
     "TransportConfig",
     "PriceResult",

@@ -28,3 +28,8 @@ htmlcov/
 
 # examples/price_drop_watcher.py cache (written to CWD)
 .swoop-watch-cache.json
+
+# Local reverse-engineering captures
+references/google-flights/explore/
+scripts/capture_explore.py
+scripts/capture_explore_browser.mjs

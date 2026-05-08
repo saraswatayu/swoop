@@ -882,3 +882,89 @@ def deals_cmd(
         format_deals_csv(result, limit=limit)
     elif output_format == "brief":
         format_deals_brief(result, limit=limit)
+
+
+@click.command("explore")
+@click.argument("origin", type=IATA_CODE)
+@click.option("-c", "--cabin", type=click.Choice(CABIN_CHOICES, case_sensitive=False),
+              default="economy", show_default=True, help="Cabin class.")
+@click.option("-n", "--nonstop", is_flag=True, default=False, help="Nonstop flights only.")
+@click.option("--max-stops", type=click.IntRange(0, 2), default=None, help="Max stops (0, 1, or 2).")
+@click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
+@click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
+@click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
+@click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
+@click.option("-l", "--limit", type=int, default=None, help="Max destinations to display.")
+@_output_options(["table", "json", "csv", "brief"])
+@click.pass_context
+def explore_cmd(
+    ctx, origin, cabin, nonstop, max_stops, passengers,
+    country, proxy, timeout, retries,
+    limit, output_format, no_color, quiet, verbose,
+):
+    """Discover flexible destinations from Google Flights Explore.
+
+    \b
+    Examples:
+      swoop explore JFK
+      swoop explore JFK --nonstop --cabin business
+      swoop explore JFK -o json -q | jq '.destinations[0]'
+    """
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+
+    from .formatters import (
+        format_explore_brief,
+        format_explore_csv,
+        format_explore_json,
+        format_explore_table,
+    )
+
+    import swoop
+
+    err = _err_console(no_color)
+
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
+
+    stops = max_stops
+    if nonstop:
+        stops = 0
+
+    pax = swoop.Passengers(adults=passengers)
+    transport = swoop.TransportConfig(
+        timeout=timeout, retries=retries, country=country, proxy=proxy,
+    )
+
+    spinner = err.status("[bold]Searching Explore...[/bold]") if (not quiet and output_format == "table") else nullcontext()
+    with spinner:
+        try:
+            result = swoop.explore(
+                origin, cabin=cabin, max_stops=stops,
+                passengers=pax, transport=transport,
+            )
+        except ValueError as e:
+            err.print(f"[red]Error: {e}[/red]")
+            ctx.exit(2)
+        except SwoopRateLimitError:
+            err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+            ctx.exit(3)
+        except SwoopHTTPError as e:
+            err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
+            ctx.exit(3)
+        except SwoopParseError:
+            err.print("[red]Could not parse Google Flights response[/red]")
+            ctx.exit(4)
+
+    if not result.destinations:
+        err.print(f"[yellow]No destinations found from {origin}.[/yellow]")
+        ctx.exit(1)
+
+    if output_format == "table":
+        format_explore_table(result, cabin=cabin, no_color=no_color, limit=limit)
+    elif output_format == "json":
+        format_explore_json(result, cabin=cabin, limit=limit)
+    elif output_format == "csv":
+        format_explore_csv(result, limit=limit)
+    elif output_format == "brief":
+        format_explore_brief(result, limit=limit)

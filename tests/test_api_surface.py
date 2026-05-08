@@ -10,7 +10,7 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -46,6 +46,7 @@ class TestFrozenExports:
         "price_deal",
         "watch_deals",
         "diff_deals",
+        "explore",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -59,6 +60,8 @@ class TestFrozenExports:
         "DealsResult",
         "PriceChange",
         "Region",
+        "ExploreDestination",
+        "ExploreResult",
         "Passengers",
         "TransportConfig",
         "PriceResult",
@@ -312,6 +315,22 @@ class TestFrozenDataclassFields:
         dr = DealsResult()
         assert dr.currency is None
 
+    def test_explore_destination_fields(self):
+        expected = {
+            "place_id", "name", "country", "latitude", "longitude",
+            "airport_code", "departure_date", "return_date",
+            "image_url", "secondary_image_url", "distance",
+            "duration_minutes", "parent_place_id",
+        }
+        assert self._field_names(ExploreDestination) == expected
+
+    def test_explore_result_fields(self):
+        expected = {
+            "destinations", "origin", "origin_name", "origin_place_id",
+            "origin_latitude", "origin_longitude",
+        }
+        assert self._field_names(ExploreResult) == expected
+
 
 class TestSearchSignature:
     """Verify search() accepts the expected parameters."""
@@ -400,6 +419,12 @@ class TestSearchSignature:
             # Transport
             "transport",
         ]
+        assert param_names == expected
+
+    def test_explore_params(self):
+        sig = inspect.signature(swoop.explore)
+        param_names = list(sig.parameters.keys())
+        expected = ["origin", "cabin", "max_stops", "passengers", "transport"]
         assert param_names == expected
 
 

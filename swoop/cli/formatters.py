@@ -960,3 +960,158 @@ def format_deals_brief(
         dates = _deals_date_range(d)
         airline_label = ", ".join(d.airline_names) or ", ".join(d.airlines)
         print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {airline_label}")
+
+# ---------------------------------------------------------------------------
+# Explore formatters
+# ---------------------------------------------------------------------------
+
+
+def _explore_date_range(destination) -> str:
+    """Format Explore suggested dates compactly."""
+    dep = destination.departure_date
+    ret = destination.return_date
+    if not dep:
+        return "\u2014"
+    try:
+        from datetime import date as _date
+        d = _date.fromisoformat(dep)
+        dep_str = d.strftime("%b %-d")
+    except (ValueError, TypeError):
+        dep_str = dep
+    if not ret:
+        return dep_str
+    try:
+        r = _date.fromisoformat(ret)
+        if d.month == r.month:
+            ret_str = str(r.day)
+        else:
+            ret_str = r.strftime("%b %-d")
+    except (ValueError, TypeError):
+        ret_str = ret
+    return f"{dep_str}\u2013{ret_str}"
+
+
+def format_explore_table(
+    result,
+    *,
+    cabin: str = "economy",
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render Explore destinations as a Rich table to stdout."""
+    console = _stdout_console(no_color=no_color)
+    destinations = list(result.destinations[:limit]) if limit else list(result.destinations)
+
+    table = Table(title=f"Explore from {result.origin} ({cabin})", show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Destination", min_width=22)
+    table.add_column("Airport", width=8)
+    table.add_column("Dates", min_width=12)
+    table.add_column("Distance", justify="right")
+    table.add_column("Duration", justify="right")
+
+    for i, destination in enumerate(destinations, 1):
+        place = destination.name
+        if destination.country:
+            place += f", {destination.country}"
+        duration = format_duration(destination.duration_minutes) if destination.duration_minutes else "\u2014"
+        table.add_row(
+            str(i),
+            place,
+            destination.airport_code or "\u2014",
+            _explore_date_range(destination),
+            destination.distance or "\u2014",
+            duration,
+        )
+
+    console.print(table)
+
+
+def format_explore_json(
+    result,
+    *,
+    cabin: str = "economy",
+    limit: Optional[int] = None,
+) -> None:
+    """Render Explore destinations as JSON to stdout."""
+    destinations = list(result.destinations[:limit]) if limit else list(result.destinations)
+    output = {
+        "query": {"origin": result.origin, "cabin": cabin},
+        "origin": {
+            "code": result.origin,
+            "name": result.origin_name,
+            "place_id": result.origin_place_id,
+            "latitude": result.origin_latitude,
+            "longitude": result.origin_longitude,
+        },
+        "total_destinations": len(result.destinations),
+        "destinations": [
+            {
+                "index": i,
+                "place_id": d.place_id,
+                "name": d.name,
+                "country": d.country,
+                "latitude": d.latitude,
+                "longitude": d.longitude,
+                "airport_code": d.airport_code,
+                "departure_date": d.departure_date,
+                "return_date": d.return_date,
+                "image_url": d.image_url,
+                "secondary_image_url": d.secondary_image_url,
+                "distance": d.distance,
+                "duration_minutes": d.duration_minutes,
+                "parent_place_id": d.parent_place_id,
+            }
+            for i, d in enumerate(destinations, 1)
+        ],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_explore_csv(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render Explore destinations as CSV to stdout."""
+    # CSV-injection guard: spreadsheet apps treat a cell beginning with
+    # =, +, -, @, tab, or CR as a formula. Place names/countries come from
+    # Google's RPC opaquely, so prefix any such value with a quote to
+    # neutralize it while keeping the cell human-readable.
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value) -> str:
+        if value is None or value == "":
+            return ""
+        text = str(value)
+        if text.startswith(_DANGEROUS_PREFIXES):
+            return "'" + text
+        return text
+
+    destinations = list(result.destinations[:limit]) if limit else list(result.destinations)
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "place_id", "name", "country", "latitude", "longitude",
+        "airport_code", "departure_date", "return_date",
+        "distance", "duration_minutes", "parent_place_id",
+    ])
+    for d in destinations:
+        writer.writerow([
+            _s(d.place_id), _s(d.name), _s(d.country), d.latitude or "", d.longitude or "",
+            _s(d.airport_code), _s(d.departure_date), _s(d.return_date),
+            _s(d.distance), d.duration_minutes or "", _s(d.parent_place_id),
+        ])
+
+
+def format_explore_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render Explore destinations in compact one-line-per-destination format."""
+    destinations = list(result.destinations[:limit]) if limit else list(result.destinations)
+    for i, d in enumerate(destinations, 1):
+        airport = d.airport_code or "\u2014"
+        dates = _explore_date_range(d)
+        duration = format_duration(d.duration_minutes) if d.duration_minutes else "\u2014"
+        print(f"{i:3d}  {airport:4s}  {d.name:<28s} {dates:>12s}  {duration:>8s}  {d.distance or ''}")

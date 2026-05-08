@@ -47,6 +47,8 @@ HOTEL_SORT_VALUES = {
 }
 
 HOTEL_FILTER_MIN_RATING_4 = 8
+HOTEL_SORT_CODE_PRICE = 3
+HOTEL_SORT_CODE_RATING = 8
 
 
 def _safe_get(data: Any, path: list[Any], default: Any = None) -> Any:
@@ -427,6 +429,7 @@ def _build_filtered_universal_search_payload(
     child_ages: Optional[list[int]] = None,
     rooms: int = 1,
     currency: str = "USD",
+    sort_by: str = HOTEL_SORT_DEFAULT,
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
@@ -440,6 +443,10 @@ def _build_filtered_universal_search_payload(
     currency_filter: list[Any] = [None, None, None, None, None, None, currency]
     if min_hotel_class is not None and min_hotel_class >= 4:
         currency_filter[1] = list(range(min_hotel_class, 6))
+    if sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE}:
+        currency_filter[4] = HOTEL_SORT_CODE_PRICE
+    elif sort_by == HOTEL_SORT_RATING:
+        currency_filter[4] = HOTEL_SORT_CODE_RATING
 
     price_filter: list[Any] = [None, None, 1]
     if max_price is not None:
@@ -473,14 +480,16 @@ def _build_filtered_universal_search_payload(
     ]
 
 
-def _should_use_server_hotel_filters(
+def _should_use_server_hotel_controls(
     *,
+    sort_by: str = HOTEL_SORT_DEFAULT,
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
 ) -> bool:
     return (
-        max_price is not None
+        sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE, HOTEL_SORT_RATING}
+        or max_price is not None
         or (min_rating is not None and min_rating >= 4)
         or (min_hotel_class is not None and min_hotel_class >= 4)
     )
@@ -1168,7 +1177,8 @@ def fetch_hotels(
             require_booking_token=require_booking_token,
         )
 
-    if _should_use_server_hotel_filters(
+    if _should_use_server_hotel_controls(
+        sort_by=sort_by,
         max_price=max_price,
         min_rating=min_rating,
         min_hotel_class=min_hotel_class,
@@ -1182,6 +1192,7 @@ def fetch_hotels(
             child_ages=child_ages,
             rooms=rooms,
             currency=currency,
+            sort_by=sort_by,
             max_price=max_price,
             min_rating=min_rating,
             min_hotel_class=min_hotel_class,

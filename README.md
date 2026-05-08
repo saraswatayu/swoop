@@ -419,7 +419,7 @@ Search Google Travel Hotels and return a `HotelSearchResult`.
 | `token_enrichment_limit` | `int \| None` | `None` | Maximum number of hotel cards to enrich when token enrichment is enabled |
 | `transport` | `TransportConfig` | `TransportConfig()` | HTTP transport configuration |
 
-Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Swoop uses captured Google Hotels filter payloads for supported quick filters (`max_price`, `min_rating >= 4`, `min_hotel_class >= 4`) and applies a final local filter/sort pass to the returned cards. When `is_complete=False`, results should still be read as a filtered partial set.
+Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Swoop uses captured Google Hotels payloads for supported server-side controls (`sort_by="price"`, `sort_by="total-price"`, `sort_by="rating"`, `max_price`, `min_rating >= 4`, `min_hotel_class >= 4`) and applies a final local filter/sort pass to the returned cards. When `is_complete=False`, results should still be read as a filtered partial set.
 
 ### `hotel_prices(hotel_token, **kwargs)`
 

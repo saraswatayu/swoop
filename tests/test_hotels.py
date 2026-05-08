@@ -229,6 +229,32 @@ def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
     assert payload[2] == [1, None, None, None, None, None, 13, None, 0]
 
 
+def test_build_filtered_universal_search_payload_uses_captured_sort_slots():
+    context = _extract_context_from_universal(_broad_universal_payload())
+
+    price_payload = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+        sort_by="price",
+    )
+    rating_payload = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+        sort_by="rating",
+    )
+
+    assert price_payload is not None
+    assert rating_payload is not None
+    assert price_payload[1][4][0][4] == 3
+    assert rating_payload[1][4][0][4] == 8
+
+
 def test_parse_hotels_payload_extracts_hotel_cards():
     payload = [None, None, None, None, None, [None] * 10]
     payload[5][9] = [[1, {"179305178": _raw_hotel()}]]

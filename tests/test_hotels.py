@@ -214,19 +214,51 @@ def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
         max_price=150,
         min_rating=4,
         min_hotel_class=4,
+        property_types=["hostels", "motels"],
+        has_pool=True,
+        free_cancellation=True,
+        special_offers=True,
+        eco_certified=True,
     )
 
     assert payload is not None
     assert payload[1][2][0][1][0][0] == "/m/02_286"
     assert payload[1][2][1][1] == [[2026, 6, 1], [2026, 6, 3], 1]
+    filter_block = payload[1][4]
+    assert filter_block[0][0] == [6]
+    assert filter_block[0][1] == [4, 5]
+    assert filter_block[0][3] == 1
+    assert filter_block[0][6] == "USD"
+    assert filter_block[0][9] == 1
+    assert filter_block[0][10] == [14, 16]
+    assert filter_block[1] is None
+    assert filter_block[2] == []
+    assert filter_block[3] == [None, [None, 150], 1]
+    assert filter_block[4] == 8
+    assert filter_block[5] == 1
+    assert payload[2] == [1, None, None, None, None, None, 13, None, 0]
+
+
+def test_build_filtered_universal_search_payload_omits_price_block_when_unneeded():
+    context = _extract_context_from_universal(_broad_universal_payload())
+
+    payload = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+        property_types=["resorts"],
+        free_cancellation=True,
+        eco_certified=True,
+    )
+
+    assert payload is not None
     assert payload[1][4] == [
-        [None, [4, 5], None, None, None, None, "USD"],
+        [None, None, None, 1, None, None, "USD", None, None, 1, [17]],
         None,
         [],
-        [None, [None, 150], 1],
-        8,
     ]
-    assert payload[2] == [1, None, None, None, None, None, 13, None, 0]
 
 
 def test_build_filtered_universal_search_payload_uses_captured_sort_slots():
@@ -499,6 +531,58 @@ def test_fetch_hotels_uses_captured_server_filter_payload(monkeypatch):
     filtered_payload = client.payloads[1][1]
     assert filtered_payload[1][4][0][1] == [4, 5]
     assert filtered_payload[2][0] == 1
+
+
+def test_fetch_hotels_returns_server_only_filtered_results_without_unfiltered_fallback(monkeypatch):
+    class Response:
+        def __init__(self, text: str):
+            self.status_code = 200
+            self.text = text
+
+    class Client:
+        def __init__(self):
+            self.payloads = []
+
+        def get(self, *args, **kwargs):
+            return Response('"cfb2h":"bl-test","FdrFJe":"sid-test"')
+
+        def post(self, url, *, content, headers, timeout):
+            parsed = urllib.parse.parse_qs(content.decode())
+            outer = json.loads(urllib.parse.unquote(parsed["f.req"][0]))
+            rpc_id = outer[0][0][0]
+            payload = json.loads(outer[0][0][1])
+            self.payloads.append((rpc_id, payload))
+            if (
+                rpc_id == UNIVERSAL_SEARCH_RPC
+                and len(payload) > 2
+                and isinstance(payload[2], list)
+                and payload[2]
+                and payload[2][0] == 1
+            ):
+                return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _filtered_class_payload()))
+            if rpc_id == UNIVERSAL_SEARCH_RPC:
+                return Response(_batchexecute(UNIVERSAL_SEARCH_RPC, _broad_universal_payload()))
+            raise AssertionError("server-only hotel filters must not request unfiltered results")
+
+    client = Client()
+    monkeypatch.setattr("swoop._hotels._get_client", lambda *args: client)
+
+    result = fetch_hotels(
+        "New York",
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        property_types=["hostels"],
+        has_pool=True,
+    )
+
+    assert [hotel.name for hotel in result.hotels] == ["Second Test Hotel"]
+    assert [rpc_id for rpc_id, _ in client.payloads] == [
+        UNIVERSAL_SEARCH_RPC,
+        UNIVERSAL_SEARCH_RPC,
+    ]
+    filtered_payload = client.payloads[1][1]
+    assert filtered_payload[1][4][0][0] == [6]
+    assert filtered_payload[1][4][0][10] == [14]
 
 
 def test_filter_and_sort_hotels_applies_client_side_controls():

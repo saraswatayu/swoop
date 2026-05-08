@@ -66,6 +66,9 @@ swoop hotels "New York" 2026-06-01 2026-06-03
 # Filter/sort returned hotel cards
 swoop hotels "New York" 2026-06-01 2026-06-03 --sort rating --min-rating 4 --max-total-price 500
 
+# Server-side hotel filters captured from Google Hotels
+swoop hotels "New York" 2026-06-01 2026-06-03 --pool --free-cancellation --property-type hostels
+
 # Enrich broad hotel cards with pricing/review tokens
 swoop hotels "New York" 2026-06-01 2026-06-03 --include-booking-tokens --token-enrichment-limit 3
 
@@ -414,12 +417,17 @@ Search Google Travel Hotels and return a `HotelSearchResult`.
 | `min_total_price` / `max_total_price` | `int \| None` | `None` | Total stay price bounds for returned cards |
 | `min_rating` | `float \| None` | `None` | Minimum Google rating |
 | `min_hotel_class` | `int \| None` | `None` | Minimum hotel class/star count |
+| `property_types` | `list[str] \| None` | `None` | Server-side property type filters: `"beach_hotels"`, `"boutique_hotels"`, `"hostels"`, `"inns"`, `"motels"`, `"resorts"`, `"spa_hotels"`, `"bed_and_breakfasts"`, `"other"`, `"apartment_hotels"` |
+| `has_pool` | `bool` | `False` | Request hotels with a pool |
+| `free_cancellation` | `bool` | `False` | Request hotels with free cancellation offers |
+| `special_offers` | `bool` | `False` | Request hotels with special offers |
+| `eco_certified` | `bool` | `False` | Request eco-certified hotels |
 | `require_booking_token` | `bool` | `False` | Keep only returned cards with provider pricing/review tokens |
 | `include_booking_tokens` | `bool` | `False` | Run exact hotel follow-up searches to attach provider pricing/review tokens to broad result cards |
 | `token_enrichment_limit` | `int \| None` | `None` | Maximum number of hotel cards to enrich when token enrichment is enabled |
 | `transport` | `TransportConfig` | `TransportConfig()` | HTTP transport configuration |
 
-Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Swoop uses captured Google Hotels payloads for supported server-side controls (`sort_by="price"`, `sort_by="total-price"`, `sort_by="rating"`, `max_price`, `min_rating >= 4`, `min_hotel_class >= 4`) and applies a final local filter/sort pass to the returned cards. When `is_complete=False`, results should still be read as a filtered partial set.
+Exact hotel queries can include `Hotel.booking_token`, which can be passed to `hotel_prices()` and `hotel_reviews()`. Swoop uses captured Google Hotels payloads for supported server-side controls (`sort_by="price"`, `sort_by="total-price"`, `sort_by="rating"`, `max_price`, `min_rating >= 4`, `min_hotel_class >= 4`, `property_types`, `has_pool`, `free_cancellation`, `special_offers`, and `eco_certified`) and applies a final local filter/sort pass to the returned cards. Server-only filters do not fall back to unfiltered result pages if Google's filtered RPC fails. When `is_complete=False`, results should still be read as a filtered partial set.
 
 ### `hotel_prices(hotel_token, **kwargs)`
 

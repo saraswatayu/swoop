@@ -1167,6 +1167,8 @@ class TestHotelsCommand:
             "--include-booking-tokens", "--token-enrichment-limit", "1",
             "--sort", "rating", "--min-rating", "4",
             "--max-total-price", "250", "--require-booking-token",
+            "--property-type", "hostels", "--pool", "--free-cancellation",
+            "--special-offers", "--eco-certified",
             "--child-age", "9", "-o", "json", "-q",
         ])
 
@@ -1184,6 +1186,11 @@ class TestHotelsCommand:
         assert kwargs["sort_by"] == "rating"
         assert kwargs["min_rating"] == 4.0
         assert kwargs["max_total_price"] == 250
+        assert kwargs["property_types"] == ["hostels"]
+        assert kwargs["has_pool"] is True
+        assert kwargs["free_cancellation"] is True
+        assert kwargs["special_offers"] is True
+        assert kwargs["eco_certified"] is True
         assert kwargs["require_booking_token"] is True
 
     @patch("swoop.hotels")

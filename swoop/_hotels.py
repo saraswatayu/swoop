@@ -49,6 +49,20 @@ HOTEL_SORT_VALUES = {
 HOTEL_FILTER_MIN_RATING_4 = 8
 HOTEL_SORT_CODE_PRICE = 3
 HOTEL_SORT_CODE_RATING = 8
+HOTEL_AMENITY_POOL = 6
+HOTEL_PROPERTY_TYPE_CODES = {
+    "beach_hotels": 12,
+    "boutique_hotels": 13,
+    "hostels": 14,
+    "inns": 15,
+    "motels": 16,
+    "resorts": 17,
+    "spa_hotels": 18,
+    "bed_and_breakfasts": 19,
+    "other": 20,
+    "apartment_hotels": 21,
+}
+HOTEL_PROPERTY_TYPE_VALUES = frozenset(HOTEL_PROPERTY_TYPE_CODES)
 
 
 def _safe_get(data: Any, path: list[Any], default: Any = None) -> Any:
@@ -433,6 +447,11 @@ def _build_filtered_universal_search_payload(
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    property_types: Optional[list[str]] = None,
+    has_pool: bool = False,
+    free_cancellation: bool = False,
+    special_offers: bool = False,
+    eco_certified: bool = False,
 ) -> Optional[list[Any]]:
     place_id = context.get("place_id")
     destination_name = context.get("destination_name")
@@ -440,21 +459,47 @@ def _build_filtered_universal_search_payload(
     if not isinstance(place_id, str):
         return None
 
+    def set_slot(items: list[Any], index: int, value: Any) -> None:
+        while len(items) <= index:
+            items.append(None)
+        items[index] = value
+
     currency_filter: list[Any] = [None, None, None, None, None, None, currency]
+    if has_pool:
+        currency_filter[0] = [HOTEL_AMENITY_POOL]
     if min_hotel_class is not None and min_hotel_class >= 4:
         currency_filter[1] = list(range(min_hotel_class, 6))
+    if free_cancellation:
+        currency_filter[3] = 1
     if sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE}:
         currency_filter[4] = HOTEL_SORT_CODE_PRICE
     elif sort_by == HOTEL_SORT_RATING:
         currency_filter[4] = HOTEL_SORT_CODE_RATING
+    if eco_certified:
+        set_slot(currency_filter, 9, 1)
+    if property_types:
+        set_slot(currency_filter, 10, [HOTEL_PROPERTY_TYPE_CODES[value] for value in property_types])
 
     price_filter: list[Any] = [None, None, 1]
     if max_price is not None:
         price_filter[1] = [None, max_price]
 
-    filter_block: list[Any] = [currency_filter, None, [], price_filter]
+    filter_block: list[Any] = [currency_filter, None, []]
+    if (
+        sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE, HOTEL_SORT_RATING}
+        or max_price is not None
+        or (min_rating is not None and min_rating >= 4)
+        or (min_hotel_class is not None and min_hotel_class >= 4)
+        or has_pool
+        or special_offers
+    ):
+        filter_block.append(price_filter)
     if min_rating is not None and min_rating >= 4:
+        while len(filter_block) <= 3:
+            filter_block.append(None)
         filter_block.append(HOTEL_FILTER_MIN_RATING_4)
+    if special_offers:
+        set_slot(filter_block, 5, 1)
 
     destination = [place_id, None, None, None, None, entity_id, destination_name]
     return [
@@ -486,12 +531,41 @@ def _should_use_server_hotel_controls(
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    property_types: Optional[list[str]] = None,
+    has_pool: bool = False,
+    free_cancellation: bool = False,
+    special_offers: bool = False,
+    eco_certified: bool = False,
 ) -> bool:
     return (
         sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE, HOTEL_SORT_RATING}
         or max_price is not None
         or (min_rating is not None and min_rating >= 4)
         or (min_hotel_class is not None and min_hotel_class >= 4)
+        or _has_server_only_hotel_controls(
+            property_types=property_types,
+            has_pool=has_pool,
+            free_cancellation=free_cancellation,
+            special_offers=special_offers,
+            eco_certified=eco_certified,
+        )
+    )
+
+
+def _has_server_only_hotel_controls(
+    *,
+    property_types: Optional[list[str]] = None,
+    has_pool: bool = False,
+    free_cancellation: bool = False,
+    special_offers: bool = False,
+    eco_certified: bool = False,
+) -> bool:
+    return bool(
+        property_types
+        or has_pool
+        or free_cancellation
+        or special_offers
+        or eco_certified
     )
 
 
@@ -1106,6 +1180,11 @@ def fetch_hotels(
     max_total_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    property_types: Optional[list[str]] = None,
+    has_pool: bool = False,
+    free_cancellation: bool = False,
+    special_offers: bool = False,
+    eco_certified: bool = False,
     require_booking_token: bool = False,
     include_booking_tokens: bool = False,
     token_enrichment_limit: Optional[int] = None,
@@ -1163,7 +1242,14 @@ def fetch_hotels(
         destination_name=context.get("destination_name") if isinstance(context.get("destination_name"), str) else None,
         is_complete=False,
     )
-    if context.get("hotel_token") and len(seed_result.hotels) == 1:
+    server_only_controls = _has_server_only_hotel_controls(
+        property_types=property_types,
+        has_pool=has_pool,
+        free_cancellation=free_cancellation,
+        special_offers=special_offers,
+        eco_certified=eco_certified,
+    )
+    if context.get("hotel_token") and len(seed_result.hotels) == 1 and not server_only_controls:
         seed_result.is_complete = True
         return _filter_and_sort_hotels(
             seed_result,
@@ -1182,6 +1268,11 @@ def fetch_hotels(
         max_price=max_price,
         min_rating=min_rating,
         min_hotel_class=min_hotel_class,
+        property_types=property_types,
+        has_pool=has_pool,
+        free_cancellation=free_cancellation,
+        special_offers=special_offers,
+        eco_certified=eco_certified,
     ):
         filtered_payload = _build_filtered_universal_search_payload(
             query,
@@ -1196,7 +1287,13 @@ def fetch_hotels(
             max_price=max_price,
             min_rating=min_rating,
             min_hotel_class=min_hotel_class,
+            property_types=property_types,
+            has_pool=has_pool,
+            free_cancellation=free_cancellation,
+            special_offers=special_offers,
+            eco_certified=eco_certified,
         )
+        filtered_result: Optional[HotelSearchResult] = None
         if filtered_payload is not None:
             try:
                 filtered_data = _post_travel_rpc(
@@ -1221,6 +1318,43 @@ def fetch_hotels(
                 )
                 if filtered_result.hotels:
                     seed_result = filtered_result
+        if server_only_controls:
+            if filtered_result is None or not filtered_result.hotels:
+                seed_result = HotelSearchResult(
+                    hotels=[],
+                    query=query,
+                    destination_name=context.get("destination_name")
+                    if isinstance(context.get("destination_name"), str)
+                    else None,
+                    currency=currency,
+                    is_complete=False,
+                )
+            if include_booking_tokens:
+                seed_result = _enrich_booking_tokens(
+                    client,
+                    seed_result,
+                    check_in=check_in,
+                    check_out=check_out,
+                    adults=adults,
+                    child_ages=child_ages,
+                    rooms=rooms,
+                    currency=currency,
+                    page_url=page_url,
+                    browser_params=browser_params,
+                    transport=transport,
+                    limit=token_enrichment_limit,
+                )
+            return _filter_and_sort_hotels(
+                seed_result,
+                sort_by=sort_by,
+                min_price=min_price,
+                max_price=max_price,
+                min_total_price=min_total_price,
+                max_total_price=max_total_price,
+                min_rating=min_rating,
+                min_hotel_class=min_hotel_class,
+                require_booking_token=require_booking_token,
+            )
 
     results_payload = _build_hotels_results_payload(
         context,

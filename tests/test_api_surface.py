@@ -420,7 +420,9 @@ class TestSearchSignature:
             "adults", "child_ages", "rooms", "currency",
             "sort_by", "min_price", "max_price",
             "min_total_price", "max_total_price",
-            "min_rating", "min_hotel_class", "require_booking_token",
+            "min_rating", "min_hotel_class", "property_types",
+            "has_pool", "free_cancellation", "special_offers", "eco_certified",
+            "require_booking_token",
             "include_booking_tokens", "token_enrichment_limit", "transport",
         ]
         assert param_names == expected

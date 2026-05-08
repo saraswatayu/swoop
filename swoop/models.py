@@ -131,6 +131,117 @@ class ResolvedLeg:
 
 
 @dataclass
+class HotelProvider:
+    """A bookable provider offer for a hotel stay."""
+
+    name: str
+    price: Optional[int] = None
+    total_price: Optional[int] = None
+    currency: Optional[str] = None
+    url: Optional[str] = None
+    logo_url: Optional[str] = None
+    provider_id: Optional[str] = None
+    room_name: Optional[str] = None
+    is_free_cancellation: Optional[bool] = None
+
+    def __repr__(self) -> str:
+        parts = [self.name]
+        if self.total_price is not None:
+            parts.append(f"total_price={self.total_price}")
+        elif self.price is not None:
+            parts.append(f"price={self.price}")
+        return f"HotelProvider({' '.join(parts)})"
+
+
+@dataclass
+class Hotel:
+    """A hotel result from Google Travel Hotels."""
+
+    hotel_id: str
+    name: str
+    price: Optional[int] = None
+    total_price: Optional[int] = None
+    currency: Optional[str] = None
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    hotel_class: Optional[int] = None
+    hotel_class_label: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    address: Optional[str] = None
+    image_url: Optional[str] = None
+    distance: Optional[str] = None
+    booking_token: Optional[str] = None
+    price_token: Optional[str] = None
+    place_id: Optional[str] = None
+    entity_id: Optional[str] = None
+    providers: list[HotelProvider] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        parts = [self.name]
+        if self.total_price is not None:
+            parts.append(f"total_price={self.total_price}")
+        elif self.price is not None:
+            parts.append(f"price={self.price}")
+        if self.rating is not None:
+            parts.append(f"rating={self.rating}")
+        return f"Hotel({' '.join(parts)})"
+
+
+@dataclass
+class HotelSearchResult:
+    """Result of a Google Travel Hotels search."""
+
+    hotels: list[Hotel] = field(default_factory=list)
+    query: str = ""
+    destination_name: Optional[str] = None
+    currency: Optional[str] = None
+    is_complete: bool = True
+
+    def __repr__(self) -> str:
+        n = len(self.hotels)
+        parts = [f"{n} hotel{'s' if n != 1 else ''}"]
+        if self.destination_name:
+            parts.append(f"in {self.destination_name}")
+        if not self.is_complete:
+            parts.append("incomplete")
+        return f"HotelSearchResult({', '.join(parts)})"
+
+
+@dataclass
+class HotelReview:
+    """A hotel review from a Google Travel review source."""
+
+    source: str
+    author: Optional[str] = None
+    rating: Optional[float] = None
+    max_rating: Optional[float] = None
+    relative_date: Optional[str] = None
+    text: Optional[str] = None
+    url: Optional[str] = None
+
+    def __repr__(self) -> str:
+        parts = [self.source]
+        if self.rating is not None:
+            parts.append(f"rating={self.rating}")
+        if self.relative_date:
+            parts.append(self.relative_date)
+        return f"HotelReview({' '.join(parts)})"
+
+
+@dataclass
+class HotelReviewsResult:
+    """Result of a hotel review lookup."""
+
+    reviews: list[HotelReview] = field(default_factory=list)
+    hotel_token: Optional[str] = None
+
+    def __repr__(self) -> str:
+        n = len(self.reviews)
+        return f"HotelReviewsResult({n} review{'s' if n != 1 else ''})"
+
+
+@dataclass
 class PriceResult:
     """Result of a targeted price check for a specific trip.
 

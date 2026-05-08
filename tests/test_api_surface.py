@@ -10,7 +10,22 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Passengers, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import (
+    Hotel,
+    HotelProvider,
+    HotelReview,
+    HotelReviewsResult,
+    HotelSearchResult,
+    Passengers,
+    PriceResult,
+    ResolvedLeg,
+    SearchLeg,
+    SearchResult,
+    SelectedLeg,
+    TransportConfig,
+    TripLeg,
+    TripOption,
+)
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -41,6 +56,9 @@ class TestFrozenExports:
         "check_price",
         "price_selector",
         "price_legs",
+        "hotels",
+        "hotel_prices",
+        "hotel_reviews",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -49,6 +67,11 @@ class TestFrozenExports:
         "itinerary_matches_flight",
         # Types
         "CabinClass",
+        "Hotel",
+        "HotelProvider",
+        "HotelReview",
+        "HotelReviewsResult",
+        "HotelSearchResult",
         "Passengers",
         "TransportConfig",
         "PriceResult",
@@ -283,6 +306,38 @@ class TestFrozenDataclassFields:
         expected = {"selector", "price", "currency", "legs"}
         assert self._field_names(TripOption) == expected
 
+    def test_hotel_provider_fields(self):
+        expected = {
+            "name", "price", "total_price", "currency", "url", "logo_url",
+            "provider_id", "room_name", "is_free_cancellation",
+        }
+        assert self._field_names(HotelProvider) == expected
+
+    def test_hotel_fields(self):
+        expected = {
+            "hotel_id", "name", "price", "total_price", "currency",
+            "rating", "review_count", "hotel_class", "hotel_class_label",
+            "latitude", "longitude", "address", "image_url", "distance",
+            "booking_token", "price_token", "place_id", "entity_id",
+            "providers",
+        }
+        assert self._field_names(Hotel) == expected
+
+    def test_hotel_search_result_fields(self):
+        expected = {"hotels", "query", "destination_name", "currency", "is_complete"}
+        assert self._field_names(HotelSearchResult) == expected
+
+    def test_hotel_review_fields(self):
+        expected = {
+            "source", "author", "rating", "max_rating",
+            "relative_date", "text", "url",
+        }
+        assert self._field_names(HotelReview) == expected
+
+    def test_hotel_reviews_result_fields(self):
+        expected = {"reviews", "hotel_token"}
+        assert self._field_names(HotelReviewsResult) == expected
+
 
 class TestSearchSignature:
     """Verify search() accepts the expected parameters."""
@@ -355,6 +410,30 @@ class TestSearchSignature:
         sig = inspect.signature(swoop.price_selector)
         param_names = list(sig.parameters.keys())
         expected = ["selector", "transport"]
+        assert param_names == expected
+
+    def test_hotels_params(self):
+        sig = inspect.signature(swoop.hotels)
+        param_names = list(sig.parameters.keys())
+        expected = [
+            "query", "check_in", "check_out",
+            "adults", "child_ages", "rooms", "currency", "transport",
+        ]
+        assert param_names == expected
+
+    def test_hotel_prices_params(self):
+        sig = inspect.signature(swoop.hotel_prices)
+        param_names = list(sig.parameters.keys())
+        expected = [
+            "hotel_token", "query", "check_in", "check_out",
+            "adults", "child_ages", "rooms", "currency", "transport",
+        ]
+        assert param_names == expected
+
+    def test_hotel_reviews_params(self):
+        sig = inspect.signature(swoop.hotel_reviews)
+        param_names = list(sig.parameters.keys())
+        expected = ["hotel_token", "transport"]
         assert param_names == expected
 
 

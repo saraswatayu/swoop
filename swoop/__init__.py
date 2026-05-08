@@ -639,7 +639,10 @@ def hotels(
     max_total_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    hotel_classes: Optional[list[int]] = None,
+    amenities: Optional[list[str]] = None,
     property_types: Optional[list[str]] = None,
+    brands: Optional[list[str]] = None,
     has_pool: bool = False,
     free_cancellation: bool = False,
     special_offers: bool = False,
@@ -662,17 +665,25 @@ def hotels(
         currency: ISO 4217 currency code requested from Google.
         sort_by: Client-side sort for returned hotel cards. Supported values:
             ``"default"``, ``"price"``, ``"total-price"``, ``"rating"``,
-            ``"class"``, and ``"name"``.
+            ``"most-reviewed"``, ``"class"``, and ``"name"``.
         min_price: Minimum nightly price to keep.
         max_price: Maximum nightly price to keep.
         min_total_price: Minimum total stay price to keep.
         max_total_price: Maximum total stay price to keep.
         min_rating: Minimum Google rating to keep.
         min_hotel_class: Minimum hotel class/star count to keep.
+        hotel_classes: Exact hotel class/star counts to request server-side.
+        amenities: Google Hotels amenities to request server-side. Supported
+            values include ``"free_wifi"``, ``"free_breakfast"``,
+            ``"pet_friendly"``, ``"pool"``, ``"indoor_pool"``,
+            ``"outdoor_pool"``, and ``"wheelchair_accessible"``.
         property_types: Google Hotels property types to request server-side.
             Supported values include ``"hostels"``, ``"motels"``,
             ``"resorts"``, ``"boutique_hotels"``, and
             ``"apartment_hotels"``.
+        brands: Google Hotels brand filters to request server-side. Supported
+            values include ``"hilton_honors"``, ``"marriott_bonvoy"``,
+            ``"ihg_hotels_resorts"``, and ``"hyatt"``.
         has_pool: Request hotels with a pool.
         free_cancellation: Request hotels with free cancellation offers.
         special_offers: Request hotels with special offers.
@@ -689,7 +700,12 @@ def hotels(
         A :class:`HotelSearchResult` containing hotel cards.
     """
     _validate_hotel_inputs(query, check_in, check_out, adults, child_ages, rooms)
-    from ._hotels import HOTEL_PROPERTY_TYPE_VALUES, HOTEL_SORT_VALUES
+    from ._hotels import (
+        HOTEL_AMENITY_VALUES,
+        HOTEL_BRAND_VALUES,
+        HOTEL_PROPERTY_TYPE_VALUES,
+        HOTEL_SORT_VALUES,
+    )
 
     if sort_by not in HOTEL_SORT_VALUES:
         raise ValueError(f"sort_by must be one of {sorted(HOTEL_SORT_VALUES)}")
@@ -713,6 +729,27 @@ def hotels(
         raise ValueError("min_rating must be between 0 and 5")
     if min_hotel_class is not None and (min_hotel_class < 0 or min_hotel_class > 5):
         raise ValueError("min_hotel_class must be between 0 and 5")
+    normalized_hotel_classes = list(hotel_classes) if hotel_classes is not None else None
+    if normalized_hotel_classes:
+        invalid_hotel_classes = [
+            value for value in normalized_hotel_classes
+            if value < 2 or value > 5
+        ]
+        if invalid_hotel_classes:
+            raise ValueError("hotel_classes must contain values between 2 and 5")
+    if isinstance(amenities, str):
+        raise ValueError("amenities must be a list of supported values")
+    normalized_amenities = list(amenities) if amenities is not None else None
+    if normalized_amenities:
+        invalid_amenities = [
+            value for value in normalized_amenities
+            if value not in HOTEL_AMENITY_VALUES
+        ]
+        if invalid_amenities:
+            raise ValueError(
+                "amenities must contain only supported values: "
+                f"{sorted(HOTEL_AMENITY_VALUES)}"
+            )
     if isinstance(property_types, str):
         raise ValueError("property_types must be a list of supported values")
     normalized_property_types = list(property_types) if property_types is not None else None
@@ -725,6 +762,19 @@ def hotels(
             raise ValueError(
                 "property_types must contain only supported values: "
                 f"{sorted(HOTEL_PROPERTY_TYPE_VALUES)}"
+            )
+    if isinstance(brands, str):
+        raise ValueError("brands must be a list of supported values")
+    normalized_brands = list(brands) if brands is not None else None
+    if normalized_brands:
+        invalid_brands = [
+            value for value in normalized_brands
+            if value not in HOTEL_BRAND_VALUES
+        ]
+        if invalid_brands:
+            raise ValueError(
+                "brands must contain only supported values: "
+                f"{sorted(HOTEL_BRAND_VALUES)}"
             )
     if token_enrichment_limit is not None and token_enrichment_limit < 0:
         raise ValueError("token_enrichment_limit must be non-negative")
@@ -746,7 +796,10 @@ def hotels(
         max_total_price=max_total_price,
         min_rating=min_rating,
         min_hotel_class=min_hotel_class,
+        hotel_classes=normalized_hotel_classes,
+        amenities=normalized_amenities,
         property_types=normalized_property_types,
+        brands=normalized_brands,
         has_pool=has_pool,
         free_cancellation=free_cancellation,
         special_offers=special_offers,

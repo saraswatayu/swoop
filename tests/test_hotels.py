@@ -214,7 +214,10 @@ def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
         max_price=150,
         min_rating=4,
         min_hotel_class=4,
+        hotel_classes=[2, 4],
+        amenities=["free_wifi", "fitness_center"],
         property_types=["hostels", "motels"],
+        brands=["hilton_honors"],
         has_pool=True,
         free_cancellation=True,
         special_offers=True,
@@ -225,10 +228,11 @@ def test_build_filtered_universal_search_payload_uses_captured_filter_slots():
     assert payload[1][2][0][1][0][0] == "/m/02_286"
     assert payload[1][2][1][1] == [[2026, 6, 1], [2026, 6, 3], 1]
     filter_block = payload[1][4]
-    assert filter_block[0][0] == [6]
-    assert filter_block[0][1] == [4, 5]
+    assert filter_block[0][0] == [35, 7, 6]
+    assert filter_block[0][1] == [2, 4]
     assert filter_block[0][3] == 1
     assert filter_block[0][6] == "USD"
+    assert filter_block[0][7] == [[28, [7, 151, 81, 88, 115, 71, 95, 54, 36, 77, 295, 285, 286, 41]]]
     assert filter_block[0][9] == 1
     assert filter_block[0][10] == [14, 16]
     assert filter_block[1] is None
@@ -248,6 +252,7 @@ def test_build_filtered_universal_search_payload_omits_price_block_when_unneeded
         check_in="2026-06-01",
         check_out="2026-06-03",
         currency="USD",
+        hotel_classes=[2, 3],
         property_types=["resorts"],
         free_cancellation=True,
         eco_certified=True,
@@ -255,10 +260,36 @@ def test_build_filtered_universal_search_payload_omits_price_block_when_unneeded
 
     assert payload is not None
     assert payload[1][4] == [
-        [None, None, None, 1, None, None, "USD", None, None, 1, [17]],
+        [None, [2, 3], None, 1, None, None, "USD", None, None, 1, [17]],
         None,
         [],
     ]
+
+
+def test_build_filtered_universal_search_payload_uses_captured_rating_thresholds():
+    context = _extract_context_from_universal(_broad_universal_payload())
+
+    payload_35 = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+        min_rating=3.5,
+    )
+    payload_45 = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+        min_rating=4.5,
+    )
+
+    assert payload_35 is not None
+    assert payload_45 is not None
+    assert payload_35[1][4] == [[None, None, None, None, None, None, "USD"], None, [], None, 7]
+    assert payload_45[1][4] == [[None, None, None, None, None, None, "USD"], None, [], None, 9]
 
 
 def test_build_filtered_universal_search_payload_uses_captured_sort_slots():
@@ -280,11 +311,21 @@ def test_build_filtered_universal_search_payload_uses_captured_sort_slots():
         currency="USD",
         sort_by="rating",
     )
+    reviewed_payload = _build_filtered_universal_search_payload(
+        "New York",
+        context,
+        check_in="2026-06-01",
+        check_out="2026-06-03",
+        currency="USD",
+        sort_by="most-reviewed",
+    )
 
     assert price_payload is not None
     assert rating_payload is not None
+    assert reviewed_payload is not None
     assert price_payload[1][4][0][4] == 3
     assert rating_payload[1][4][0][4] == 8
+    assert reviewed_payload[1][4][0][4] == 13
 
 
 def test_parse_hotels_payload_extracts_hotel_cards():

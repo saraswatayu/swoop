@@ -34,6 +34,7 @@ HOTEL_SORT_DEFAULT = "default"
 HOTEL_SORT_PRICE = "price"
 HOTEL_SORT_TOTAL_PRICE = "total-price"
 HOTEL_SORT_RATING = "rating"
+HOTEL_SORT_MOST_REVIEWED = "most-reviewed"
 HOTEL_SORT_CLASS = "class"
 HOTEL_SORT_NAME = "name"
 
@@ -42,6 +43,7 @@ HOTEL_SORT_VALUES = {
     HOTEL_SORT_PRICE,
     HOTEL_SORT_TOTAL_PRICE,
     HOTEL_SORT_RATING,
+    HOTEL_SORT_MOST_REVIEWED,
     HOTEL_SORT_CLASS,
     HOTEL_SORT_NAME,
 }
@@ -49,7 +51,35 @@ HOTEL_SORT_VALUES = {
 HOTEL_FILTER_MIN_RATING_4 = 8
 HOTEL_SORT_CODE_PRICE = 3
 HOTEL_SORT_CODE_RATING = 8
+HOTEL_SORT_CODE_MOST_REVIEWED = 13
 HOTEL_AMENITY_POOL = 6
+HOTEL_RATING_FILTER_CODES = (
+    (4.5, 9),
+    (4.0, 8),
+    (3.5, 7),
+)
+HOTEL_AMENITY_CODES = {
+    "free_parking": 1,
+    "parking": 1,
+    "indoor_pool": 4,
+    "outdoor_pool": 5,
+    "pool": HOTEL_AMENITY_POOL,
+    "fitness_center": 7,
+    "restaurant": 8,
+    "free_breakfast": 9,
+    "spa": 10,
+    "beach_access": 11,
+    "kid_friendly": 12,
+    "bar": 15,
+    "pet_friendly": 19,
+    "room_service": 22,
+    "free_wifi": 35,
+    "air_conditioned": 40,
+    "all_inclusive_available": 52,
+    "wheelchair_accessible": 53,
+    "ev_charger": 61,
+}
+HOTEL_AMENITY_VALUES = frozenset(HOTEL_AMENITY_CODES)
 HOTEL_PROPERTY_TYPE_CODES = {
     "beach_hotels": 12,
     "boutique_hotels": 13,
@@ -63,6 +93,30 @@ HOTEL_PROPERTY_TYPE_CODES = {
     "apartment_hotels": 21,
 }
 HOTEL_PROPERTY_TYPE_VALUES = frozenset(HOTEL_PROPERTY_TYPE_CODES)
+HOTEL_BRAND_FILTERS = {
+    "accor_live_limitless": [[33, [8, 84]]],
+    "best_western_international": [[18, [155, 104, 105, 254, 255, 107]]],
+    "choice_hotels": [[20, [63, 112, 27, 113, 82, 78, 23]]],
+    "four_seasons": [[289]],
+    "hilton_honors": [[28, [7, 151, 81, 88, 115, 71, 95, 54, 36, 77, 295, 285, 286, 41]]],
+    "hyatt": [[37, [116, 412, 288, 119, 120, 121, 122, 349, 118, 346, 262]]],
+    "ihcl": [[202, [203]]],
+    "ihg_hotels_resorts": [[17, [125, 52, 42, 282, 64, 56, 87, 2, 127, 298]]],
+    "knights_inn": [[89]],
+    "marriott_bonvoy": [[46, [128, 60, 59, 86, 153, 256, 134, 58, 135, 26, 72, 61, 129, 131, 75, 3, 12, 83, 136, 143, 40, 137, 39]]],
+    "melia_hotels_international": [[174, [179]]],
+    "nh_hotel_group": [[169, [171]]],
+    "omni_hotels_resorts": [[311]],
+    "oyo": [[353, [99]]],
+    "radisson_hotel_group": [[80, [25]]],
+    "red_roof_inn": [[345, [399]]],
+    "riu_hotels_resorts": [[163, [164]]],
+    "sonesta_hotels": [[424, [426, 428, 425]]],
+    "starwood_hotels": [[493, [494]]],
+    "westgate_resorts": [[312]],
+    "wyndham_hotels_resorts": [[53, [30, 19, 11, 49, 50, 93, 284, 16, 65, 68, 150, 141]]],
+}
+HOTEL_BRAND_VALUES = frozenset(HOTEL_BRAND_FILTERS)
 
 
 def _safe_get(data: Any, path: list[Any], default: Any = None) -> Any:
@@ -447,7 +501,10 @@ def _build_filtered_universal_search_payload(
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    hotel_classes: Optional[list[int]] = None,
+    amenities: Optional[list[str]] = None,
     property_types: Optional[list[str]] = None,
+    brands: Optional[list[str]] = None,
     has_pool: bool = False,
     free_cancellation: bool = False,
     special_offers: bool = False,
@@ -465,9 +522,14 @@ def _build_filtered_universal_search_payload(
         items[index] = value
 
     currency_filter: list[Any] = [None, None, None, None, None, None, currency]
+    amenity_codes = [HOTEL_AMENITY_CODES[value] for value in amenities or []]
     if has_pool:
-        currency_filter[0] = [HOTEL_AMENITY_POOL]
-    if min_hotel_class is not None and min_hotel_class >= 4:
+        amenity_codes.append(HOTEL_AMENITY_POOL)
+    if amenity_codes:
+        currency_filter[0] = list(dict.fromkeys(amenity_codes))
+    if hotel_classes:
+        currency_filter[1] = list(dict.fromkeys(hotel_classes))
+    elif min_hotel_class is not None and min_hotel_class >= 4:
         currency_filter[1] = list(range(min_hotel_class, 6))
     if free_cancellation:
         currency_filter[3] = 1
@@ -475,6 +537,13 @@ def _build_filtered_universal_search_payload(
         currency_filter[4] = HOTEL_SORT_CODE_PRICE
     elif sort_by == HOTEL_SORT_RATING:
         currency_filter[4] = HOTEL_SORT_CODE_RATING
+    elif sort_by == HOTEL_SORT_MOST_REVIEWED:
+        currency_filter[4] = HOTEL_SORT_CODE_MOST_REVIEWED
+    if brands:
+        brand_filters: list[Any] = []
+        for brand in brands:
+            brand_filters.extend(HOTEL_BRAND_FILTERS[brand])
+        set_slot(currency_filter, 7, brand_filters)
     if eco_certified:
         set_slot(currency_filter, 9, 1)
     if property_types:
@@ -486,18 +555,20 @@ def _build_filtered_universal_search_payload(
 
     filter_block: list[Any] = [currency_filter, None, []]
     if (
-        sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE, HOTEL_SORT_RATING}
+        sort_by in {
+            HOTEL_SORT_PRICE,
+            HOTEL_SORT_TOTAL_PRICE,
+            HOTEL_SORT_RATING,
+            HOTEL_SORT_MOST_REVIEWED,
+        }
         or max_price is not None
-        or (min_rating is not None and min_rating >= 4)
-        or (min_hotel_class is not None and min_hotel_class >= 4)
         or has_pool
         or special_offers
     ):
         filter_block.append(price_filter)
-    if min_rating is not None and min_rating >= 4:
-        while len(filter_block) <= 3:
-            filter_block.append(None)
-        filter_block.append(HOTEL_FILTER_MIN_RATING_4)
+    rating_filter_code = _hotel_rating_filter_code(min_rating)
+    if rating_filter_code is not None:
+        set_slot(filter_block, 4, rating_filter_code)
     if special_offers:
         set_slot(filter_block, 5, 1)
 
@@ -531,7 +602,10 @@ def _should_use_server_hotel_controls(
     max_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    hotel_classes: Optional[list[int]] = None,
+    amenities: Optional[list[str]] = None,
     property_types: Optional[list[str]] = None,
+    brands: Optional[list[str]] = None,
     has_pool: bool = False,
     free_cancellation: bool = False,
     special_offers: bool = False,
@@ -539,11 +613,15 @@ def _should_use_server_hotel_controls(
 ) -> bool:
     return (
         sort_by in {HOTEL_SORT_PRICE, HOTEL_SORT_TOTAL_PRICE, HOTEL_SORT_RATING}
+        or sort_by == HOTEL_SORT_MOST_REVIEWED
         or max_price is not None
-        or (min_rating is not None and min_rating >= 4)
+        or _hotel_rating_filter_code(min_rating) is not None
         or (min_hotel_class is not None and min_hotel_class >= 4)
         or _has_server_only_hotel_controls(
+            hotel_classes=hotel_classes,
+            amenities=amenities,
             property_types=property_types,
+            brands=brands,
             has_pool=has_pool,
             free_cancellation=free_cancellation,
             special_offers=special_offers,
@@ -554,19 +632,34 @@ def _should_use_server_hotel_controls(
 
 def _has_server_only_hotel_controls(
     *,
+    hotel_classes: Optional[list[int]] = None,
+    amenities: Optional[list[str]] = None,
     property_types: Optional[list[str]] = None,
+    brands: Optional[list[str]] = None,
     has_pool: bool = False,
     free_cancellation: bool = False,
     special_offers: bool = False,
     eco_certified: bool = False,
 ) -> bool:
     return bool(
-        property_types
+        hotel_classes
+        or amenities
+        or property_types
+        or brands
         or has_pool
         or free_cancellation
         or special_offers
         or eco_certified
     )
+
+
+def _hotel_rating_filter_code(min_rating: Optional[float]) -> Optional[int]:
+    if min_rating is None:
+        return None
+    for threshold, code in HOTEL_RATING_FILTER_CODES:
+        if min_rating >= threshold:
+            return code
+    return None
 
 
 def _extract_context_from_universal(data: list[Any]) -> dict[str, Any]:
@@ -849,6 +942,9 @@ def _hotel_sort_key(hotel: Hotel, sort_by: str) -> tuple[Any, ...]:
     if sort_by == HOTEL_SORT_RATING:
         value = hotel.rating
         return (value is None, -(value if value is not None else 0.0), hotel.name.casefold())
+    if sort_by == HOTEL_SORT_MOST_REVIEWED:
+        value = hotel.review_count
+        return (value is None, -(value if value is not None else 0), hotel.name.casefold())
     if sort_by == HOTEL_SORT_CLASS:
         value = hotel.hotel_class
         return (value is None, -(value if value is not None else 0), hotel.name.casefold())
@@ -1180,7 +1276,10 @@ def fetch_hotels(
     max_total_price: Optional[int] = None,
     min_rating: Optional[float] = None,
     min_hotel_class: Optional[int] = None,
+    hotel_classes: Optional[list[int]] = None,
+    amenities: Optional[list[str]] = None,
     property_types: Optional[list[str]] = None,
+    brands: Optional[list[str]] = None,
     has_pool: bool = False,
     free_cancellation: bool = False,
     special_offers: bool = False,
@@ -1243,7 +1342,10 @@ def fetch_hotels(
         is_complete=False,
     )
     server_only_controls = _has_server_only_hotel_controls(
+        hotel_classes=hotel_classes,
+        amenities=amenities,
         property_types=property_types,
+        brands=brands,
         has_pool=has_pool,
         free_cancellation=free_cancellation,
         special_offers=special_offers,
@@ -1268,7 +1370,10 @@ def fetch_hotels(
         max_price=max_price,
         min_rating=min_rating,
         min_hotel_class=min_hotel_class,
+        hotel_classes=hotel_classes,
+        amenities=amenities,
         property_types=property_types,
+        brands=brands,
         has_pool=has_pool,
         free_cancellation=free_cancellation,
         special_offers=special_offers,
@@ -1287,7 +1392,10 @@ def fetch_hotels(
             max_price=max_price,
             min_rating=min_rating,
             min_hotel_class=min_hotel_class,
+            hotel_classes=hotel_classes,
+            amenities=amenities,
             property_types=property_types,
+            brands=brands,
             has_pool=has_pool,
             free_cancellation=free_cancellation,
             special_offers=special_offers,

@@ -420,7 +420,7 @@ class TestSearchSignature:
             "adults", "child_ages", "rooms", "currency",
             "sort_by", "min_price", "max_price",
             "min_total_price", "max_total_price",
-            "min_rating", "min_hotel_class", "property_types",
+            "min_rating", "min_hotel_class", "hotel_classes", "amenities", "property_types", "brands",
             "has_pool", "free_cancellation", "special_offers", "eco_certified",
             "require_booking_token",
             "include_booking_tokens", "token_enrichment_limit", "transport",

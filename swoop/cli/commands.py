@@ -28,6 +28,50 @@ HOTEL_PROPERTY_TYPE_CHOICES = [
     "other",
     "apartment-hotels",
 ]
+HOTEL_AMENITY_CHOICES = [
+    "free-parking",
+    "parking",
+    "indoor-pool",
+    "outdoor-pool",
+    "pool",
+    "fitness-center",
+    "restaurant",
+    "free-breakfast",
+    "spa",
+    "beach-access",
+    "kid-friendly",
+    "bar",
+    "pet-friendly",
+    "room-service",
+    "free-wifi",
+    "air-conditioned",
+    "all-inclusive-available",
+    "wheelchair-accessible",
+    "ev-charger",
+]
+HOTEL_BRAND_CHOICES = [
+    "accor-live-limitless",
+    "best-western-international",
+    "choice-hotels",
+    "four-seasons",
+    "hilton-honors",
+    "hyatt",
+    "ihcl",
+    "ihg-hotels-resorts",
+    "knights-inn",
+    "marriott-bonvoy",
+    "melia-hotels-international",
+    "nh-hotel-group",
+    "omni-hotels-resorts",
+    "oyo",
+    "radisson-hotel-group",
+    "red-roof-inn",
+    "riu-hotels-resorts",
+    "sonesta-hotels",
+    "starwood-hotels",
+    "westgate-resorts",
+    "wyndham-hotels-resorts",
+]
 
 
 class _SearchFormatKwargs(TypedDict, total=False):
@@ -747,14 +791,17 @@ def _hotel_error(ctx, err, exc) -> None:
 @click.option("--child-age", "child_ages", type=click.IntRange(0, 17), multiple=True, help="Child age (repeatable).")
 @click.option("--rooms", type=click.IntRange(1), default=1, show_default=True, help="Room count.")
 @click.option("--currency", type=str, default="USD", show_default=True, help="Requested ISO 4217 currency.")
-@click.option("--sort", "sort_by", type=click.Choice(["default", "price", "total-price", "rating", "class", "name"], case_sensitive=False), default="default", show_default=True, help="Client-side sort for returned hotel cards.")
+@click.option("--sort", "sort_by", type=click.Choice(["default", "price", "total-price", "rating", "most-reviewed", "class", "name"], case_sensitive=False), default="default", show_default=True, help="Client-side sort for returned hotel cards.")
 @click.option("--min-price", type=click.IntRange(0), default=None, help="Minimum nightly price.")
 @click.option("--max-price", type=click.IntRange(0), default=None, help="Maximum nightly price.")
 @click.option("--min-total-price", type=click.IntRange(0), default=None, help="Minimum total stay price.")
 @click.option("--max-total-price", type=click.IntRange(0), default=None, help="Maximum total stay price.")
 @click.option("--min-rating", type=click.FloatRange(0, 5), default=None, help="Minimum Google rating.")
 @click.option("--min-class", "min_hotel_class", type=click.IntRange(0, 5), default=None, help="Minimum hotel class/star count.")
+@click.option("--hotel-class", "hotel_classes", type=click.IntRange(2, 5), multiple=True, help="Exact hotel class/star count (repeatable).")
+@click.option("--amenity", "amenities", type=click.Choice(HOTEL_AMENITY_CHOICES, case_sensitive=False), multiple=True, help="Amenity filter (repeatable).")
 @click.option("--property-type", "property_types", type=click.Choice(HOTEL_PROPERTY_TYPE_CHOICES, case_sensitive=False), multiple=True, help="Property type filter (repeatable).")
+@click.option("--brand", "brands", type=click.Choice(HOTEL_BRAND_CHOICES, case_sensitive=False), multiple=True, help="Hotel brand filter (repeatable).")
 @click.option("--pool", "has_pool", is_flag=True, default=False, help="Only show hotels with a pool.")
 @click.option("--free-cancellation", is_flag=True, default=False, help="Only show hotels with free cancellation offers.")
 @click.option("--special-offers", is_flag=True, default=False, help="Only show hotels with special offers.")
@@ -774,7 +821,7 @@ def hotels_cmd(
     adults, child_ages, rooms, currency,
     sort_by, min_price, max_price,
     min_total_price, max_total_price,
-    min_rating, min_hotel_class, property_types,
+    min_rating, min_hotel_class, hotel_classes, amenities, property_types, brands,
     has_pool, free_cancellation, special_offers, eco_certified,
     require_booking_token,
     include_booking_tokens, token_enrichment_limit,
@@ -787,7 +834,7 @@ def hotels_cmd(
     Examples:
       swoop hotels "New York" 2026-06-01 2026-06-03
       swoop hotels "New York" 2026-06-01 2026-06-03 --sort rating --min-rating 4
-      swoop hotels "New York" 2026-06-01 2026-06-03 --pool --property-type hostels
+      swoop hotels "New York" 2026-06-01 2026-06-03 --amenity free-wifi --property-type hostels
       swoop hotels "New York" 2026-06-01 2026-06-03 --include-booking-tokens --token-enrichment-limit 3
       swoop hotels "HI New York City Hostel" 2026-06-01 2026-06-03 -o json -q
     """
@@ -827,7 +874,10 @@ def hotels_cmd(
                 max_total_price=max_total_price,
                 min_rating=min_rating,
                 min_hotel_class=min_hotel_class,
+                hotel_classes=list(hotel_classes) or None,
+                amenities=[value.replace("-", "_") for value in amenities] or None,
                 property_types=[value.replace("-", "_") for value in property_types] or None,
+                brands=[value.replace("-", "_") for value in brands] or None,
                 has_pool=has_pool,
                 free_cancellation=free_cancellation,
                 special_offers=special_offers,

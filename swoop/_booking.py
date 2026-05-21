@@ -274,24 +274,26 @@ def _extract_seller(option: list[Any]) -> tuple[str, str, str, str, bool]:
     """
     booking_url = _extract_booking_url(_safe_get(option, [5]))
 
-    seller_entry = _safe_get(option, [1, 0])
+    opt1_list = _safe_get(option, [1])
+    if not isinstance(opt1_list, list) or not opt1_list:
+        return "", "", booking_url, "", False
+    seller_entry = opt1_list[0]
     if not isinstance(seller_entry, list):
         return "", "", booking_url, "", False
 
     # Multi-seller opt[1] lists are not observed in our corpus but the wire
     # format permits them. Log so we can detect this if Google ever changes.
-    opt1_list = _safe_get(option, [1])
-    if isinstance(opt1_list, list) and len(opt1_list) > 1:
+    if len(opt1_list) > 1:
         logger.debug(
             "booking option has %d seller entries; using the first (%s)",
             len(opt1_list),
-            seller_entry[0] if seller_entry else None,
+            _safe_get(seller_entry, [0]),
         )
 
-    seller_code = str(seller_entry[0]) if len(seller_entry) > 0 and seller_entry[0] else ""
-    seller_name = str(seller_entry[1]) if len(seller_entry) > 1 and seller_entry[1] else ""
-    logo_code = str(seller_entry[2]) if len(seller_entry) > 2 and seller_entry[2] else ""
-    is_airline_direct = bool(seller_entry[3]) if len(seller_entry) > 3 else False
+    seller_code = str(_safe_get(seller_entry, [0], "") or "")
+    seller_name = str(_safe_get(seller_entry, [1], "") or "")
+    logo_code = str(_safe_get(seller_entry, [2], "") or "")
+    is_airline_direct = _safe_get(seller_entry, [3], None) is True
 
     logo_url = (
         f"{_GSTATIC_LOGO_BASE}/{urllib.parse.quote(logo_code, safe='')}.png"

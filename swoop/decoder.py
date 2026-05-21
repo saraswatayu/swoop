@@ -293,18 +293,35 @@ class RawSearchResult:
 
 @dataclass
 class BookingOption:
-    """A single fare option from GetBookingResults."""
+    """A single fare option from GetBookingResults.
+
+    Seller fields (``seller_name``, ``seller_code``, ``booking_url``, ``logo_url``,
+    ``is_airline_direct``) describe who is selling the fare and how to reach the
+    booking page:
+
+    * ``booking_url`` is a ``google.com/travel/clk/f`` redirect, taken verbatim
+      from the RPC response. swoop does *not* validate the scheme or host —
+      callers that render it as ``<a href>`` or open it programmatically MUST
+      verify it begins with ``https://www.google.com/`` before trusting it. A
+      poisoned or reshaped response could in principle deliver ``javascript:``,
+      ``data:``, or a lookalike host.
+    * ``logo_url`` points at ``gstatic.com/flights/partner_logos/70px/...`` only
+      when Google explicitly provides ``logo_code``; empty otherwise. Consumers
+      that want a best-effort airline logo can construct the URL themselves
+      via ``{gstatic_base}/{seller_code}.png`` (works for IATA-style codes,
+      404s for OTA codes).
+    """
     price: int = 0
     brand_label: str = ""
     brand_code: str = ""
     is_basic: bool = False
     fare_family: str = ""
     rebookability_signal: str = ""
-    seller_name: str = ""        # Human-readable seller name, e.g. "Gotogate", "Qatar Airways"
-    seller_code: str = ""        # Internal seller code, e.g. "ETRAVELI_Gotogate", "QR"
-    booking_url: str = ""        # google.com/travel/clk/f redirect that opens the seller's booking page. NOT validated — comes verbatim from the RPC response. Callers who render this as <a href> or open it programmatically MUST verify the scheme is https and the host is www.google.com before trusting it; a poisoned/reshaped response could in principle deliver any URL (javascript:, data:, lookalike host).
-    logo_url: str = ""           # https://www.gstatic.com/flights/partner_logos/70px/<logo_code>.png when Google provides logo_code; empty otherwise. Consumers that want a best-effort airline logo can construct {gstatic_base}/{seller_code}.png themselves (works for IATA codes, 404s for OTA codes).
-    is_airline_direct: bool = False  # True when the booking is direct with the operating carrier (not via an OTA)
+    seller_name: str = ""        # e.g. "Gotogate", "Qatar Airways"
+    seller_code: str = ""        # e.g. "ETRAVELI_Gotogate", "QR"
+    booking_url: str = ""
+    logo_url: str = ""
+    is_airline_direct: bool = False
     _is_basic_by_flags: bool = False
     _is_basic_by_text: bool = False
     _option_index: Optional[int] = None

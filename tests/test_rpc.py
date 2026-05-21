@@ -17,6 +17,8 @@ import pytest
 
 import swoop._booking as _booking
 import swoop.rpc as rpc
+from swoop._booking import _extract_seller
+from swoop.decoder import BookingOption
 from swoop.rpc import (
     _build_booking_f_req,
     _build_filters_from_legs,
@@ -657,18 +659,15 @@ def test_booking_option_seller_fields_empty_when_absent() -> None:
 
 def test_booking_option_booking_url_extracted_independently_of_seller_block() -> None:
     """opt[5] click URL is parsed even when opt[1] seller block is missing."""
-    from tests.factories import make_brand_block, make_price_block
-    option = [None] * 25
-    option[19] = json.dumps(["", [""]])
-    option[7] = make_price_block(400)
-    option[21] = make_brand_block("ECONOMY", "Economy")
-    # Note: opt[1] intentionally left as None — seller identity missing, click URL still present.
-    option[5] = [
-        "www.example.com/...",
-        None,
-        ["https://www.google.com/travel/clk/f", [["u", "tok_orphan"], ["v", "1"]]],
+    payload = [
+        make_booking_option(
+            price=400,
+            brand_code="ECONOMY",
+            brand_label="Economy",
+            booking_url_token="tok_orphan",
+        ),
     ]
-    text = encode_rpc_outer([None, [[option]]])
+    text = encode_rpc_outer([None, [payload]])
     options = rpc._parse_booking_rpc_response(text)
 
     assert len(options) == 1
@@ -681,11 +680,7 @@ def test_booking_option_booking_url_extracted_independently_of_seller_block() ->
 
 def test_booking_option_multi_seller_logs_debug_and_picks_first(caplog) -> None:
     """When opt[1] carries multiple seller entries we use the first and log at DEBUG."""
-    from tests.factories import make_brand_block, make_price_block
-    option = [None] * 25
-    option[19] = json.dumps(["", [""]])
-    option[7] = make_price_block(400)
-    option[21] = make_brand_block("ECONOMY", "Economy")
+    option = make_booking_option(price=400, brand_code="ECONOMY", brand_label="Economy")
     option[1] = [
         ["PRIMARY", "Primary Seller", "PRIMARY", True],
         ["SECONDARY", "Secondary Seller", "SECONDARY", False],
@@ -699,7 +694,6 @@ def test_booking_option_multi_seller_logs_debug_and_picks_first(caplog) -> None:
 
 
 def test_booking_option_repr_shows_seller_when_present() -> None:
-    from swoop.decoder import BookingOption
     opt = BookingOption(price=594, seller_name="Mytrip", brand_label="Economy")
     rendered = repr(opt)
     assert "seller='Mytrip'" in rendered
@@ -709,7 +703,6 @@ def test_booking_option_repr_shows_seller_when_present() -> None:
 
 def test_booking_option_repr_escapes_seller_name_with_apostrophe() -> None:
     """Seller names with apostrophes/quotes don't corrupt the repr output."""
-    from swoop.decoder import BookingOption
     opt = BookingOption(price=300, seller_name="Bob's Travel")
     rendered = repr(opt)
     assert "Bob's Travel" in rendered
@@ -719,7 +712,6 @@ def test_booking_option_repr_escapes_seller_name_with_apostrophe() -> None:
 
 def test_booking_option_logo_url_path_escapes_logo_code() -> None:
     """logo_code is path-escaped so unexpected characters don't break the URL."""
-    from swoop._booking import _extract_seller
     option = [None] * 25
     option[1] = [["CODE", "Name", "weird/code?x=1", False]]
     seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)

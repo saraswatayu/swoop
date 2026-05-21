@@ -80,7 +80,8 @@ def record_fixture(origin, dest, date, cabin, target_airlines, fixture_name):
         for opt in raw:
             bb = _extract_brand_block(opt)
             cn = _safe_get(bb, [6, 0, 0]) if bb else None
-            cabin_buckets.append(_CABIN_NUM_TO_BUCKET.get(cn, "unknown") if cn is not None else "unknown")
+            bucket = _CABIN_NUM_TO_BUCKET.get(cn, "unknown") if isinstance(cn, int) else "unknown"
+            cabin_buckets.append(bucket)
 
         print(f"    {len(options)} options, cabin_field_present={all_have_cabin}")
         print(f"    Prices: {[o.price for o in options]}")

@@ -101,8 +101,9 @@ def main() -> int:
         return 0
 
     currency = result.currency or "USD"
-    print(f"top {min(5, len(result.results))} of {len(result.results)} trip options ({currency}):\n")
-    for i, option in enumerate(result.results[:5], 1):
+    top = result.results[:5]
+    print(f"top {len(top)} of {len(result.results)} trip options ({currency}):\n")
+    for i, option in enumerate(top, 1):
         price_str = f"{option.price} {currency}" if option.price is not None else "price n/a"
         print(f"#{i}  {price_str}")
         for leg in option.legs:

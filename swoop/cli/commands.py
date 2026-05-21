@@ -1,9 +1,35 @@
 """CLI commands for swoop: search and price."""
 
 from contextlib import nullcontext
-from typing import Any
+from typing import Optional, TypedDict
 
 import click
+
+
+class _SearchFormatKwargs(TypedDict, total=False):
+    """Shared kwargs passed to ``format_search_table`` / ``format_search_json``.
+
+    The shapes drifted between the two formatters historically; defining
+    the union here lets pyright narrow each value to its declared type
+    instead of widening to the union of all values (which is what the
+    old ``dict[str, Any]`` annotation defended against).
+
+    Note the ``origin`` / ``destination`` / ``date`` fields are non-
+    optional even though Click parses them as ``Optional[str]`` at the
+    command boundary. They are narrowed before this TypedDict is built
+    (see search_cmd) so the formatter call sites don't have to repeat
+    the narrowing.
+    """
+
+    origin: str
+    destination: str
+    date: str
+    cabin: str
+    adults: int
+    return_date: Optional[str]
+    legs: Optional[list]
+    limit: Optional[int]
+    price_commands: Optional[list[str]]
 from rich.console import Console
 
 from .utils import (
@@ -379,9 +405,17 @@ def search_cmd(
         ctx.exit(1)
 
     assert result is not None  # narrowed by the ctx.exit(1) above
-    display_origin = leg[0][0] if has_leg else origin
-    display_destination = leg[-1][1] if has_leg else destination
-    display_date = leg[0][2] if has_leg else date
+    if has_leg:
+        display_origin: str = leg[0][0]
+        display_destination: str = leg[-1][1]
+        display_date: str = leg[0][2]
+    else:
+        # has_full_positional was enforced above via ctx.exit(2); pyright
+        # can't see through Click's exit, so re-assert here for the typer.
+        assert origin is not None and destination is not None and date is not None
+        display_origin = origin
+        display_destination = destination
+        display_date = date
     display_return_date = None if has_leg else return_date
     display_options = list(result.results[:limit]) if limit else list(result.results)
     price_commands = None
@@ -390,15 +424,17 @@ def search_cmd(
             _build_price_selector_command(option.selector)
             for option in display_options
         ]
-    # dict[str, Any] so pyright doesn't widen each value to the union of all values
-    # and reject every str-typed parameter on the formatter calls below.
-    fmt_kwargs: dict[str, Any] = dict(
-        origin=display_origin, destination=display_destination, date=display_date,
-        cabin=cabin, adults=passengers, return_date=display_return_date,
-        legs=leg if has_leg else None,
-        limit=limit,
-        price_commands=price_commands,
-    )
+    fmt_kwargs: _SearchFormatKwargs = {
+        "origin": display_origin,
+        "destination": display_destination,
+        "date": display_date,
+        "cabin": cabin,
+        "adults": passengers,
+        "return_date": display_return_date,
+        "legs": list(leg) if has_leg else None,
+        "limit": limit,
+        "price_commands": price_commands,
+    }
 
     if output_format == "table":
         format_search_table(result, no_color=no_color, **fmt_kwargs)

@@ -5,13 +5,14 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from swoop import CabinClass, Passengers, TransportConfig
 from swoop.rpc import search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req, _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME
 from swoop._booking import parse_booking_payload, _extract_brand_block, _extract_price_block, _safe_get
 
 SEAT_NAMES = {1: "ECON", 2: "PREM", 3: "BIZ", 4: "FIRST"}
 
 
-def fetch_raw_booking_options(itinerary, cabin):
+def fetch_raw_booking_options(itinerary, cabin: CabinClass):
     booking_token = itinerary.booking_token
     origin = itinerary.departure_airport_code
     destination = itinerary.arrival_airport_code
@@ -21,8 +22,9 @@ def fetch_raw_booking_options(itinerary, cabin):
 
     legs = [_normalize_rpc_leg(origin, destination, date)]
     filters = _build_filters_from_legs(
-        legs, cabin=cabin, adults=1, children=0,
-        infants_in_seat=0, infants_on_lap=0, sort=SORT_DEPARTURE_TIME,
+        legs, cabin=cabin,
+        passengers=Passengers(adults=1, children=0, infants_in_seat=0, infants_on_lap=0),
+        sort=SORT_DEPARTURE_TIME,
     )
     filter_block = filters[1]
     encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
@@ -32,7 +34,7 @@ def fetch_raw_booking_options(itinerary, cabin):
     res = _http_post(
         BOOKING_RPC_URL,
         content=f"f.req={encoded_body}".encode(),
-        timeout=90, retries=2,
+        transport=TransportConfig(timeout=90, retries=2),
     )
     return parse_booking_payload(res.text)
 
@@ -56,7 +58,7 @@ def main():
         ("LAX", "SYD", "2026-06-20"),
     ]
 
-    cabins = ["economy", "business"]
+    cabins: list[CabinClass] = ["economy", "business"]
 
     total_options = 0
     missing_count = 0

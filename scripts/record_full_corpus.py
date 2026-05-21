@@ -11,6 +11,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from typing import cast
+
+from swoop import CabinClass, Passengers, TransportConfig
 from swoop.rpc import (
     search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req,
     _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME,
@@ -42,9 +45,9 @@ def record_shopping(origin, dest, date, cabin, country, fixture_name, fixture_id
     try:
         result = search_raw(
             origin, dest, date,
-            cabin=cabin,
+            cabin=cast(CabinClass, cabin),
             return_date=return_date,
-            country=country,
+            transport=TransportConfig(country=country),
         )
     except Exception as e:
         print(f"FAILED: {e}")
@@ -70,7 +73,7 @@ def record_shopping(origin, dest, date, cabin, country, fixture_name, fixture_id
     legs = [_normalize_rpc_leg(origin, dest, date)]
     if return_date:
         legs.append(_normalize_rpc_leg(dest, origin, return_date))
-    raw_result = _search_from_legs(legs, cabin=cabin, country=country)
+    raw_result = _search_from_legs(legs, cabin=cast(CabinClass, cabin), transport=TransportConfig(country=country))
     if raw_result is None:
         print("raw search failed")
         return None
@@ -118,8 +121,9 @@ def fetch_booking_response_text(itinerary, cabin):
 
     legs = [_normalize_rpc_leg(origin, destination, date)]
     filters = _build_filters_from_legs(
-        legs, cabin=cabin, adults=1, children=0,
-        infants_in_seat=0, infants_on_lap=0, sort=SORT_DEPARTURE_TIME,
+        legs, cabin=cast(CabinClass, cabin),
+        passengers=Passengers(adults=1, children=0, infants_in_seat=0, infants_on_lap=0),
+        sort=SORT_DEPARTURE_TIME,
     )
     filter_block = filters[1]
     encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
@@ -129,7 +133,7 @@ def fetch_booking_response_text(itinerary, cabin):
     res = _http_post(
         BOOKING_RPC_URL,
         content=f"f.req={encoded_body}".encode(),
-        timeout=90, retries=2,
+        transport=TransportConfig(timeout=90, retries=2),
     )
     return res.text
 
@@ -140,7 +144,7 @@ def record_booking(origin, dest, date, cabin, fixture_name, fixture_id,
     print(f"\n  Booking {origin}->{dest} cabin={cabin} airlines={target_airlines}...", end=" ", flush=True)
 
     try:
-        result = search_raw(origin, dest, date, cabin=cabin)
+        result = search_raw(origin, dest, date, cabin=cast(CabinClass, cabin))
     except Exception as e:
         print(f"FAILED: {e}")
         return None
@@ -177,7 +181,8 @@ def record_booking(origin, dest, date, cabin, fixture_name, fixture_id,
         for opt in raw:
             bb = _extract_brand_block(opt)
             cn = _safe_get(bb, [6, 0, 0]) if bb else None
-            cabin_buckets.append(_CABIN_NUM_TO_BUCKET.get(cn, "unknown"))
+            bucket = _CABIN_NUM_TO_BUCKET.get(cn, "unknown") if isinstance(cn, int) else "unknown"
+            cabin_buckets.append(bucket)
 
         if "unknown" in cabin_buckets:
             continue

@@ -7,16 +7,18 @@ class indicators beyond brand name text matching.
 import json
 import sys
 import os
+from typing import cast
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch
+from swoop import CabinClass, Passengers, TransportConfig
 from swoop.rpc import search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req, _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME
 from swoop._booking import parse_booking_payload, _extract_brand_block, _extract_price_block, _safe_get
 
 
-def dump_raw_booking_options(itinerary, *, cabin="business"):
-    """Make a GetBookingResults call and return (parsed_options, raw_options, response_text)."""
+def dump_raw_booking_options(itinerary, *, cabin: CabinClass = "business"):
+    """Make a GetBookingResults call and return (raw_options, response_text)."""
     booking_token = itinerary.booking_token
     origin = itinerary.departure_airport_code
     destination = itinerary.arrival_airport_code
@@ -26,21 +28,21 @@ def dump_raw_booking_options(itinerary, *, cabin="business"):
 
     legs = [_normalize_rpc_leg(origin, destination, date)]
     filters = _build_filters_from_legs(
-        legs, cabin=cabin, adults=1,
-        children=0, infants_in_seat=0, infants_on_lap=0,
+        legs,
+        cabin=cabin,
+        passengers=Passengers(adults=1, children=0, infants_in_seat=0, infants_on_lap=0),
         sort=SORT_DEPARTURE_TIME,
     )
     filter_block = filters[1]
     encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
     if not encoded_body:
         print("ERROR: Failed to build booking request")
-        return None, None, None
+        return None, None
 
     res = _http_post(
         BOOKING_RPC_URL,
         content=f"f.req={encoded_body}".encode(),
-        timeout=90,
-        retries=2,
+        transport=TransportConfig(timeout=90, retries=2),
     )
 
     raw_options = parse_booking_payload(res.text)
@@ -81,7 +83,10 @@ def main():
         print(f"SEARCHING: {origin} → {dest} on {date}, cabin={cabin}")
         print(f"{'='*80}")
 
-        result = search_raw(origin, dest, date, cabin=cabin)
+        result = search_raw(origin, dest, date, cabin=cast(CabinClass, cabin))
+        if result is None:
+            print("  No result returned from search_raw")
+            continue
         all_itins = (result.best or []) + (result.other or [])
 
         if not all_itins:
@@ -100,7 +105,7 @@ def main():
         itin = all_itins[0]
         print(f"\n  Fetching booking options for itinerary 0: ${itin.price}")
 
-        raw_options, response_text = dump_raw_booking_options(itin, cabin=cabin)
+        raw_options, response_text = dump_raw_booking_options(itin, cabin=cast(CabinClass, cabin))
         if not raw_options:
             print("  No raw booking options returned")
             continue

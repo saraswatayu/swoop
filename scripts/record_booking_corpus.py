@@ -6,6 +6,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from swoop import Passengers, TransportConfig
 from swoop.rpc import search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req, _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME
 from swoop._booking import parse_booking_payload, _parse_booking_rpc_response, _extract_brand_block, _safe_get
 
@@ -22,8 +23,9 @@ def fetch_booking_response_text(itinerary, cabin):
 
     legs = [_normalize_rpc_leg(origin, destination, date)]
     filters = _build_filters_from_legs(
-        legs, cabin=cabin, adults=1, children=0,
-        infants_in_seat=0, infants_on_lap=0, sort=SORT_DEPARTURE_TIME,
+        legs, cabin=cabin,
+        passengers=Passengers(adults=1, children=0, infants_in_seat=0, infants_on_lap=0),
+        sort=SORT_DEPARTURE_TIME,
     )
     filter_block = filters[1]
     encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
@@ -33,7 +35,7 @@ def fetch_booking_response_text(itinerary, cabin):
     res = _http_post(
         BOOKING_RPC_URL,
         content=f"f.req={encoded_body}".encode(),
-        timeout=90, retries=2,
+        transport=TransportConfig(timeout=90, retries=2),
     )
     return res.text
 
@@ -71,7 +73,8 @@ def record(origin, dest, date, cabin, target_airlines, fixture_name, fixture_id,
         for opt in raw:
             bb = _extract_brand_block(opt)
             cn = _safe_get(bb, [6, 0, 0]) if bb else None
-            cabin_buckets.append(_CABIN_NUM_TO_BUCKET.get(cn, "unknown"))
+            bucket = _CABIN_NUM_TO_BUCKET.get(cn, "unknown") if isinstance(cn, int) else "unknown"
+            cabin_buckets.append(bucket)
 
         all_have_cabin = "unknown" not in cabin_buckets
 

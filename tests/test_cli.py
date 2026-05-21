@@ -713,7 +713,13 @@ class TestPriceCommand:
             "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300", "--return-date", "2026-06-22",
         ])
         assert result.exit_code == 2
-        assert "no such option: --return-date" in result.stderr.lower()
+        stderr = result.stderr.lower()
+        # Click's exact wording around unknown options has shifted between
+        # versions (colon vs quoted, plus "did you mean" suggestions), so
+        # assert on the contract — the dropped flag is named and rejected —
+        # not the exact phrasing.
+        assert "no such option" in stderr
+        assert "--return-date" in stderr
 
     @patch("swoop.price_selector")
     def test_price_selector_mode(self, mock_price_selector):

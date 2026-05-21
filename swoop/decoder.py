@@ -69,13 +69,17 @@ def _safe_get(data: Any, path: list[int], default: Any = None) -> Any:
 
 
 def _safe_tuple(val: Any, length: int, defaults: list) -> tuple:
-    """Convert a value to a tuple of fixed length with defaults for missing elements."""
-    if val is None:
-        return tuple(defaults[:length])
-    if isinstance(val, (list, tuple)):
-        result = list(val) + defaults
-        return tuple(result[:length])
-    return tuple(defaults[:length])
+    """Convert a value to a tuple of fixed length with defaults for missing or None elements.
+
+    Google Flights sometimes encodes a leading-zero hour by omitting it, sending
+    e.g. ``[None, 5]`` for ``00:05``, so None inside the list is treated the
+    same as a missing element.
+    """
+    seq: list = list(val) if isinstance(val, (list, tuple)) else []
+    return tuple(
+        seq[i] if i < len(seq) and seq[i] is not None else defaults[i]
+        for i in range(length)
+    )
 
 
 def _safe_int(value: Any, default: int = 0) -> int:

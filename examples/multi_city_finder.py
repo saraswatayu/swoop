@@ -32,6 +32,7 @@ class LegAction(argparse.Action):
 
     def __call__(self, parser, namespace, values, option_string=None):
         legs = getattr(namespace, self.dest, None) or []
+        assert isinstance(values, list) and len(values) == 3  # nargs=3 guarantees
         origin, destination, date = values
         legs.append((origin.upper(), destination.upper(), date))
         setattr(namespace, self.dest, legs)

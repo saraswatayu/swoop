@@ -631,6 +631,13 @@ def format_price_json(
                 "brand_code": opt.brand_code,
                 "price": opt.price,
                 "is_basic": opt.is_basic,
+                "fare_family": opt.fare_family,
+                "rebookability_signal": opt.rebookability_signal,
+                "seller_name": opt.seller_name,
+                "seller_code": opt.seller_code,
+                "booking_url": opt.booking_url,
+                "logo_url": opt.logo_url,
+                "is_airline_direct": opt.is_airline_direct,
             }
             for opt in result.booking_options
         ] if result.booking_options else [],

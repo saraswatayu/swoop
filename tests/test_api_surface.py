@@ -103,20 +103,57 @@ class TestFrozenExports:
         for name in swoop.__all__:
             assert hasattr(swoop, name), f"swoop.__all__ lists {name!r} but it's not importable"
 
-    def test_no_internal_leakage_in_dir(self):
-        """`dir(swoop)` must not expose implementation details.
+    def test_dir_returns_sorted_all(self):
+        """`dir(swoop)` is what tab completion shows; PEP 562 `__dir__`
+        guarantees the perceived public surface equals ``__all__``."""
+        assert dir(swoop) == sorted(swoop.__all__)
 
-        Tab completion uses `dir()`, not `__all__`. Anything visible there
-        is part of the perceived public surface and creates a maintenance
-        burden if someone reaches for it.
+    def test_dir_excludes_known_internals(self):
+        """The previous test would still pass if ``__dir__`` were
+        accidentally removed (it would degrade to listing every name
+        in ``swoop.__dict__``, which is a superset of ``__all__``, so
+        the sorted-equality check would just fail with a long list and
+        no signal about what regressed). Pin a handful of internal
+        names that exist in the module dict but MUST stay out of
+        ``dir()`` so tab completion doesn't surface them.
+
+        These are accessible via ``swoop.X`` for legitimate internal
+        callers (and were intentionally kept reachable when ``__dir__``
+        replaced the older ``globals().pop`` approach), but they have
+        no place on the perceived public surface.
         """
-        public = set(swoop.__all__)
-        visible = {name for name in dir(swoop) if not name.startswith("_")}
-        leaked = visible - public
-        assert leaked == set(), (
-            f"dir(swoop) exposes names that aren't in __all__: {sorted(leaked)}. "
-            "If you intentionally added a new public name, add it to __all__. "
-            "If it's internal, hide it by `_`-prefixing or `del`ing in swoop/__init__.py."
+        known_internals = [
+            # standard-library imports that escaped
+            "logging",
+            "logger",
+            # private validators
+            "validate_iata_code",
+            "validate_date",
+            "validate_search_params",
+            # internal selection helpers
+            "search_trip_options",
+            "price_trip_selector",
+            "build_request_legs_from_selected",
+            # internal submodules
+            "rpc",
+            "decoder",
+            "builders",
+        ]
+        # Sanity: every name in this allowlist must actually be reachable
+        # via ``swoop.X``. If one disappears, the test should be updated,
+        # not silently passed because the membership check became vacuous.
+        for name in known_internals:
+            assert hasattr(swoop, name), (
+                f"{name!r} is in the internals allowlist but isn't reachable "
+                "via swoop.X — remove it from the allowlist or restore the import."
+            )
+        visible = set(dir(swoop))
+        exposed = [name for name in known_internals if name in visible]
+        assert exposed == [], (
+            f"dir(swoop) exposes internals: {exposed}. Tab completion now "
+            "surfaces these to users. Either add them to swoop.__all__ if "
+            "they're intentionally public, or fix __dir__ (PEP 562) so the "
+            "perceived surface stays curated."
         )
 
     def test_submodules_still_importable(self):

@@ -335,7 +335,9 @@
         "fare_families": [
           "enhanced",
           "premium"
-        ]
+        ],
+        "seller_codes": ["DL", "DL"],
+        "is_airline_direct": [true, true]
       }
     },
     {
@@ -366,7 +368,9 @@
           "standard",
           "enhanced",
           "enhanced"
-        ]
+        ],
+        "seller_codes": ["AA", "AA", "AA", "AA"],
+        "is_airline_direct": [true, true, true, true]
       }
     },
     {
@@ -389,7 +393,9 @@
         "fare_families": [
           "unknown",
           "premium"
-        ]
+        ],
+        "seller_codes": ["TK", "TK"],
+        "is_airline_direct": [true, true]
       }
     },
     {
@@ -400,7 +406,9 @@
         "prices": [419, 719, 1449],
         "brands": ["Delta Main Classic", "Delta Comfort Classic", "Delta Premium Select Classic"],
         "cabin_buckets": ["economy", "premium-economy", "premium-economy"],
-        "fare_families": ["standard", "enhanced", "premium"]
+        "fare_families": ["standard", "enhanced", "premium"],
+        "seller_codes": ["DL", "DL", "DL"],
+        "is_airline_direct": [true, true, true]
       }
     },
     {
@@ -411,7 +419,9 @@
         "prices": [369, 1936, 2136],
         "brands": ["Main Select", "Flagship Business", "Flagship First"],
         "cabin_buckets": ["economy", "business", "first"],
-        "fare_families": ["enhanced", "premium", "premium"]
+        "fare_families": ["enhanced", "premium", "premium"],
+        "seller_codes": ["AA", "AA", "AA"],
+        "is_airline_direct": [true, true, true]
       }
     },
     {
@@ -422,7 +432,9 @@
         "prices": [3088, 4258, 3088, 5833],
         "brands": ["Business Promo", "First", "Flagship Business", "Flagship First"],
         "cabin_buckets": ["economy", "business", "economy", "first"],
-        "fare_families": ["premium", "premium", "premium", "premium"]
+        "fare_families": ["premium", "premium", "premium", "premium"],
+        "seller_codes": ["BA", "BA", "AA", "AA"],
+        "is_airline_direct": [true, true, true, true]
       }
     },
     {
@@ -433,7 +445,9 @@
         "prices": [3584, 854, 879, 988],
         "brands": ["Mint", "Blue Refundable", "Blue Extra Refundable", "Even More Refundable"],
         "cabin_buckets": ["business", "economy", "economy", "economy"],
-        "fare_families": ["unknown", "unknown", "unknown", "unknown"]
+        "fare_families": ["unknown", "unknown", "unknown", "unknown"],
+        "seller_codes": ["B6", "B6", "B6", "B6"],
+        "is_airline_direct": [true, true, true, true]
       }
     },
     {
@@ -444,7 +458,9 @@
         "prices": [3088, 4258, 3088, 5833],
         "brands": ["Business Promo", "First", "Flagship Business", "Flagship First"],
         "cabin_buckets": ["economy", "business", "economy", "first"],
-        "fare_families": ["premium", "premium", "premium", "premium"]
+        "fare_families": ["premium", "premium", "premium", "premium"],
+        "seller_codes": ["BA", "BA", "AA", "AA"],
+        "is_airline_direct": [true, true, true, true]
       }
     },
     {
@@ -455,7 +471,9 @@
         "prices": [369, 1936, 2136],
         "brands": ["Main Select", "Flagship Business", "Flagship First"],
         "cabin_buckets": ["economy", "business", "first"],
-        "fare_families": ["enhanced", "premium", "premium"]
+        "fare_families": ["enhanced", "premium", "premium"],
+        "seller_codes": ["AA", "AA", "AA"],
+        "is_airline_direct": [true, true, true]
       }
     },
     {
@@ -486,7 +504,9 @@
           "unknown",
           "unknown",
           "unknown"
-        ]
+        ],
+        "seller_codes": ["B6", "B6", "B6", "B6"],
+        "is_airline_direct": [true, true, true, true]
       }
     }
   ]

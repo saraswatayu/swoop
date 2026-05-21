@@ -116,6 +116,8 @@ print(results.is_complete)
 
 `search()` and `search_legs()` return shopping totals. Use `check_price()`, `price_legs()`, or `price_selector()` when you need the bookable fare for one chosen itinerary.
 
+Each price-check call costs ~2 RPCs (one search, one booking lookup) — including one-way trips, so `PriceResult.booking_options` is populated and `booking_url` is available. For high-volume scoring of many fares, expect rate-limit pressure to scale accordingly; increase `retries` or pace your calls.
+
 <details>
 <summary>More examples</summary>
 
@@ -213,7 +215,10 @@ itinerary = option.legs[0].itinerary
 options = get_booking_results(itinerary)
 
 for opt in options:
-    print(f"${opt.price} — {opt.brand_label} ({opt.fare_family})")
+    label = opt.seller_name or "airline-direct"
+    print(f"${opt.price} — {opt.brand_label} ({opt.fare_family}) via {label}")
+    if opt.booking_url:
+        print(f"  book at: {opt.booking_url}")
 ```
 
 </details>
@@ -322,7 +327,7 @@ Returns `PriceResult | None`. `PriceResult` has `price`, `fare_brand`, `is_basic
 
 ### `get_booking_results(itinerary_or_token, **kwargs)`
 
-Get fare options for a specific itinerary. Pass an `Itinerary` object directly, or a booking token string with explicit `origin`, `destination`, `date`, and `selected_legs`. Returns `list[BookingOption]` with `price`, `brand_label`, `brand_code`, `fare_family`, etc.
+Get fare options for a specific itinerary. Pass an `Itinerary` object directly, or a booking token string with explicit `origin`, `destination`, `date`, and `selected_legs`. Returns `list[BookingOption]` with `price`, `brand_label`, `brand_code`, `is_basic`, `fare_family`, `rebookability_signal`, plus seller fields `seller_name`, `seller_code`, `booking_url`, `logo_url`, and `is_airline_direct` for routing users to the actual booking page.
 
 ### `set_country(country_code)`
 

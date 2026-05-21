@@ -420,7 +420,14 @@ class TestProxyPropagation:
             resolve_kwargs.append(kwargs)
             return _raw_result(itin)
 
+        booking_kwargs: dict = {}
+
+        def spy_booking(*args, **kwargs):
+            booking_kwargs.update(kwargs)
+            return []
+
         monkeypatch.setattr(selection, "_search_from_legs", spy_search)
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", spy_booking)
 
         transport = TransportConfig(proxy="socks5://host:1080", country="US")
         result = selection.price_trip_selector(
@@ -430,6 +437,8 @@ class TestProxyPropagation:
 
         assert resolve_kwargs[0]["transport"].proxy == "socks5://host:1080"
         assert resolve_kwargs[0]["transport"].country == "US"
+        assert booking_kwargs["transport"].proxy == "socks5://host:1080"
+        assert booking_kwargs["transport"].country == "US"
         assert result is not None
         assert result.price == 299
 

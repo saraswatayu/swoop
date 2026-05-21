@@ -4,6 +4,7 @@ import logging
 import re
 import sys
 from datetime import date as _date, datetime
+from typing import Optional
 
 import click
 
@@ -29,22 +30,44 @@ class _SwoopVerboseHandler(logging.StreamHandler):
     """
 
 
-def configure_verbose_logging(verbose: bool) -> None:
+def configure_verbose_logging(
+    ctx: Optional[click.Context],
+    verbose: bool,
+) -> None:
     """Wire ``swoop.*`` loggers to stderr at DEBUG level when ``--verbose``.
 
-    Idempotent: re-invoking with ``verbose=True`` does not stack handlers.
-    Called once per CLI invocation, before any swoop API calls run.
+    Idempotent: re-invoking with ``verbose=True`` does not stack handlers
+    or re-snapshot prior state.
+
+    Scoped: when ``ctx`` is provided, the prior logger level, propagate
+    flag, and handler set are restored via ``ctx.call_on_close`` so that
+    in-process callers (tests, embedding wrappers) don't leak DEBUG state
+    or our handler into subsequent non-verbose invocations.
     """
     if not verbose:
         return
     swoop_logger = logging.getLogger("swoop")
-    swoop_logger.setLevel(logging.DEBUG)
     if any(isinstance(h, _SwoopVerboseHandler) for h in swoop_logger.handlers):
         return
+    prior_level = swoop_logger.level
+    prior_propagate = swoop_logger.propagate
+    swoop_logger.setLevel(logging.DEBUG)
+    # Don't double-emit through root: a host app embedding swoop may have
+    # its own root handler, which would surface our DEBUG records (and any
+    # future ``logger.debug`` line that quotes a proxy URL or request body
+    # per SECURITY.md) into places the user didn't opt into.
+    swoop_logger.propagate = False
     handler = _SwoopVerboseHandler(sys.stderr)
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter("[%(levelname)s %(name)s] %(message)s"))
     swoop_logger.addHandler(handler)
+
+    if ctx is not None:
+        def _restore() -> None:
+            swoop_logger.removeHandler(handler)
+            swoop_logger.setLevel(prior_level)
+            swoop_logger.propagate = prior_propagate
+        ctx.call_on_close(_restore)
 
 
 class IATACodeType(click.ParamType):

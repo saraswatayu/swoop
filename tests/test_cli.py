@@ -296,58 +296,109 @@ class TestResolveQuiet:
 
 
 class TestVerboseFlag:
-    """--verbose flag wires swoop.* loggers to stderr at DEBUG."""
+    """--verbose flag wires swoop.* loggers to stderr at DEBUG for the
+    lifetime of the CLI invocation, then restores prior state."""
 
-    def _reset_swoop_logger(self):
+    @pytest.fixture(autouse=True)
+    def _snapshot_swoop_logger(self):
+        """Snapshot the swoop logger so a test's wiring can't leak.
+
+        Replaces the previous teardown_method that hardcoded
+        ``level=WARNING`` — that was itself a state leak (any pre-existing
+        configuration above WARNING would be silently lowered) and made
+        these tests order-dependent.
+        """
         import logging
-        from swoop.cli.utils import _SwoopVerboseHandler
         log = logging.getLogger("swoop")
-        for handler in list(log.handlers):
-            if isinstance(handler, _SwoopVerboseHandler):
-                log.removeHandler(handler)
-        log.setLevel(logging.WARNING)
-
-    def teardown_method(self):
-        self._reset_swoop_logger()
+        saved_level = log.level
+        saved_propagate = log.propagate
+        saved_handlers = list(log.handlers)
+        try:
+            yield
+        finally:
+            log.handlers[:] = saved_handlers
+            log.setLevel(saved_level)
+            log.propagate = saved_propagate
 
     @patch("swoop.cli.commands._run_search")
-    def test_verbose_configures_swoop_logger(self, mock_search):
-        """--verbose sets swoop.* logger to DEBUG and attaches a stderr handler."""
+    def test_verbose_attaches_and_restores_during_command(self, mock_search):
+        """During the invocation the handler is attached and the level is
+        DEBUG; after Click closes the context, prior state is restored."""
         import logging
         from swoop.cli.utils import _SwoopVerboseHandler
-        mock_search.return_value = _make_search_result()
+
+        observed = {}
+
+        def _capture_state(*_args, **_kwargs):
+            log = logging.getLogger("swoop")
+            observed["level"] = log.level
+            observed["propagate"] = log.propagate
+            observed["has_handler"] = any(
+                isinstance(h, _SwoopVerboseHandler) for h in log.handlers
+            )
+            return _make_search_result()
+
+        mock_search.side_effect = _capture_state
         runner = CliRunner()
         result = runner.invoke(main, [
             "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "--verbose",
         ])
         assert result.exit_code == 0
+        # While the command was running.
+        assert observed["level"] == logging.DEBUG
+        assert observed["propagate"] is False
+        assert observed["has_handler"] is True
+        # After the command finished, Click closed the context and the
+        # cleanup restored the prior swoop-logger state. Without this,
+        # in-process callers (test harnesses, embedding wrappers) would
+        # leak DEBUG and the handler into subsequent non-verbose runs.
         swoop_log = logging.getLogger("swoop")
-        assert swoop_log.level == logging.DEBUG
-        assert any(isinstance(h, _SwoopVerboseHandler) for h in swoop_log.handlers)
+        assert not any(
+            isinstance(h, _SwoopVerboseHandler) for h in swoop_log.handlers
+        )
 
     @patch("swoop.cli.commands._run_search")
     def test_verbose_short_flag(self, mock_search):
         """-v is equivalent to --verbose."""
         import logging
-        mock_search.return_value = _make_search_result()
+        observed_level = []
+
+        def _capture(*_args, **_kwargs):
+            observed_level.append(logging.getLogger("swoop").level)
+            return _make_search_result()
+
+        mock_search.side_effect = _capture
         runner = CliRunner()
         result = runner.invoke(main, [
             "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "-v",
         ])
         assert result.exit_code == 0
-        assert logging.getLogger("swoop").level == logging.DEBUG
+        assert observed_level == [logging.DEBUG]
 
     @patch("swoop.cli.commands._run_search")
-    def test_verbose_idempotent(self, mock_search):
-        """Re-invoking with --verbose must not stack handlers."""
+    def test_verbose_idempotent_within_invocation(self, mock_search):
+        """Re-invoking with --verbose must not stack handlers even if
+        the cleanup didn't fire between calls (e.g. exception path)."""
         import logging
-        from swoop.cli.utils import _SwoopVerboseHandler
+        from swoop.cli.utils import _SwoopVerboseHandler, configure_verbose_logging
+
         mock_search.return_value = _make_search_result()
         runner = CliRunner()
+        # Two back-to-back invocations: each scope must restore cleanly,
+        # so the handler count between invocations stays at zero, then
+        # rises to exactly one during the next invocation.
         for _ in range(3):
             runner.invoke(main, [
                 "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "-v",
             ])
+            assert not any(
+                isinstance(h, _SwoopVerboseHandler)
+                for h in logging.getLogger("swoop").handlers
+            )
+        # Also exercise the bare function with no ctx: two calls
+        # in the same scope must still produce only one handler.
+        configure_verbose_logging(None, True)
+        configure_verbose_logging(None, True)
         count = sum(
             1 for h in logging.getLogger("swoop").handlers
             if isinstance(h, _SwoopVerboseHandler)
@@ -356,18 +407,31 @@ class TestVerboseFlag:
 
     @patch("swoop.cli.commands._run_search")
     def test_no_verbose_leaves_logging_quiet(self, mock_search):
-        """Without --verbose, no handler should be added."""
+        """Without --verbose, no handler is added and the level is unchanged."""
         import logging
         from swoop.cli.utils import _SwoopVerboseHandler
-        self._reset_swoop_logger()
         mock_search.return_value = _make_search_result()
         runner = CliRunner()
+        prior_level = logging.getLogger("swoop").level
         result = runner.invoke(main, [
             "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json",
         ])
         assert result.exit_code == 0
         swoop_log = logging.getLogger("swoop")
         assert not any(isinstance(h, _SwoopVerboseHandler) for h in swoop_log.handlers)
+        assert swoop_log.level == prior_level
+
+    def test_configure_verbose_logging_false_is_noop(self):
+        """configure_verbose_logging(ctx, False) must not touch the logger."""
+        import logging
+        from swoop.cli.utils import _SwoopVerboseHandler, configure_verbose_logging
+        log = logging.getLogger("swoop")
+        prior_level = log.level
+        prior_propagate = log.propagate
+        configure_verbose_logging(None, False)
+        assert log.level == prior_level
+        assert log.propagate == prior_propagate
+        assert not any(isinstance(h, _SwoopVerboseHandler) for h in log.handlers)
 
 
 # ---------------------------------------------------------------------------

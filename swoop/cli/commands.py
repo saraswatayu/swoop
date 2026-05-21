@@ -276,7 +276,7 @@ def search_cmd(
         format_search_table,
     )
 
-    configure_verbose_logging(verbose)
+    configure_verbose_logging(ctx, verbose)
     quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
     has_positional = any(value is not None for value in (origin, destination, date))
@@ -470,7 +470,7 @@ def price_cmd(
         format_price_table,
     )
 
-    configure_verbose_logging(verbose)
+    configure_verbose_logging(ctx, verbose)
     quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
 

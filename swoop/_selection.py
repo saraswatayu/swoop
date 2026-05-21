@@ -596,9 +596,11 @@ def build_request_legs_from_selected(
 ) -> list[dict[str, Any]]:
     request_legs: list[dict[str, Any]] = []
     for index, leg in enumerate(legs):
-        airlines = None
-        if carrier_filters and carrier_filters[index] is not None:
-            airlines = [carrier_filters[index]]
+        airlines: Optional[list[str]] = None
+        if carrier_filters:
+            filter_val = carrier_filters[index]
+            if filter_val is not None:
+                airlines = [filter_val]
         request_legs.append(
             _normalize_rpc_leg(
                 leg.origin,

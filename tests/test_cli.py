@@ -261,6 +261,178 @@ class TestMainGroup:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
 
+    def test_version_matches_library(self):
+        """CLI --version must report the same value as swoop.__version__."""
+        import swoop
+        runner = CliRunner()
+        result = runner.invoke(main, ["--version"])
+        assert result.exit_code == 0
+        assert swoop.__version__ in result.output
+
+
+class TestResolveQuiet:
+    """resolve_quiet auto-detects non-TTY stdout."""
+
+    def test_explicit_quiet_flag_wins(self):
+        from swoop.cli.utils import resolve_quiet
+        import sys
+        with patch.object(sys.stdout, "isatty", return_value=True):
+            assert resolve_quiet(True) is True
+        with patch.object(sys.stdout, "isatty", return_value=False):
+            assert resolve_quiet(True) is True
+
+    def test_tty_without_flag_stays_loud(self):
+        from swoop.cli.utils import resolve_quiet
+        import sys
+        with patch.object(sys.stdout, "isatty", return_value=True):
+            assert resolve_quiet(False) is False
+
+    def test_non_tty_without_flag_auto_quiets(self):
+        """The whole point: piping to jq shouldn't need a -q."""
+        from swoop.cli.utils import resolve_quiet
+        import sys
+        with patch.object(sys.stdout, "isatty", return_value=False):
+            assert resolve_quiet(False) is True
+
+
+class TestVerboseFlag:
+    """--verbose flag wires swoop.* loggers to stderr at DEBUG for the
+    lifetime of the CLI invocation, then restores prior state."""
+
+    @pytest.fixture(autouse=True)
+    def _snapshot_swoop_logger(self):
+        """Snapshot the swoop logger so a test's wiring can't leak.
+
+        Replaces the previous teardown_method that hardcoded
+        ``level=WARNING`` — that was itself a state leak (any pre-existing
+        configuration above WARNING would be silently lowered) and made
+        these tests order-dependent.
+        """
+        import logging
+        log = logging.getLogger("swoop")
+        saved_level = log.level
+        saved_propagate = log.propagate
+        saved_handlers = list(log.handlers)
+        try:
+            yield
+        finally:
+            log.handlers[:] = saved_handlers
+            log.setLevel(saved_level)
+            log.propagate = saved_propagate
+
+    @patch("swoop.cli.commands._run_search")
+    def test_verbose_attaches_and_restores_during_command(self, mock_search):
+        """During the invocation the handler is attached and the level is
+        DEBUG; after Click closes the context, prior state is restored."""
+        import logging
+        from swoop.cli.utils import _SwoopVerboseHandler
+
+        observed = {}
+
+        def _capture_state(*_args, **_kwargs):
+            log = logging.getLogger("swoop")
+            observed["level"] = log.level
+            observed["propagate"] = log.propagate
+            observed["has_handler"] = any(
+                isinstance(h, _SwoopVerboseHandler) for h in log.handlers
+            )
+            return _make_search_result()
+
+        mock_search.side_effect = _capture_state
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "--verbose",
+        ])
+        assert result.exit_code == 0
+        # While the command was running.
+        assert observed["level"] == logging.DEBUG
+        assert observed["propagate"] is False
+        assert observed["has_handler"] is True
+        # After the command finished, Click closed the context and the
+        # cleanup restored the prior swoop-logger state. Without this,
+        # in-process callers (test harnesses, embedding wrappers) would
+        # leak DEBUG and the handler into subsequent non-verbose runs.
+        swoop_log = logging.getLogger("swoop")
+        assert not any(
+            isinstance(h, _SwoopVerboseHandler) for h in swoop_log.handlers
+        )
+
+    @patch("swoop.cli.commands._run_search")
+    def test_verbose_short_flag(self, mock_search):
+        """-v is equivalent to --verbose."""
+        import logging
+        observed_level = []
+
+        def _capture(*_args, **_kwargs):
+            observed_level.append(logging.getLogger("swoop").level)
+            return _make_search_result()
+
+        mock_search.side_effect = _capture
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "-v",
+        ])
+        assert result.exit_code == 0
+        assert observed_level == [logging.DEBUG]
+
+    @patch("swoop.cli.commands._run_search")
+    def test_verbose_idempotent_within_invocation(self, mock_search):
+        """Re-invoking with --verbose must not stack handlers even if
+        the cleanup didn't fire between calls (e.g. exception path)."""
+        import logging
+        from swoop.cli.utils import _SwoopVerboseHandler, configure_verbose_logging
+
+        mock_search.return_value = _make_search_result()
+        runner = CliRunner()
+        # Two back-to-back invocations: each scope must restore cleanly,
+        # so the handler count between invocations stays at zero, then
+        # rises to exactly one during the next invocation.
+        for _ in range(3):
+            runner.invoke(main, [
+                "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "-v",
+            ])
+            assert not any(
+                isinstance(h, _SwoopVerboseHandler)
+                for h in logging.getLogger("swoop").handlers
+            )
+        # Also exercise the bare function with no ctx: two calls
+        # in the same scope must still produce only one handler.
+        configure_verbose_logging(None, True)
+        configure_verbose_logging(None, True)
+        count = sum(
+            1 for h in logging.getLogger("swoop").handlers
+            if isinstance(h, _SwoopVerboseHandler)
+        )
+        assert count == 1, f"expected 1 verbose handler, got {count}"
+
+    @patch("swoop.cli.commands._run_search")
+    def test_no_verbose_leaves_logging_quiet(self, mock_search):
+        """Without --verbose, no handler is added and the level is unchanged."""
+        import logging
+        from swoop.cli.utils import _SwoopVerboseHandler
+        mock_search.return_value = _make_search_result()
+        runner = CliRunner()
+        prior_level = logging.getLogger("swoop").level
+        result = runner.invoke(main, [
+            "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json",
+        ])
+        assert result.exit_code == 0
+        swoop_log = logging.getLogger("swoop")
+        assert not any(isinstance(h, _SwoopVerboseHandler) for h in swoop_log.handlers)
+        assert swoop_log.level == prior_level
+
+    def test_configure_verbose_logging_false_is_noop(self):
+        """configure_verbose_logging(ctx, False) must not touch the logger."""
+        import logging
+        from swoop.cli.utils import _SwoopVerboseHandler, configure_verbose_logging
+        log = logging.getLogger("swoop")
+        prior_level = log.level
+        prior_propagate = log.propagate
+        configure_verbose_logging(None, False)
+        assert log.level == prior_level
+        assert log.propagate == prior_propagate
+        assert not any(isinstance(h, _SwoopVerboseHandler) for h in log.handlers)
+
 
 # ---------------------------------------------------------------------------
 # Search command tests
@@ -606,6 +778,176 @@ class TestPriceCommand:
         assert "$342" in result.output
         assert "1-leg" in result.output
         assert "RPC" not in result.output
+
+    @patch("swoop.check_price")
+    def test_price_csv_output_with_booking_options(self, mock_check):
+        """csv emits one row per booking option with seller fields."""
+        mock_check.return_value = PriceResult(
+            price=342,
+            currency="USD",
+            fare_brand="Main Cabin",
+            booking_options=[
+                BookingOption(
+                    price=342, brand_label="Main", brand_code="MAIN",
+                    is_basic=False, fare_family="Main",
+                    rebookability_signal="free-changes",
+                    seller_name="Delta", seller_code="DL",
+                    booking_url="https://example.test/book/dl",
+                    logo_url="https://logos.test/dl.png",
+                    is_airline_direct=True,
+                ),
+                BookingOption(
+                    price=355, brand_label="Main", brand_code="MAIN",
+                    is_basic=False, fare_family="Main",
+                    rebookability_signal=None,
+                    seller_name="Mytrip", seller_code="ETRAVELI_Mytrip",
+                    booking_url="https://example.test/book/mytrip",
+                    logo_url="",
+                    is_airline_direct=False,
+                ),
+            ],
+            rpc_calls=2,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        reader = _csv.reader(_io.StringIO(result.output))
+        rows = list(reader)
+        # Header + 2 booking options
+        assert len(rows) == 3
+        header = rows[0]
+        assert header[0] == "price"
+        assert "seller_name" in header
+        assert "is_airline_direct" in header
+        assert "logo_url" in header
+        idx = {name: i for i, name in enumerate(header)}
+        # Row 1: airline-direct Delta — booleans must be lowercase so
+        # spreadsheet filters like is_airline_direct == TRUE match.
+        assert rows[1][idx["price"]] == "342"
+        assert rows[1][idx["seller_name"]] == "Delta"
+        assert rows[1][idx["is_airline_direct"]] == "true"
+        assert rows[1][idx["logo_url"]] == "https://logos.test/dl.png"
+        # Row 2: OTA Mytrip
+        assert rows[2][idx["price"]] == "355"
+        assert rows[2][idx["seller_name"]] == "Mytrip"
+        assert rows[2][idx["is_airline_direct"]] == "false"
+        assert rows[2][idx["logo_url"]] == ""
+
+    @patch("swoop.check_price")
+    def test_price_csv_output_no_booking_options(self, mock_check):
+        """csv falls back to a single row when booking_options is empty."""
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD", fare_brand="Main Cabin", rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        assert len(rows) == 2  # header + chosen fare
+        # Header column count must match the fallback row column count.
+        assert len(rows[0]) == len(rows[1])
+        assert "logo_url" in rows[0]
+        assert rows[1][rows[0].index("price")] == "342"
+
+    @patch("swoop.check_price")
+    def test_price_csv_empty_currency_column_when_none(self, mock_check):
+        """currency=None must serialize as an empty string, not 'None'."""
+        mock_check.return_value = PriceResult(
+            price=342, currency=None, fare_brand="Main Cabin", rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        assert rows[1][rows[0].index("currency")] == ""
+
+    @patch("swoop.check_price")
+    def test_price_csv_round_trips_commas_quotes_newlines(self, mock_check):
+        """csv.writer must quote commas, double-quotes, and newlines so
+        the row round-trips through csv.reader unchanged."""
+        from swoop.decoder import BookingOption
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD",
+            booking_options=[BookingOption(
+                price=342,
+                seller_name='Acme, Inc. "Travel"\nDivision',
+                booking_url="https://x.test/a?q=1,2",
+                is_airline_direct=False,
+            )],
+            rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        idx = {name: i for i, name in enumerate(rows[0])}
+        assert rows[1][idx["seller_name"]] == 'Acme, Inc. "Travel"\nDivision'
+        assert rows[1][idx["booking_url"]] == "https://x.test/a?q=1,2"
+
+    @patch("swoop.check_price")
+    def test_price_csv_sanitizes_formula_prefixes(self, mock_check):
+        """Excel/Sheets treat a cell starting with =,+,-,@,\\t,\\r as a
+        formula. swoop passes Google's RPC strings through opaquely, so
+        any such prefix must be neutralized with a leading single quote
+        before the CSV reaches a spreadsheet that would auto-evaluate it.
+        """
+        from swoop.decoder import BookingOption
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD",
+            fare_brand="=cmd|'/c calc'!A1",
+            booking_options=[
+                BookingOption(price=342, seller_name="=HYPERLINK(\"https://evil\",\"click\")"),
+                BookingOption(price=355, seller_name="+1234567890"),
+                BookingOption(price=360, seller_name="-2+3"),
+                BookingOption(price=370, seller_name="@SUM(A1:A10)"),
+                BookingOption(price=380, seller_name="\tinjected"),
+                BookingOption(price=390, seller_name="\rinjected"),
+                BookingOption(price=400, seller_name="Delta Air Lines"),
+            ],
+            rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        idx = {name: i for i, name in enumerate(rows[0])}
+        sellers = [row[idx["seller_name"]] for row in rows[1:]]
+        # Each dangerous prefix is neutralized with a leading single quote.
+        assert sellers[0].startswith("'=HYPERLINK")
+        assert sellers[1].startswith("'+1234567890")
+        assert sellers[2].startswith("'-2+3")
+        assert sellers[3].startswith("'@SUM")
+        assert sellers[4].startswith("'\t")
+        assert sellers[5].startswith("'\r")
+        # Safe prefixes are passed through unmolested.
+        assert sellers[6] == "Delta Air Lines"
+        # fare_brand is also RPC-sourced and must be sanitized.
+        assert rows[1][idx["fare_brand"]].startswith("'=cmd")
 
     @patch("swoop.check_price")
     def test_price_table_output_hides_rpc_call_count(self, mock_check):

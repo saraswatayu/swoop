@@ -78,11 +78,17 @@ swoop price --leg JFK LAX 2026-06-15 DL2300 --leg LAX SFO 2026-06-18 UA544 --leg
 # CSV for spreadsheets
 swoop search JFK LAX 2026-06-15 -o csv -q > flights.csv
 
+# Price CSV (one row per booking option, with seller and booking_url)
+swoop price JFK LAX --depart 2026-06-15 DL2300 -o csv -q > fares.csv
+
 # Search JSON for piping
 swoop search JFK LAX 2026-06-15 -o json -q | jq '.results[0] | {selector, price, legs}'
 
 # Filter by airline and time window
 swoop search JFK LAX 2026-06-15 -a DL -a UA --depart-after 8 --depart-before 14
+
+# Surface RPC debug logging on stderr (URLs, response sizes, retries)
+swoop search JFK LAX 2026-06-15 --verbose
 ```
 
 </details>
@@ -91,6 +97,21 @@ Run `swoop search --help` for all options.
 
 > [!TIP]
 > Search shows shopping totals for browsing. Use `--show-price-commands` for copy/paste `swoop price --selector ...` commands in human output, or use `selector` from JSON with `swoop price --selector ...` in scripts.
+
+### Shell completion
+
+```bash
+# bash (~/.bashrc)
+eval "$(_SWOOP_COMPLETE=bash_source swoop)"
+
+# zsh (~/.zshrc)
+eval "$(_SWOOP_COMPLETE=zsh_source swoop)"
+
+# fish (~/.config/fish/config.fish)
+_SWOOP_COMPLETE=fish_source swoop | source
+```
+
+After reloading your shell, `swoop <TAB>`, `swoop search --<TAB>`, and `-o <TAB>` will autocomplete.
 
 ## Python API
 
@@ -225,6 +246,13 @@ for opt in options:
 
 > [!TIP]
 > Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
+
+### Runnable examples
+
+Real-world patterns are in [`examples/`](examples/):
+
+- [`examples/price_drop_watcher.py`](examples/price_drop_watcher.py) — Watch a known flight for price drops on a schedule (the pattern Perch uses to save users ~$247/trip).
+- [`examples/multi_city_finder.py`](examples/multi_city_finder.py) — Multi-city / open-jaw search with beam-search tuning knobs.
 
 ## How it works
 

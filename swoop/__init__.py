@@ -544,7 +544,7 @@ def check_price(
             airlines=[outbound_carrier] if outbound_carrier else None,
         )
     ]
-    requested_flights = [flight_number]
+    requested_flights: list[Optional[str]] = [flight_number]
     if return_date is not None:
         request_legs.append(
             _normalize_rpc_leg(
@@ -634,3 +634,11 @@ __all__ = [
     "STOPS_ONE_OR_FEWER",
     "STOPS_TWO_OR_FEWER",
 ]
+
+
+# Hide implementation details from `dir(swoop)` and tab completion (PEP 562).
+# Names remain in globals() so internal call sites still resolve; only the
+# perceived public surface — what shows up in tab completion and `dir()` —
+# is curated to __all__.
+def __dir__() -> list[str]:
+    return sorted(__all__)

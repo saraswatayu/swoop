@@ -730,3 +730,72 @@ class TestExactPricing:
         assert result.price == 1199
         assert result.fare_brand is None
         assert result.booking_options == options
+
+
+class _StubLeg:
+    """Minimal duck-typed leg for build_request_legs_from_selected."""
+
+    def __init__(self, origin: str, destination: str, date: str) -> None:
+        self.origin = origin
+        self.destination = destination
+        self.date = date
+
+
+class TestBuildRequestLegsFromSelected:
+    """Cover the carrier_filters branches in build_request_legs_from_selected.
+
+    The function feeds airlines into the RPC request when the caller wants
+    to pin the carrier per leg. None means "no airline pin," and silent
+    misbehaviour here is hard to spot from higher-level tests (a missing
+    filter just means Google returns more candidates than expected).
+    """
+
+    def test_none_filters_omits_airlines(self):
+        legs = [_StubLeg("JFK", "LAX", "2026-06-15")]
+        out = selection.build_request_legs_from_selected(legs)
+        assert len(out) == 1
+        assert out[0]["origin"] == "JFK"
+        assert out[0]["destination"] == "LAX"
+        assert out[0]["date"] == "2026-06-15"
+        assert out[0]["airlines"] is None
+
+    def test_empty_filters_list_treated_as_no_pin(self):
+        """An empty carrier_filters list is falsy and must not raise
+        IndexError on the first leg — it means "no pins anywhere."
+        """
+        legs = [_StubLeg("JFK", "LAX", "2026-06-15")]
+        out = selection.build_request_legs_from_selected(legs, carrier_filters=[])
+        assert out[0]["airlines"] is None
+
+    def test_all_none_filters_omits_airlines_on_every_leg(self):
+        legs = [
+            _StubLeg("JFK", "LAX", "2026-06-15"),
+            _StubLeg("LAX", "SFO", "2026-06-18"),
+        ]
+        out = selection.build_request_legs_from_selected(
+            legs, carrier_filters=[None, None]
+        )
+        assert [leg["airlines"] for leg in out] == [None, None]
+
+    def test_mixed_filters_apply_per_leg(self):
+        legs = [
+            _StubLeg("JFK", "LAX", "2026-06-15"),
+            _StubLeg("LAX", "SFO", "2026-06-18"),
+        ]
+        out = selection.build_request_legs_from_selected(
+            legs, carrier_filters=["DL", None]
+        )
+        assert out[0]["airlines"] == ["DL"]
+        assert out[1]["airlines"] is None
+
+    def test_length_mismatch_raises_indexerror(self):
+        """Pinning the contract: a too-short filters list must raise
+        IndexError rather than silently dropping pins. If we ever wrap
+        this in a friendlier error, this test catches the API change.
+        """
+        legs = [
+            _StubLeg("JFK", "LAX", "2026-06-15"),
+            _StubLeg("LAX", "SFO", "2026-06-18"),
+        ]
+        with pytest.raises(IndexError):
+            selection.build_request_legs_from_selected(legs, carrier_filters=["DL"])

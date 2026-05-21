@@ -729,6 +729,7 @@ class TestPriceCommand:
                     rebookability_signal="free-changes",
                     seller_name="Delta", seller_code="DL",
                     booking_url="https://example.test/book/dl",
+                    logo_url="https://logos.test/dl.png",
                     is_airline_direct=True,
                 ),
                 BookingOption(
@@ -737,6 +738,7 @@ class TestPriceCommand:
                     rebookability_signal=None,
                     seller_name="Mytrip", seller_code="ETRAVELI_Mytrip",
                     booking_url="https://example.test/book/mytrip",
+                    logo_url="",
                     is_airline_direct=False,
                 ),
             ],
@@ -748,20 +750,29 @@ class TestPriceCommand:
             "-o", "csv", "-q",
         ])
         assert result.exit_code == 0
-        lines = result.output.strip().splitlines()
+        import csv as _csv
+        import io as _io
+        reader = _csv.reader(_io.StringIO(result.output))
+        rows = list(reader)
         # Header + 2 booking options
-        assert len(lines) == 3
-        assert lines[0].split(",")[0] == "price"
-        assert "seller_name" in lines[0]
-        assert "is_airline_direct" in lines[0]
-        # Row 1: airline-direct Delta
-        assert "342" in lines[1]
-        assert "Delta" in lines[1]
-        assert "True" in lines[1]
+        assert len(rows) == 3
+        header = rows[0]
+        assert header[0] == "price"
+        assert "seller_name" in header
+        assert "is_airline_direct" in header
+        assert "logo_url" in header
+        idx = {name: i for i, name in enumerate(header)}
+        # Row 1: airline-direct Delta — booleans must be lowercase so
+        # spreadsheet filters like is_airline_direct == TRUE match.
+        assert rows[1][idx["price"]] == "342"
+        assert rows[1][idx["seller_name"]] == "Delta"
+        assert rows[1][idx["is_airline_direct"]] == "true"
+        assert rows[1][idx["logo_url"]] == "https://logos.test/dl.png"
         # Row 2: OTA Mytrip
-        assert "355" in lines[2]
-        assert "Mytrip" in lines[2]
-        assert "False" in lines[2]
+        assert rows[2][idx["price"]] == "355"
+        assert rows[2][idx["seller_name"]] == "Mytrip"
+        assert rows[2][idx["is_airline_direct"]] == "false"
+        assert rows[2][idx["logo_url"]] == ""
 
     @patch("swoop.check_price")
     def test_price_csv_output_no_booking_options(self, mock_check):
@@ -775,9 +786,14 @@ class TestPriceCommand:
             "-o", "csv", "-q",
         ])
         assert result.exit_code == 0
-        lines = result.output.strip().splitlines()
-        assert len(lines) == 2  # header + chosen fare
-        assert "342" in lines[1]
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        assert len(rows) == 2  # header + chosen fare
+        # Header column count must match the fallback row column count.
+        assert len(rows[0]) == len(rows[1])
+        assert "logo_url" in rows[0]
+        assert rows[1][rows[0].index("price")] == "342"
 
     @patch("swoop.check_price")
     def test_price_table_output_hides_rpc_call_count(self, mock_check):

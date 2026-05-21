@@ -687,6 +687,10 @@ def test_booking_option_booking_url_extracted_independently_of_seller_block() ->
         "https://www.google.com.evil.example/travel/clk/f",
         "https://www.google.com/travel/clk/other",
         "https://www.google.com/travel/clk/f#fragment",
+        "https://attacker@www.google.com/travel/clk/f",
+        "https://user:pw@www.google.com/travel/clk/f",
+        "https://www.google.com:444/travel/clk/f",
+        "https://www.google.com/travel/clk/f?u=preset",
     ],
 )
 def test_booking_option_booking_url_rejects_untrusted_redirect_base(clk_base: str) -> None:

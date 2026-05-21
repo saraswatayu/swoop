@@ -306,7 +306,14 @@ def _extract_seller(option: list[Any]) -> tuple[str, str, str, str, bool]:
 
 
 def _is_google_clk_base(value: str) -> bool:
-    """Return whether *value* is the expected Google Flights booking redirect base."""
+    """Return whether *value* is the expected Google Flights booking redirect base.
+
+    Accepts only ``https://www.google.com/travel/clk/f`` with no userinfo,
+    no port other than the default 443, no pre-existing query string, and
+    no fragment. Rejecting a pre-existing query prevents an RPC reshape
+    from injecting a competing ``u=`` parameter that Google's redirect
+    could prefer over the one we reconstruct from ``opt[5]``.
+    """
     try:
         parsed = urllib.parse.urlsplit(value)
     except ValueError:
@@ -315,6 +322,10 @@ def _is_google_clk_base(value: str) -> bool:
         parsed.scheme == _GOOGLE_CLK_SCHEME
         and parsed.hostname == _GOOGLE_CLK_HOST
         and parsed.path == _GOOGLE_CLK_PATH
+        and parsed.port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
         and not parsed.fragment
     )
 
@@ -335,8 +346,7 @@ def _extract_booking_url(url_block: Any) -> str:
     ]
     if not (clk_base and kv_pairs and _is_google_clk_base(clk_base)):
         return ""
-    sep = "&" if "?" in clk_base else "?"
-    return clk_base + sep + urllib.parse.urlencode(kv_pairs)
+    return clk_base + "?" + urllib.parse.urlencode(kv_pairs)
 
 
 def _normalize_attribute_vector(value: Any) -> list[Any]:

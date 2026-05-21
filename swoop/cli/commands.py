@@ -4,6 +4,17 @@ from contextlib import nullcontext
 from typing import Optional, TypedDict
 
 import click
+from rich.console import Console
+
+from .utils import (
+    CABIN_CHOICES,
+    DATE,
+    IATA_CODE,
+    SORT_MAP,
+    check_past_date,
+    configure_verbose_logging,
+    resolve_quiet,
+)
 
 
 class _SearchFormatKwargs(TypedDict, total=False):
@@ -30,17 +41,6 @@ class _SearchFormatKwargs(TypedDict, total=False):
     legs: Optional[list]
     limit: Optional[int]
     price_commands: Optional[list[str]]
-from rich.console import Console
-
-from .utils import (
-    CABIN_CHOICES,
-    DATE,
-    IATA_CODE,
-    SORT_MAP,
-    check_past_date,
-    configure_verbose_logging,
-    resolve_quiet,
-)
 
 
 def _err_console(no_color: bool = False) -> Console:

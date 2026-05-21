@@ -544,7 +544,7 @@ def check_price(
             airlines=[outbound_carrier] if outbound_carrier else None,
         )
     ]
-    requested_flights = [flight_number]
+    requested_flights: list[Optional[str]] = [flight_number]
     if return_date is not None:
         request_legs.append(
             _normalize_rpc_leg(

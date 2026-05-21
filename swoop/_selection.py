@@ -12,7 +12,7 @@ from typing import Any, Optional
 from .builders import CabinClass
 from ._validate import parse_flight_number
 from .decoder import Itinerary, RawSearchResult, itinerary_matches_flight
-from .exceptions import SwoopHTTPError, SwoopParseError
+from .exceptions import SwoopError
 from .models import Passengers, PriceResult, ResolvedLeg, SearchResult, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_DEPARTURE_TIME,
@@ -479,7 +479,7 @@ def price_selected_trip(
                 transport=transport,
             )
             rpc_calls += 1
-        except (SwoopHTTPError, SwoopParseError) as exc:
+        except SwoopError as exc:
             logger.debug("Trip booking lookup failed: %s", exc)
 
     if booking_options:

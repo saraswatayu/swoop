@@ -103,3 +103,14 @@ def test_booking_corpus_cases_parse_critical_fields():
         assert [option._cabin_bucket for option in options] == expected["cabin_buckets"]
         assert [option.fare_family for option in options] == expected["fare_families"]
         assert [option._registry_version for option in options] == [case["registry_version"]] * len(options)
+        assert [option.seller_code for option in options] == expected["seller_codes"], (
+            f"{case['id']}: seller_code drift — Google may have reshaped opt[1]"
+        )
+        assert [option.is_airline_direct for option in options] == expected["is_airline_direct"], (
+            f"{case['id']}: is_airline_direct drift"
+        )
+        # Every option in our corpus has a non-empty booking_url; assert this
+        # contract so a future reshape that empties opt[5] fails loudly.
+        assert all(option.booking_url for option in options), (
+            f"{case['id']}: at least one option missing booking_url"
+        )

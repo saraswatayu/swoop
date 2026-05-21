@@ -343,7 +343,7 @@ class BookingOption:
         if self.seller_name:
             parts.append(f"seller={self.seller_name!r}")
         if self.brand_label:
-            parts.append(f"'{self.brand_label}'")
+            parts.append(f"{self.brand_label!r}")
         if self.is_basic:
             parts.append("basic")
         return f"BookingOption({' '.join(parts)})"

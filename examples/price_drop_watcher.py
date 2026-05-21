@@ -49,7 +49,12 @@ def load_cache() -> dict[str, int]:
 
 
 def save_cache(cache: dict[str, int]) -> None:
-    CACHE_PATH.write_text(json.dumps(cache, indent=2))
+    # Atomic replace so a SIGKILL mid-write can't leave a half-written
+    # JSON file that load_cache silently swallows as `{}` (which would
+    # wipe every cached baseline and disable drop detection).
+    tmp = CACHE_PATH.with_suffix(CACHE_PATH.suffix + ".tmp")
+    tmp.write_text(json.dumps(cache, indent=2))
+    tmp.replace(CACHE_PATH)
 
 
 def check_once(args: argparse.Namespace, cache: dict[str, int]) -> None:
@@ -103,6 +108,13 @@ def run_loop(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer (got %r)" % value)
+    return parsed
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("origin", help="origin IATA, e.g. JFK")
@@ -111,10 +123,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("flight_number", help="outbound flight, e.g. DL2300")
     parser.add_argument("--return-date", dest="return_date", help="return date YYYY-MM-DD")
     parser.add_argument("--return-flight", dest="return_flight", help="return flight, e.g. DL2301")
-    parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS,
+    parser.add_argument("--interval", type=_positive_int, default=DEFAULT_INTERVAL_SECONDS,
                         help=f"seconds between checks (default {DEFAULT_INTERVAL_SECONDS})")
     parser.add_argument("--once", action="store_true", help="run a single check and exit")
-    return parser.parse_args()
+    args = parser.parse_args()
+    # Roundtrip flags must come as a pair: a return-date without a return-flight
+    # makes check_price auto-pick a return itinerary; a return-flight without a
+    # return-date silently degrades to a one-way. Either pitfall silently watches
+    # the wrong trip, and cache_key only differentiates returns when both are set.
+    if bool(args.return_date) != bool(args.return_flight):
+        parser.error("--return-date and --return-flight must be passed together")
+    return args
 
 
 if __name__ == "__main__":

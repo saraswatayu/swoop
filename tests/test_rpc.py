@@ -678,6 +678,33 @@ def test_booking_option_booking_url_extracted_independently_of_seller_block() ->
     assert opt.logo_url == ""
 
 
+@pytest.mark.parametrize(
+    "clk_base",
+    [
+        "javascript:alert(1)",
+        "http://www.google.com/travel/clk/f",
+        "https://evil.example/travel/clk/f",
+        "https://www.google.com.evil.example/travel/clk/f",
+        "https://www.google.com/travel/clk/other",
+        "https://www.google.com/travel/clk/f#fragment",
+    ],
+)
+def test_booking_option_booking_url_rejects_untrusted_redirect_base(clk_base: str) -> None:
+    """Only the expected HTTPS Google Flights click redirect is exposed."""
+    option = make_booking_option(
+        price=400,
+        brand_code="ECONOMY",
+        brand_label="Economy",
+        booking_url_token="tok_orphan",
+    )
+    option[5][2][0] = clk_base
+    text = encode_rpc_outer([None, [[option]]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    assert options[0].booking_url == ""
+
+
 def test_booking_option_multi_seller_logs_debug_and_picks_first(caplog) -> None:
     """When opt[1] carries multiple seller entries we use the first and log at DEBUG."""
     option = make_booking_option(price=400, brand_code="ECONOMY", brand_label="Economy")

@@ -252,6 +252,9 @@ def _extract_segment_identity_from_context(context_segment_token_b64: str) -> di
 
 
 _GSTATIC_LOGO_BASE = "https://www.gstatic.com/flights/partner_logos/70px"
+_GOOGLE_CLK_SCHEME = "https"
+_GOOGLE_CLK_HOST = "www.google.com"
+_GOOGLE_CLK_PATH = "/travel/clk/f"
 
 
 def _extract_seller(option: list[Any]) -> tuple[str, str, str, str, bool]:
@@ -302,8 +305,22 @@ def _extract_seller(option: list[Any]) -> tuple[str, str, str, str, bool]:
     return seller_name, seller_code, booking_url, logo_url, is_airline_direct
 
 
+def _is_google_clk_base(value: str) -> bool:
+    """Return whether *value* is the expected Google Flights booking redirect base."""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == _GOOGLE_CLK_SCHEME
+        and parsed.hostname == _GOOGLE_CLK_HOST
+        and parsed.path == _GOOGLE_CLK_PATH
+        and not parsed.fragment
+    )
+
+
 def _extract_booking_url(url_block: Any) -> str:
-    """Reconstruct the clk redirect URL from opt[5]. Empty string when the shape is unexpected."""
+    """Reconstruct the validated clk redirect URL from opt[5]."""
     if not (isinstance(url_block, list) and len(url_block) >= 3):
         return ""
     clk_block = url_block[2]
@@ -314,9 +331,9 @@ def _extract_booking_url(url_block: Any) -> str:
     kv_pairs = [
         (str(p[0]), str(p[1]))
         for p in params
-        if isinstance(p, list) and len(p) >= 2 and p[0] and p[1]
+        if isinstance(p, list) and len(p) >= 2 and p[0] is not None and p[1] is not None
     ]
-    if not (clk_base and kv_pairs):
+    if not (clk_base and kv_pairs and _is_google_clk_base(clk_base)):
         return ""
     sep = "&" if "?" in clk_base else "?"
     return clk_base + sep + urllib.parse.urlencode(kv_pairs)

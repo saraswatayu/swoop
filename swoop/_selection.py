@@ -467,29 +467,20 @@ def price_selected_trip(
 
     final_itinerary = itineraries[-1]
     base_price = final_itinerary.price
-    if len(itineraries) == 1:
-        if base_price is None or base_price <= 0:
-            return None
-        return PriceResult(
-            price=base_price,
-            currency=final_itinerary.currency,
-            itinerary=final_itinerary,
-            resolved_legs=resolved_legs,
-            rpc_calls=rpc_calls,
-        )
-
-    try:
-        booking_options = fetch_trip_booking_options(
-            request_legs,
-            itineraries,
-            cabin=cabin,
-            passengers=passengers,
-            transport=transport,
-        )
-        rpc_calls += 1
-    except (SwoopHTTPError, SwoopParseError) as exc:
-        logger.debug("Trip booking lookup failed: %s", exc)
-        booking_options = []
+    booking_options = []
+    selected_payloads = _selected_payloads_for_itineraries(itineraries)
+    if selected_payloads is not None and final_itinerary.booking_token:
+        try:
+            booking_options = fetch_trip_booking_options(
+                request_legs,
+                itineraries,
+                cabin=cabin,
+                passengers=passengers,
+                transport=transport,
+            )
+            rpc_calls += 1
+        except (SwoopHTTPError, SwoopParseError) as exc:
+            logger.debug("Trip booking lookup failed: %s", exc)
 
     if booking_options:
         eligible = _eligible_booking_options(

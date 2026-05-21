@@ -299,12 +299,10 @@ class BookingOption:
     ``is_airline_direct``) describe who is selling the fare and how to reach the
     booking page:
 
-    * ``booking_url`` is a ``google.com/travel/clk/f`` redirect, taken verbatim
-      from the RPC response. swoop does *not* validate the scheme or host —
-      callers that render it as ``<a href>`` or open it programmatically MUST
-      verify it begins with ``https://www.google.com/`` before trusting it. A
-      poisoned or reshaped response could in principle deliver ``javascript:``,
-      ``data:``, or a lookalike host.
+    * ``booking_url`` is a ``google.com/travel/clk/f`` redirect reconstructed
+      from the RPC response. swoop only exposes it when the base URL is the
+      expected ``https://www.google.com/travel/clk/f`` endpoint; malformed,
+      reshaped, or non-Google bases produce an empty string.
     * ``logo_url`` points at ``gstatic.com/flights/partner_logos/70px/...`` only
       when Google explicitly provides ``logo_code``; empty otherwise. Consumers
       that want a best-effort airline logo can construct the URL themselves

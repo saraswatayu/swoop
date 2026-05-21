@@ -393,6 +393,86 @@ class TestSelectedTripResolution:
 
 
 class TestExactPricing:
+    def test_price_selected_trip_fetches_booking_options_for_one_way(self, monkeypatch):
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+        ]
+        itinerary = _make_itinerary(
+            origin="JFK",
+            destination="LAX",
+            date="2026-04-15",
+            airline="DL",
+            flight_number="2300",
+            price=342,
+            booking_token="token-out",
+        )
+        options = [
+            BookingOption(
+                price=319,
+                brand_label="Main Cabin",
+                brand_code="MAIN",
+                seller_name="Delta Air Lines",
+                booking_url="https://www.google.com/travel/clk/f?u=tok&v=1",
+                _cabin_bucket="economy",
+            )
+        ]
+        calls = []
+
+        def fake_fetch_trip_booking(legs, itineraries, **kwargs):
+            calls.append((legs, itineraries, kwargs))
+            return options
+
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", fake_fetch_trip_booking)
+
+        result = selection.price_selected_trip(
+            request_legs,
+            [itinerary],
+            cabin="economy",
+            include_basic_economy=False,
+        )
+
+        assert result is not None
+        assert result.price == 319
+        assert result.fare_brand == "Main Cabin"
+        assert result.booking_options == options
+        assert result.rpc_calls == 1
+        assert calls[0][0] == request_legs
+        assert calls[0][1] == [itinerary]
+
+    def test_price_selected_trip_skips_booking_lookup_without_one_way_token(self, monkeypatch):
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+        ]
+        itinerary = _make_itinerary(
+            origin="JFK",
+            destination="LAX",
+            date="2026-04-15",
+            airline="DL",
+            flight_number="2300",
+            price=342,
+            booking_token="",
+        )
+        calls = []
+
+        def fake_fetch_trip_booking(*args, **kwargs):
+            calls.append((args, kwargs))
+            return [BookingOption(price=319, brand_label="Main Cabin", _cabin_bucket="economy")]
+
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", fake_fetch_trip_booking)
+
+        result = selection.price_selected_trip(
+            request_legs,
+            [itinerary],
+            cabin="economy",
+            include_basic_economy=False,
+        )
+
+        assert result is not None
+        assert result.price == 342
+        assert result.booking_options == []
+        assert result.rpc_calls == 0
+        assert calls == []
+
     @pytest.mark.parametrize(
         ("cabin", "options", "expected_price", "expected_brand"),
         [

@@ -860,6 +860,96 @@ class TestPriceCommand:
         assert rows[1][rows[0].index("price")] == "342"
 
     @patch("swoop.check_price")
+    def test_price_csv_empty_currency_column_when_none(self, mock_check):
+        """currency=None must serialize as an empty string, not 'None'."""
+        mock_check.return_value = PriceResult(
+            price=342, currency=None, fare_brand="Main Cabin", rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        assert rows[1][rows[0].index("currency")] == ""
+
+    @patch("swoop.check_price")
+    def test_price_csv_round_trips_commas_quotes_newlines(self, mock_check):
+        """csv.writer must quote commas, double-quotes, and newlines so
+        the row round-trips through csv.reader unchanged."""
+        from swoop.decoder import BookingOption
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD",
+            booking_options=[BookingOption(
+                price=342,
+                seller_name='Acme, Inc. "Travel"\nDivision',
+                booking_url="https://x.test/a?q=1,2",
+                is_airline_direct=False,
+            )],
+            rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        idx = {name: i for i, name in enumerate(rows[0])}
+        assert rows[1][idx["seller_name"]] == 'Acme, Inc. "Travel"\nDivision'
+        assert rows[1][idx["booking_url"]] == "https://x.test/a?q=1,2"
+
+    @patch("swoop.check_price")
+    def test_price_csv_sanitizes_formula_prefixes(self, mock_check):
+        """Excel/Sheets treat a cell starting with =,+,-,@,\\t,\\r as a
+        formula. swoop passes Google's RPC strings through opaquely, so
+        any such prefix must be neutralized with a leading single quote
+        before the CSV reaches a spreadsheet that would auto-evaluate it.
+        """
+        from swoop.decoder import BookingOption
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD",
+            fare_brand="=cmd|'/c calc'!A1",
+            booking_options=[
+                BookingOption(price=342, seller_name="=HYPERLINK(\"https://evil\",\"click\")"),
+                BookingOption(price=355, seller_name="+1234567890"),
+                BookingOption(price=360, seller_name="-2+3"),
+                BookingOption(price=370, seller_name="@SUM(A1:A10)"),
+                BookingOption(price=380, seller_name="\tinjected"),
+                BookingOption(price=390, seller_name="\rinjected"),
+                BookingOption(price=400, seller_name="Delta Air Lines"),
+            ],
+            rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(result.output)))
+        idx = {name: i for i, name in enumerate(rows[0])}
+        sellers = [row[idx["seller_name"]] for row in rows[1:]]
+        # Each dangerous prefix is neutralized with a leading single quote.
+        assert sellers[0].startswith("'=HYPERLINK")
+        assert sellers[1].startswith("'+1234567890")
+        assert sellers[2].startswith("'-2+3")
+        assert sellers[3].startswith("'@SUM")
+        assert sellers[4].startswith("'\t")
+        assert sellers[5].startswith("'\r")
+        # Safe prefixes are passed through unmolested.
+        assert sellers[6] == "Delta Air Lines"
+        # fare_brand is also RPC-sourced and must be sanitized.
+        assert rows[1][idx["fare_brand"]].startswith("'=cmd")
+
+    @patch("swoop.check_price")
     def test_price_table_output_hides_rpc_call_count(self, mock_check):
         mock_check.return_value = PriceResult(price=342, fare_brand="Main Cabin", rpc_calls=1)
         runner = CliRunner()

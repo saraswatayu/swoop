@@ -688,6 +688,22 @@ def format_price_csv(
     def _b(v: bool) -> str:
         return "true" if v else "false"
 
+    # CSV-injection guard: when Excel/Sheets/LibreOffice open a CSV and
+    # see a cell beginning with `=`, `+`, `-`, `@`, tab, or CR, they
+    # treat it as a formula. Google's RPC returns seller/brand strings
+    # that swoop passes through opaquely; if any of those ever start
+    # with one of those characters, opening the CSV could execute
+    # attacker-controlled content. Prefix with a single quote to neuter
+    # the cell while keeping it human-readable after manual unquoting.
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        if value.startswith(_DANGEROUS_PREFIXES):
+            return "'" + value
+        return value
+
     currency = result.currency or ""
     writer = csv.writer(sys.stdout)
     writer.writerow([
@@ -702,18 +718,18 @@ def format_price_csv(
             writer.writerow([
                 opt.price,
                 currency,
-                result.fare_brand or "",
+                _s(result.fare_brand),
                 _b(result.is_basic_economy),
-                opt.brand_label or "",
-                opt.brand_code or "",
+                _s(opt.brand_label),
+                _s(opt.brand_code),
                 _b(opt.is_basic),
-                opt.fare_family or "",
-                opt.rebookability_signal or "",
-                opt.seller_name or "",
-                opt.seller_code or "",
+                _s(opt.fare_family),
+                _s(opt.rebookability_signal),
+                _s(opt.seller_name),
+                _s(opt.seller_code),
                 _b(opt.is_airline_direct),
-                opt.booking_url or "",
-                opt.logo_url or "",
+                _s(opt.booking_url),
+                _s(opt.logo_url),
             ])
     else:
         # No booking options surfaced — emit a single row with the chosen fare
@@ -721,7 +737,7 @@ def format_price_csv(
         writer.writerow([
             result.price,
             currency,
-            result.fare_brand or "",
+            _s(result.fare_brand),
             _b(result.is_basic_economy),
             "", "", "", "", "", "", "", "", "", "",
         ])

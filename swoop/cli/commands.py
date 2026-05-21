@@ -1,6 +1,7 @@
 """CLI commands for swoop: search and price."""
 
 from contextlib import nullcontext
+from typing import Any
 
 import click
 from rich.console import Console
@@ -377,6 +378,7 @@ def search_cmd(
             )
         ctx.exit(1)
 
+    assert result is not None  # narrowed by the ctx.exit(1) above
     display_origin = leg[0][0] if has_leg else origin
     display_destination = leg[-1][1] if has_leg else destination
     display_date = leg[0][2] if has_leg else date
@@ -388,7 +390,9 @@ def search_cmd(
             _build_price_selector_command(option.selector)
             for option in display_options
         ]
-    fmt_kwargs = dict(
+    # dict[str, Any] so pyright doesn't widen each value to the union of all values
+    # and reject every str-typed parameter on the formatter calls below.
+    fmt_kwargs: dict[str, Any] = dict(
         origin=display_origin, destination=display_destination, date=display_date,
         cabin=cabin, adults=passengers, return_date=display_return_date,
         legs=leg if has_leg else None,
@@ -538,10 +542,12 @@ def price_cmd(
                 err.print(f"[yellow]{warning}[/yellow]")
                 break
     else:
+        assert depart is not None  # not has_selector and not has_leg => has_depart
         warning = check_past_date(depart[0])
         if warning:
             err.print(f"[yellow]{warning}[/yellow]")
         elif has_return:
+            assert return_leg is not None  # has_return narrows return_leg
             warning = check_past_date(return_leg[0])
             if warning:
                 err.print(f"[yellow]{warning}[/yellow]")
@@ -576,6 +582,8 @@ def price_cmd(
                     transport=transport,
                 )
             else:
+                assert depart is not None  # has_depart guards this branch
+                assert origin is not None and destination is not None
                 pax = swoop.Passengers(
                     adults=passengers,
                     children=children,
@@ -588,8 +596,8 @@ def price_cmd(
                     origin=origin,
                     destination=destination,
                     date=depart[0],
-                    return_flight_number=return_leg[1] if has_return else None,
-                    return_date=return_leg[0] if has_return else None,
+                    return_flight_number=return_leg[1] if return_leg is not None else None,
+                    return_date=return_leg[0] if return_leg is not None else None,
                     cabin=cabin,
                     passengers=pax,
                     max_stops=max_stops,
@@ -615,8 +623,10 @@ def price_cmd(
         elif has_leg:
             err.print("[yellow]Selected itinerary was not found for the requested trip.[/yellow]")
         else:
+            assert depart is not None  # not has_selector and not has_leg => has_depart
             trip = f"{origin} -> {destination} on {depart[0]}"
             if has_return:
+                assert return_leg is not None
                 trip += f" / {destination} -> {origin} on {return_leg[0]}"
             err.print(
                 f"[yellow]Requested itinerary was not found for {trip}.[/yellow]"
@@ -624,6 +634,7 @@ def price_cmd(
         ctx.exit(1)
 
     if not has_selector and not has_leg:
+        assert depart is not None  # has_depart guards this branch
         query_legs = [
             {
                 "flight_number": depart[1],
@@ -634,6 +645,7 @@ def price_cmd(
             }
         ]
         if has_return:
+            assert return_leg is not None
             query_legs.append(
                 {
                     "flight_number": return_leg[1],

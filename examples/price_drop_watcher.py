@@ -17,7 +17,10 @@ Usage:
         --return-date 2026-06-22 --return-flight DL2301
 
 Cache lives at .swoop-watch-cache.json in the working directory, keyed
-by route + flight + date so multiple watchers coexist.
+by route + flight + date. Multiple keys can share one file, but the
+read-modify-write isn't lock-protected — run one watcher per cache file
+or set CACHE_PATH per process if you want to poll several flights in
+parallel.
 """
 from __future__ import annotations
 

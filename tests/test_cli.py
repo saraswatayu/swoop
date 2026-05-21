@@ -687,6 +687,70 @@ class TestPriceCommand:
         assert "RPC" not in result.output
 
     @patch("swoop.check_price")
+    def test_price_csv_output_with_booking_options(self, mock_check):
+        """csv emits one row per booking option with seller fields."""
+        mock_check.return_value = PriceResult(
+            price=342,
+            currency="USD",
+            fare_brand="Main Cabin",
+            booking_options=[
+                BookingOption(
+                    price=342, brand_label="Main", brand_code="MAIN",
+                    is_basic=False, fare_family="Main",
+                    rebookability_signal="free-changes",
+                    seller_name="Delta", seller_code="DL",
+                    booking_url="https://example.test/book/dl",
+                    is_airline_direct=True,
+                ),
+                BookingOption(
+                    price=355, brand_label="Main", brand_code="MAIN",
+                    is_basic=False, fare_family="Main",
+                    rebookability_signal=None,
+                    seller_name="Mytrip", seller_code="ETRAVELI_Mytrip",
+                    booking_url="https://example.test/book/mytrip",
+                    is_airline_direct=False,
+                ),
+            ],
+            rpc_calls=2,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        # Header + 2 booking options
+        assert len(lines) == 3
+        assert lines[0].split(",")[0] == "price"
+        assert "seller_name" in lines[0]
+        assert "is_airline_direct" in lines[0]
+        # Row 1: airline-direct Delta
+        assert "342" in lines[1]
+        assert "Delta" in lines[1]
+        assert "True" in lines[1]
+        # Row 2: OTA Mytrip
+        assert "355" in lines[2]
+        assert "Mytrip" in lines[2]
+        assert "False" in lines[2]
+
+    @patch("swoop.check_price")
+    def test_price_csv_output_no_booking_options(self, mock_check):
+        """csv falls back to a single row when booking_options is empty."""
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD", fare_brand="Main Cabin", rpc_calls=1,
+        )
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", "2026-06-15", "DL2300",
+            "-o", "csv", "-q",
+        ])
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert len(lines) == 2  # header + chosen fare
+        assert "342" in lines[1]
+
+    @patch("swoop.check_price")
     def test_price_table_output_hides_rpc_call_count(self, mock_check):
         mock_check.return_value = PriceResult(price=342, fare_brand="Main Cabin", rpc_calls=1)
         runner = CliRunner()

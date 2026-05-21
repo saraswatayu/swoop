@@ -668,3 +668,52 @@ def format_price_brief(
     trip_type = f"{len(query_legs or result.resolved_legs or [])}-leg"
     brand = f" ({result.fare_brand})" if result.fare_brand else ""
     print(f"{_format_price(result.price, result.currency)}{brand} {trip_type}")
+
+
+def format_price_csv(
+    result,
+    *,
+    query_legs=None,
+) -> None:
+    """Render a price check result as CSV to stdout.
+
+    One row per booking option, so callers can sort/filter fares
+    across sellers in a spreadsheet. The header row always exists
+    even when the result has no booking_options (the chosen fare
+    is still emitted as a single row).
+    """
+    currency = result.currency or ""
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "price", "currency", "fare_brand", "is_basic_economy",
+        "brand_label", "brand_code", "is_basic",
+        "fare_family", "rebookability_signal",
+        "seller_name", "seller_code", "is_airline_direct", "booking_url",
+    ])
+    if result.booking_options:
+        for opt in result.booking_options:
+            writer.writerow([
+                opt.price if opt.price is not None else "",
+                currency,
+                result.fare_brand or "",
+                result.is_basic_economy,
+                opt.brand_label or "",
+                opt.brand_code or "",
+                opt.is_basic,
+                opt.fare_family or "",
+                opt.rebookability_signal or "",
+                opt.seller_name or "",
+                opt.seller_code or "",
+                opt.is_airline_direct,
+                opt.booking_url or "",
+            ])
+    else:
+        # No booking options surfaced — emit a single row with the chosen fare
+        # so downstream tooling still has data to work with.
+        writer.writerow([
+            result.price if result.price is not None else "",
+            currency,
+            result.fare_brand or "",
+            result.is_basic_economy,
+            "", "", "", "", "", "", "", "", "",
+        ])

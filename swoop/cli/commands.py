@@ -426,7 +426,7 @@ def search_cmd(
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True)
 @click.option("--retries", type=int, default=2, show_default=True)
-@_output_options(["table", "json", "brief"])
+@_output_options(["table", "json", "csv", "brief"])
 @click.pass_context
 def price_cmd(
     ctx, origin, destination,
@@ -456,7 +456,12 @@ def price_cmd(
     import swoop
     from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 
-    from .formatters import format_price_brief, format_price_json, format_price_table
+    from .formatters import (
+        format_price_brief,
+        format_price_csv,
+        format_price_json,
+        format_price_table,
+    )
 
     configure_verbose_logging(verbose)
     err = _err_console(no_color)
@@ -639,6 +644,8 @@ def price_cmd(
 
     if output_format == "json":
         format_price_json(result, query_legs=query_legs)
+    elif output_format == "csv":
+        format_price_csv(result, query_legs=query_legs)
     elif output_format == "brief":
         format_price_brief(result, query_legs=query_legs)
     else:

@@ -261,6 +261,14 @@ class TestMainGroup:
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
 
+    def test_version_matches_library(self):
+        """CLI --version must report the same value as swoop.__version__."""
+        import swoop
+        runner = CliRunner()
+        result = runner.invoke(main, ["--version"])
+        assert result.exit_code == 0
+        assert swoop.__version__ in result.output
+
 
 # ---------------------------------------------------------------------------
 # Search command tests

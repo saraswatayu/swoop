@@ -133,6 +133,29 @@ class TestSafeTuple:
     def test_none_input(self):
         assert _safe_tuple(None, 3, [0, 0, 0]) == (0, 0, 0)
 
+    def test_none_element_within_list(self):
+        # Google Flights omits the leading-zero hour for midnight times,
+        # encoding 00:05 as [None, 5]. The decoder must substitute the
+        # default rather than propagate the None to formatters.
+        assert _safe_tuple([None, 5], 2, [0, 0]) == (0, 5)
+        assert _safe_tuple([14, None], 2, [0, 0]) == (14, 0)
+        assert _safe_tuple([None, None, 15], 3, [0, 0, 0]) == (0, 0, 15)
+
+    def test_repr_handles_decoded_midnight_time(self):
+        # Regression: midnight times decoded as [None, 5] used to crash repr via fmt_clock.
+        seg = Segment(
+            departure_time=_safe_tuple([None, 5], 2, [0, 0]),
+            arrival_time=_safe_tuple([14, None], 2, [0, 0]),
+        )
+        assert "00:05" in repr(seg)
+        assert "14:00" in repr(seg)
+        itin = Itinerary(
+            departure_time=_safe_tuple([None, 50], 2, [0, 0]),
+            arrival_time=_safe_tuple([6, 30], 2, [0, 0]),
+        )
+        assert "00:50" in repr(itin)
+        assert "06:30" in repr(itin)
+
 
 # ---------------------------------------------------------------------------
 # Edge-case tests (synthetic — testing error handling)

@@ -6,39 +6,19 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from swoop import CabinClass, Passengers, TransportConfig
-from swoop.rpc import (
-    search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req,
-    _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME,
-)
+from swoop import CabinClass
+from swoop.rpc import search_raw
 from swoop._booking import (
-    parse_booking_payload, _looks_like_brand_block, _extract_brand_block,
+    _looks_like_brand_block, _extract_brand_block,
     _looks_like_price_block, _extract_price_block, _safe_get,
 )
 
+from _booking_helper import fetch_booking_results
+
 
 def fetch_raw(itinerary, cabin: CabinClass):
-    booking_token = itinerary.booking_token
-    origin = itinerary.departure_airport_code
-    destination = itinerary.arrival_airport_code
-    dep = itinerary.departure_date
-    date = f"{dep[0]:04d}-{dep[1]:02d}-{dep[2]:02d}"
-    selected_legs = _build_selected_legs(itinerary)
-    legs = [_normalize_rpc_leg(origin, destination, date)]
-    filters = _build_filters_from_legs(
-        legs, cabin=cabin,
-        passengers=Passengers(),
-        sort=SORT_DEPARTURE_TIME,
-    )
-    encoded_body = _build_booking_f_req(booking_token, filters[1], selected_legs)
-    if not encoded_body:
-        return []
-    res = _http_post(
-        BOOKING_RPC_URL,
-        content=f"f.req={encoded_body}".encode(),
-        transport=TransportConfig(),
-    )
-    return parse_booking_payload(res.text)
+    raw_options, _ = fetch_booking_results(itinerary, cabin)
+    return raw_options or []
 
 
 def main():

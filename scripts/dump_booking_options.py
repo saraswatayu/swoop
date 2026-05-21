@@ -11,42 +11,20 @@ from typing import cast
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from unittest.mock import patch
-from swoop import CabinClass, Passengers, TransportConfig
-from swoop.rpc import search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req, _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME
-from swoop._booking import parse_booking_payload, _extract_brand_block, _extract_price_block, _safe_get
+from swoop import CabinClass
+from swoop.rpc import search_raw
+from swoop._booking import _extract_brand_block, _extract_price_block, _safe_get
+
+from _booking_helper import fetch_booking_results
 
 
 def dump_raw_booking_options(itinerary, *, cabin: CabinClass = "business"):
     """Make a GetBookingResults call and return (raw_options, response_text)."""
-    booking_token = itinerary.booking_token
-    origin = itinerary.departure_airport_code
-    destination = itinerary.arrival_airport_code
-    dep = itinerary.departure_date
-    date = f"{dep[0]:04d}-{dep[1]:02d}-{dep[2]:02d}"
-    selected_legs = _build_selected_legs(itinerary)
-
-    legs = [_normalize_rpc_leg(origin, destination, date)]
-    filters = _build_filters_from_legs(
-        legs,
-        cabin=cabin,
-        passengers=Passengers(),
-        sort=SORT_DEPARTURE_TIME,
-    )
-    filter_block = filters[1]
-    encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
-    if not encoded_body:
+    raw_options, response_text = fetch_booking_results(itinerary, cabin)
+    if raw_options is None:
         print("ERROR: Failed to build booking request")
         return None, None
-
-    res = _http_post(
-        BOOKING_RPC_URL,
-        content=f"f.req={encoded_body}".encode(),
-        transport=TransportConfig(),
-    )
-
-    raw_options = parse_booking_payload(res.text)
-    return raw_options, res.text
+    return raw_options, response_text
 
 
 def summarize_value(val, max_len=120):

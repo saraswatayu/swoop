@@ -17,7 +17,7 @@ import pytest
 
 import swoop._booking as _booking
 import swoop.rpc as rpc
-from swoop._booking import _extract_seller
+from swoop._booking import _extract_booking_url, _extract_seller
 from swoop.decoder import BookingOption
 from swoop.rpc import (
     _build_booking_f_req,
@@ -748,6 +748,49 @@ def test_booking_option_logo_url_path_escapes_logo_code() -> None:
     seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)
     assert "weird%2Fcode%3Fx%3D1" in logo_url
     assert logo_url.endswith(".png")
+
+
+@pytest.mark.parametrize(
+    "opt1",
+    [
+        {"unexpected": "dict"},
+        "scalar-string",
+        42,
+        [],
+        ["scalar-instead-of-list-entry"],
+        [{"wrong": "shape"}],
+    ],
+)
+def test_extract_seller_returns_empty_for_non_list_opt1_shapes(opt1) -> None:
+    """opt[1] reshapes that aren't a non-empty list-of-lists fall through to empty fields."""
+    option = [None] * 25
+    option[1] = opt1
+    seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)
+    assert seller_name == ""
+    assert seller_code == ""
+    assert booking_url == ""
+    assert logo_url == ""
+    assert is_airline_direct is False
+
+
+@pytest.mark.parametrize(
+    "url_block",
+    [
+        None,
+        [],
+        ["only-one"],
+        ["a", "b"],
+        ["a", None, "scalar-instead-of-list"],
+        ["a", None, ["url-but-no-params"]],
+        ["a", None, ["https://www.google.com/travel/clk/f", "params-not-list"]],
+        # All param pairs filtered out — kv_pairs empty, validator rejects empty params:
+        ["a", None, ["https://www.google.com/travel/clk/f", [[None, "v"], ["k", None]]]],
+        ["a", None, ["https://www.google.com/travel/clk/f", [["short-pair"]]]],
+    ],
+)
+def test_extract_booking_url_returns_empty_for_malformed_opt5(url_block) -> None:
+    """opt[5] reshapes that don't yield a usable clk_base + kv pairs produce an empty URL."""
+    assert _extract_booking_url(url_block) == ""
 
 
 def test_parse_rpc_response_null_and_decode(monkeypatch) -> None:

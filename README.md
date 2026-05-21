@@ -92,6 +92,21 @@ Run `swoop search --help` for all options.
 > [!TIP]
 > Search shows shopping totals for browsing. Use `--show-price-commands` for copy/paste `swoop price --selector ...` commands in human output, or use `selector` from JSON with `swoop price --selector ...` in scripts.
 
+### Shell completion
+
+```bash
+# bash (~/.bashrc)
+eval "$(_SWOOP_COMPLETE=bash_source swoop)"
+
+# zsh (~/.zshrc)
+eval "$(_SWOOP_COMPLETE=zsh_source swoop)"
+
+# fish (~/.config/fish/config.fish)
+_SWOOP_COMPLETE=fish_source swoop | source
+```
+
+After reloading your shell, `swoop <TAB>`, `swoop search --<TAB>`, and `-o <TAB>` will autocomplete.
+
 ## Python API
 
 ### One-way search

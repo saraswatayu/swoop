@@ -302,8 +302,9 @@ class BookingOption:
     rebookability_signal: str = ""
     seller_name: str = ""        # Human-readable seller name, e.g. "Gotogate", "Qatar Airways"
     seller_code: str = ""        # Internal seller code, e.g. "ETRAVELI_Gotogate", "QR"
-    booking_url: str = ""        # google.com/travel/clk/f redirect that opens the seller's booking page
-    logo_url: str = ""           # https://www.gstatic.com/flights/partner_logos/70px/<logo_code>.png (falls back to <seller_code>.png when logo_code is absent)
+    booking_url: str = ""        # google.com/travel/clk/f redirect that opens the seller's booking page. NOT validated — comes verbatim from the RPC response. Callers who render this as <a href> or open it programmatically MUST verify the scheme is https and the host is www.google.com before trusting it; a poisoned/reshaped response could in principle deliver any URL (javascript:, data:, lookalike host).
+    logo_url: str = ""           # https://www.gstatic.com/flights/partner_logos/70px/<logo_code>.png when Google provides logo_code; empty otherwise. Consumers that want a best-effort airline logo can construct {gstatic_base}/{seller_code}.png themselves (works for IATA codes, 404s for OTA codes).
+    is_airline_direct: bool = False  # True when the booking is direct with the operating carrier (not via an OTA)
     _is_basic_by_flags: bool = False
     _is_basic_by_text: bool = False
     _option_index: Optional[int] = None
@@ -325,8 +326,8 @@ class BookingOption:
     def __repr__(self) -> str:
         parts = [f"price={self.price}"]
         if self.seller_name:
-            parts.append(f"seller='{self.seller_name}'")
-        elif self.brand_label:
+            parts.append(f"seller={self.seller_name!r}")
+        if self.brand_label:
             parts.append(f"'{self.brand_label}'")
         if self.is_basic:
             parts.append("basic")

@@ -597,6 +597,7 @@ def test_booking_option_seller_fields_populated() -> None:
             brand_label="Economy",
             seller_code="ETRAVELI_Mytrip",
             seller_name="Mytrip",
+            logo_code="ETRAVELI_Mytrip",
             booking_url_token="tok_abc123",
         ),
     ]
@@ -609,10 +610,11 @@ def test_booking_option_seller_fields_populated() -> None:
     assert opt.seller_code == "ETRAVELI_Mytrip"
     assert opt.booking_url == "https://www.google.com/travel/clk/f?u=tok_abc123&v=1"
     assert opt.logo_url == "https://www.gstatic.com/flights/partner_logos/70px/ETRAVELI_Mytrip.png"
+    assert opt.is_airline_direct is False
 
 
-def test_booking_option_seller_logo_falls_back_to_seller_code_when_no_logo_code() -> None:
-    """When opt[1][0][2] is None, logo_url uses seller_code as the path segment."""
+def test_booking_option_logo_url_empty_when_logo_code_absent() -> None:
+    """When opt[1][0][2] is None, logo_url is empty — library does not guess a URL that may 404."""
     payload = [
         make_booking_option(
             price=600,
@@ -620,7 +622,8 @@ def test_booking_option_seller_logo_falls_back_to_seller_code_when_no_logo_code(
             brand_label="Economy",
             seller_code="QR",
             seller_name="Qatar Airways",
-            logo_code=None,  # no explicit logo code
+            logo_code=None,
+            is_airline_direct=True,
             booking_url_token="tok_qr",
         ),
     ]
@@ -631,7 +634,8 @@ def test_booking_option_seller_logo_falls_back_to_seller_code_when_no_logo_code(
     opt = options[0]
     assert opt.seller_name == "Qatar Airways"
     assert opt.seller_code == "QR"
-    assert opt.logo_url == "https://www.gstatic.com/flights/partner_logos/70px/QR.png"
+    assert opt.logo_url == ""
+    assert opt.is_airline_direct is True
 
 
 def test_booking_option_seller_fields_empty_when_absent() -> None:
@@ -648,13 +652,69 @@ def test_booking_option_seller_fields_empty_when_absent() -> None:
     assert opt.seller_code == ""
     assert opt.booking_url == ""
     assert opt.logo_url == ""
+    assert opt.is_airline_direct is False
+
+
+def test_booking_option_booking_url_extracted_independently_of_seller_block() -> None:
+    """opt[5] click URL is parsed even when opt[1] seller block is missing."""
+    from tests.factories import make_brand_block, make_price_block
+    option = [None] * 25
+    option[19] = json.dumps(["", [""]])
+    option[7] = make_price_block(400)
+    option[21] = make_brand_block("ECONOMY", "Economy")
+    # Note: opt[1] intentionally left as None — seller identity missing, click URL still present.
+    option[5] = [
+        "www.example.com/...",
+        None,
+        ["https://www.google.com/travel/clk/f", [["u", "tok_orphan"], ["v", "1"]]],
+    ]
+    text = encode_rpc_outer([None, [[option]]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    opt = options[0]
+    assert opt.seller_name == ""
+    assert opt.seller_code == ""
+    assert opt.booking_url == "https://www.google.com/travel/clk/f?u=tok_orphan&v=1"
+    assert opt.logo_url == ""
+
+
+def test_booking_option_multi_seller_logs_debug_and_picks_first(caplog) -> None:
+    """When opt[1] carries multiple seller entries we use the first and log at DEBUG."""
+    from tests.factories import make_brand_block, make_price_block
+    option = [None] * 25
+    option[19] = json.dumps(["", [""]])
+    option[7] = make_price_block(400)
+    option[21] = make_brand_block("ECONOMY", "Economy")
+    option[1] = [
+        ["PRIMARY", "Primary Seller", "PRIMARY", True],
+        ["SECONDARY", "Secondary Seller", "SECONDARY", False],
+    ]
+    text = encode_rpc_outer([None, [[option]]])
+    with caplog.at_level(logging.DEBUG, logger="swoop._booking"):
+        options = rpc._parse_booking_rpc_response(text)
+
+    assert options[0].seller_code == "PRIMARY"
+    assert any("2 seller entries" in record.message for record in caplog.records)
 
 
 def test_booking_option_repr_shows_seller_when_present() -> None:
     from swoop.decoder import BookingOption
     opt = BookingOption(price=594, seller_name="Mytrip", brand_label="Economy")
-    assert "seller='Mytrip'" in repr(opt)
-    assert "price=594" in repr(opt)
+    rendered = repr(opt)
+    assert "seller='Mytrip'" in rendered
+    assert "price=594" in rendered
+    assert "'Economy'" in rendered  # brand_label still surfaced alongside seller
+
+
+def test_booking_option_repr_escapes_seller_name_with_apostrophe() -> None:
+    """Seller names with apostrophes/quotes don't corrupt the repr output."""
+    from swoop.decoder import BookingOption
+    opt = BookingOption(price=300, seller_name="Bob's Travel")
+    rendered = repr(opt)
+    assert "Bob's Travel" in rendered
+    assert rendered.count("seller=") == 1
+    assert rendered.endswith(")")
 
 
 def test_booking_option_logo_url_path_escapes_logo_code() -> None:
@@ -662,7 +722,7 @@ def test_booking_option_logo_url_path_escapes_logo_code() -> None:
     from swoop._booking import _extract_seller
     option = [None] * 25
     option[1] = [["CODE", "Name", "weird/code?x=1", False]]
-    seller_name, seller_code, booking_url, logo_url = _extract_seller(option)
+    seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)
     assert "weird%2Fcode%3Fx%3D1" in logo_url
     assert logo_url.endswith(".png")
 

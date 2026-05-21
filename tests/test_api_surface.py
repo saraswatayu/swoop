@@ -154,6 +154,7 @@ class TestFrozenDataclassFields:
             "price", "brand_label", "brand_code",
             "is_basic", "fare_family", "rebookability_signal",
             "seller_name", "seller_code", "booking_url", "logo_url",
+            "is_airline_direct",
         }
         actual = {
             field.name

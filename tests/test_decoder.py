@@ -141,6 +141,25 @@ class TestSafeTuple:
         assert _safe_tuple([14, None], 2, [0, 0]) == (14, 0)
         assert _safe_tuple([None, None, 15], 3, [0, 0, 0]) == (0, 0, 15)
 
+    def test_midnight_time_does_not_crash_repr(self):
+        # End-to-end regression for the same bug: with the broken _safe_tuple,
+        # decoded segments/itineraries carried (None, 5) in departure_time, and
+        # fmt_clock then crashed in __repr__ with "unsupported format string
+        # passed to NoneType.__format__". This guards the formatter path, not
+        # just the helper.
+        seg = Segment(
+            departure_time=_safe_tuple([None, 5], 2, [0, 0]),
+            arrival_time=_safe_tuple([14, None], 2, [0, 0]),
+        )
+        assert "00:05" in repr(seg)
+        assert "14:00" in repr(seg)
+        itin = Itinerary(
+            departure_time=_safe_tuple([None, 50], 2, [0, 0]),
+            arrival_time=_safe_tuple([6, 30], 2, [0, 0]),
+        )
+        assert "00:50" in repr(itin)
+        assert "06:30" in repr(itin)
+
 
 # ---------------------------------------------------------------------------
 # Edge-case tests (synthetic — testing error handling)

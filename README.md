@@ -241,6 +241,13 @@ for opt in options:
 > [!TIP]
 > Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
 
+### Runnable examples
+
+Real-world patterns are in [`examples/`](examples/):
+
+- [`examples/price_drop_watcher.py`](examples/price_drop_watcher.py) — Watch a known flight for price drops on a schedule (the pattern Perch uses to save users ~$247/trip).
+- [`examples/multi_city_finder.py`](examples/multi_city_finder.py) — Multi-city / open-jaw search with beam-search tuning knobs.
+
 ## How it works
 
 swoop reverse-engineers the `FlightsFrontendService` RPC interface that powers Google Flights. Search parameters are encoded as nested JSON arrays matching Google's internal protobuf schema, then sent as HTTP POST requests. The HTTP client uses TLS fingerprint impersonation (via [primp](https://github.com/deedy5/primp)) so requests are indistinguishable from a real Chrome session.

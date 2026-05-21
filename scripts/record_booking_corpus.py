@@ -24,7 +24,7 @@ def fetch_booking_response_text(itinerary, cabin):
     legs = [_normalize_rpc_leg(origin, destination, date)]
     filters = _build_filters_from_legs(
         legs, cabin=cabin,
-        passengers=Passengers(adults=1, children=0, infants_in_seat=0, infants_on_lap=0),
+        passengers=Passengers(),
         sort=SORT_DEPARTURE_TIME,
     )
     filter_block = filters[1]
@@ -35,7 +35,7 @@ def fetch_booking_response_text(itinerary, cabin):
     res = _http_post(
         BOOKING_RPC_URL,
         content=f"f.req={encoded_body}".encode(),
-        transport=TransportConfig(timeout=90, retries=2),
+        transport=TransportConfig(),
     )
     return res.text
 

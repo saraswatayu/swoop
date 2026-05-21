@@ -78,11 +78,17 @@ swoop price --leg JFK LAX 2026-06-15 DL2300 --leg LAX SFO 2026-06-18 UA544 --leg
 # CSV for spreadsheets
 swoop search JFK LAX 2026-06-15 -o csv -q > flights.csv
 
+# Price CSV (one row per booking option, with seller and booking_url)
+swoop price JFK LAX --depart 2026-06-15 DL2300 -o csv -q > fares.csv
+
 # Search JSON for piping
 swoop search JFK LAX 2026-06-15 -o json -q | jq '.results[0] | {selector, price, legs}'
 
 # Filter by airline and time window
 swoop search JFK LAX 2026-06-15 -a DL -a UA --depart-after 8 --depart-before 14
+
+# Surface RPC debug logging on stderr (URLs, response sizes, retries)
+swoop search JFK LAX 2026-06-15 --verbose
 ```
 
 </details>

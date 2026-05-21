@@ -65,7 +65,8 @@ swoop/
 ├── _validate.py      # IATA code validation (optional airportsdata)
 ├── exceptions.py     # Custom exceptions
 ├── flights.proto     # Protobuf schema (ItinerarySummary)
-├── flights_pb2.py    # Generated protobuf code
+├── flights_pb2.py    # Generated protobuf code (excluded from pyright)
+├── flights_pb2.pyi   # Hand-written type stub for flights_pb2 (covers what builders.py touches)
 └── cli/
     ├── __init__.py   # Click group, main() entry point
     ├── commands.py   # search_cmd, price_cmd definitions
@@ -94,10 +95,11 @@ swoop/
 | `_validate.py` | `validate_iata()` with optional airportsdata |
 | `exceptions.py` | `SwoopError`, `SwoopRPCError`, `SwoopValidationError` |
 | `__init__.py` | Public re-exports: `search`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `RawSearchResult`, `SearchResult`, `TripOption`, `TripLeg`, etc. |
-| `cli/__init__.py` | Click group + `main()` entry point |
-| `cli/commands.py` | `search_cmd`, `price_cmd` |
-| `cli/formatters.py` | Trip-level table, JSON, CSV, and brief formatters |
-| `cli/utils.py` | `IATACodeType`, `DateType`, `format_time()`, `format_duration()` |
+| `cli/__init__.py` | Click group + `main()` entry point (uses `swoop.__version__` for `--version`) |
+| `cli/commands.py` | `search_cmd`, `price_cmd`, `_SearchFormatKwargs` TypedDict for formatter kwargs |
+| `cli/formatters.py` | Trip-level table, JSON, CSV (search + price), and brief formatters; CSV escapes formula prefixes |
+| `cli/utils.py` | `IATACodeType`, `DateType`, `format_time()`, `format_duration()`, `resolve_quiet()`, `configure_verbose_logging()` (scoped to Click ctx) |
+| `flights_pb2.pyi` | Hand-written stub mirroring `flights.proto` — restores pyright on `PB.*` |
 | `__main__.py` | `python -m swoop` with graceful ImportError |
 | `tests/test_api_surface.py` | Frozen public API assertions |
 | `tests/factories.py` | Test factories for dataclasses |
@@ -109,3 +111,7 @@ swoop/
 |-------|------|
 | Protobuf response schema | `.claude/docs/google-flights-protobuf-schema.md` |
 | Booking option parsing notes | `.claude/docs/booking-options-proto-notes.md` |
+| Version-to-version upgrade notes | `MIGRATION.md` (0.3 → 0.4, 0.4 → 0.5) |
+| Security policy and threat model | `SECURITY.md` |
+| Runnable end-user examples | `examples/README.md`, `examples/price_drop_watcher.py`, `examples/multi_city_finder.py` |
+| Diagnostic scripts shared helper | `scripts/_booking_helper.py` (fetch_booking_results — reused by the 7 record_*/sweep/validate scripts) |

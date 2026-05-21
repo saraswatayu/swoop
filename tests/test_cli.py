@@ -270,6 +270,77 @@ class TestMainGroup:
         assert swoop.__version__ in result.output
 
 
+class TestVerboseFlag:
+    """--verbose flag wires swoop.* loggers to stderr at DEBUG."""
+
+    def _reset_swoop_logger(self):
+        import logging
+        log = logging.getLogger("swoop")
+        for handler in list(log.handlers):
+            if getattr(handler, "_swoop_cli_verbose", False):
+                log.removeHandler(handler)
+        log.setLevel(logging.WARNING)
+
+    def teardown_method(self):
+        self._reset_swoop_logger()
+
+    @patch("swoop.cli.commands._run_search")
+    def test_verbose_configures_swoop_logger(self, mock_search):
+        """--verbose sets swoop.* logger to DEBUG and attaches a stderr handler."""
+        import logging
+        mock_search.return_value = _make_search_result()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "--verbose",
+        ])
+        assert result.exit_code == 0
+        swoop_log = logging.getLogger("swoop")
+        assert swoop_log.level == logging.DEBUG
+        assert any(getattr(h, "_swoop_cli_verbose", False) for h in swoop_log.handlers)
+
+    @patch("swoop.cli.commands._run_search")
+    def test_verbose_short_flag(self, mock_search):
+        """-v is equivalent to --verbose."""
+        import logging
+        mock_search.return_value = _make_search_result()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "-v",
+        ])
+        assert result.exit_code == 0
+        assert logging.getLogger("swoop").level == logging.DEBUG
+
+    @patch("swoop.cli.commands._run_search")
+    def test_verbose_idempotent(self, mock_search):
+        """Re-invoking with --verbose must not stack handlers."""
+        import logging
+        mock_search.return_value = _make_search_result()
+        runner = CliRunner()
+        for _ in range(3):
+            runner.invoke(main, [
+                "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json", "-v",
+            ])
+        count = sum(
+            1 for h in logging.getLogger("swoop").handlers
+            if getattr(h, "_swoop_cli_verbose", False)
+        )
+        assert count == 1, f"expected 1 verbose handler, got {count}"
+
+    @patch("swoop.cli.commands._run_search")
+    def test_no_verbose_leaves_logging_quiet(self, mock_search):
+        """Without --verbose, no handler should be added."""
+        import logging
+        self._reset_swoop_logger()
+        mock_search.return_value = _make_search_result()
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "search", "JFK", "LAX", "2026-06-15", "-q", "-o", "json",
+        ])
+        assert result.exit_code == 0
+        swoop_log = logging.getLogger("swoop")
+        assert not any(getattr(h, "_swoop_cli_verbose", False) for h in swoop_log.handlers)
+
+
 # ---------------------------------------------------------------------------
 # Search command tests
 # ---------------------------------------------------------------------------

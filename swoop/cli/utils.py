@@ -1,11 +1,33 @@
 """Shared helpers and custom Click parameter types for the CLI."""
 
+import logging
 import re
+import sys
 from datetime import date as _date, datetime
 
 import click
 
 from .._formatting import fmt_duration as format_duration
+
+
+def configure_verbose_logging(verbose: bool) -> None:
+    """Wire ``swoop.*`` loggers to stderr at DEBUG level when ``--verbose``.
+
+    Idempotent: re-invoking with ``verbose=True`` does not stack handlers.
+    Called once per CLI invocation, before any swoop API calls run.
+    """
+    if not verbose:
+        return
+    swoop_logger = logging.getLogger("swoop")
+    swoop_logger.setLevel(logging.DEBUG)
+    for existing in swoop_logger.handlers:
+        if getattr(existing, "_swoop_cli_verbose", False):
+            return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter("[%(levelname)s %(name)s] %(message)s"))
+    handler._swoop_cli_verbose = True  # type: ignore[attr-defined]
+    swoop_logger.addHandler(handler)
 
 
 class IATACodeType(click.ParamType):

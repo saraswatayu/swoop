@@ -11,6 +11,7 @@ from .utils import (
     IATA_CODE,
     SORT_MAP,
     check_past_date,
+    configure_verbose_logging,
 )
 
 
@@ -218,6 +219,8 @@ def _output_options(formats: list[str]):
             click.option("-o", "--output", "output_format", type=click.Choice(formats, case_sensitive=False), default=formats[0], show_default=True, help="Output format."),
             click.option("--no-color", is_flag=True, default=False, help="Disable color output."),
             click.option("-q", "--quiet", is_flag=True, default=False, help="Suppress spinners/headers (for piping)."),
+            click.option("-v", "--verbose", is_flag=True, default=False,
+                         help="Show debug logging (RPC URLs, response sizes, retries) on stderr."),
         ]
         for option in reversed(options):
             f = option(f)
@@ -248,7 +251,7 @@ def search_cmd(
     country, proxy,
     timeout, retries, max_results, beam_width, time_budget,
     limit, show_price_commands,
-    output_format, no_color, quiet,
+    output_format, no_color, quiet, verbose,
 ):
     """Search for flights.
 
@@ -270,6 +273,7 @@ def search_cmd(
         format_search_table,
     )
 
+    configure_verbose_logging(verbose)
     err = _err_console(no_color)
     has_positional = any(value is not None for value in (origin, destination, date))
     has_full_positional = all(value is not None for value in (origin, destination, date))
@@ -432,7 +436,7 @@ def price_cmd(
     max_stops, include_basic,
     country, proxy,
     timeout, retries,
-    output_format, no_color, quiet,
+    output_format, no_color, quiet, verbose,
 ):
     """Check the current bookable fare for a chosen itinerary.
 
@@ -454,6 +458,7 @@ def price_cmd(
 
     from .formatters import format_price_brief, format_price_json, format_price_table
 
+    configure_verbose_logging(verbose)
     err = _err_console(no_color)
 
     has_route_args = any(value is not None for value in (origin, destination))

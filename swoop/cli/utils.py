@@ -20,6 +20,15 @@ def resolve_quiet(quiet_flag: bool) -> bool:
     return quiet_flag or not sys.stdout.isatty()
 
 
+class _SwoopVerboseHandler(logging.StreamHandler):
+    """Tagged stderr handler for the CLI's ``--verbose`` mode.
+
+    Subclassed (rather than tagged via an ad-hoc attribute) so
+    idempotency checks can use ``isinstance`` without monkey-patching
+    a stdlib class.
+    """
+
+
 def configure_verbose_logging(verbose: bool) -> None:
     """Wire ``swoop.*`` loggers to stderr at DEBUG level when ``--verbose``.
 
@@ -30,13 +39,11 @@ def configure_verbose_logging(verbose: bool) -> None:
         return
     swoop_logger = logging.getLogger("swoop")
     swoop_logger.setLevel(logging.DEBUG)
-    for existing in swoop_logger.handlers:
-        if getattr(existing, "_swoop_cli_verbose", False):
-            return
-    handler = logging.StreamHandler(sys.stderr)
+    if any(isinstance(h, _SwoopVerboseHandler) for h in swoop_logger.handlers):
+        return
+    handler = _SwoopVerboseHandler(sys.stderr)
     handler.setLevel(logging.DEBUG)
     handler.setFormatter(logging.Formatter("[%(levelname)s %(name)s] %(message)s"))
-    handler._swoop_cli_verbose = True  # type: ignore[attr-defined]
     swoop_logger.addHandler(handler)
 
 

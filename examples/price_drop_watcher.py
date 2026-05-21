@@ -26,6 +26,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import swoop
 
@@ -90,9 +91,16 @@ def check_once(args: argparse.Namespace, cache: dict[str, int]) -> None:
 
 def run_loop(args: argparse.Namespace) -> int:
     cache = load_cache()
+    # last_error tracks whether the most recent iteration failed. In
+    # --once mode it determines the exit code: an unhandled swoop error
+    # or network failure should exit non-zero so callers piping this
+    # script (cron, CI, shell `&&` chains) can tell a failure from a
+    # successful check that simply didn't surface a price drop.
+    last_error: Optional[BaseException] = None
     while True:
         try:
             check_once(args, cache)
+            last_error = None
         except swoop.SwoopRateLimitError:
             wait = RATE_LIMIT_BACKOFF_SECONDS
             print(f"  rate-limited, backing off {wait}s", file=sys.stderr)
@@ -100,11 +108,13 @@ def run_loop(args: argparse.Namespace) -> int:
             continue
         except swoop.SwoopError as exc:
             print(f"  swoop error: {exc}", file=sys.stderr)
+            last_error = exc
         except (OSError, ConnectionError) as exc:
             print(f"  network error: {exc}", file=sys.stderr)
+            last_error = exc
 
         if args.once:
-            return 0
+            return 1 if last_error is not None else 0
         time.sleep(args.interval)
 
 

@@ -12,6 +12,7 @@ from .utils import (
     SORT_MAP,
     check_past_date,
     configure_verbose_logging,
+    resolve_quiet,
 )
 
 
@@ -218,7 +219,8 @@ def _output_options(formats: list[str]):
         options = [
             click.option("-o", "--output", "output_format", type=click.Choice(formats, case_sensitive=False), default=formats[0], show_default=True, help="Output format."),
             click.option("--no-color", is_flag=True, default=False, help="Disable color output."),
-            click.option("-q", "--quiet", is_flag=True, default=False, help="Suppress spinners/headers (for piping)."),
+            click.option("-q", "--quiet", is_flag=True, default=False,
+                         help="Suppress spinners/headers. Auto-on when stdout is not a TTY."),
             click.option("-v", "--verbose", is_flag=True, default=False,
                          help="Show debug logging (RPC URLs, response sizes, retries) on stderr."),
         ]
@@ -274,6 +276,7 @@ def search_cmd(
     )
 
     configure_verbose_logging(verbose)
+    quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
     has_positional = any(value is not None for value in (origin, destination, date))
     has_full_positional = all(value is not None for value in (origin, destination, date))
@@ -464,6 +467,7 @@ def price_cmd(
     )
 
     configure_verbose_logging(verbose)
+    quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
 
     has_route_args = any(value is not None for value in (origin, destination))

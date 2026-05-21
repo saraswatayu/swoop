@@ -10,6 +10,16 @@ import click
 from .._formatting import fmt_duration as format_duration
 
 
+def resolve_quiet(quiet_flag: bool) -> bool:
+    """Return True if ``--quiet`` was passed OR stdout is not a TTY.
+
+    Auto-quiet on non-TTY (pipes, redirects, CI) means users piping
+    swoop into ``jq`` or capturing output to a file get clean stdout
+    without remembering ``-q``.
+    """
+    return quiet_flag or not sys.stdout.isatty()
+
+
 def configure_verbose_logging(verbose: bool) -> None:
     """Wire ``swoop.*`` loggers to stderr at DEBUG level when ``--verbose``.
 

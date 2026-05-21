@@ -270,6 +270,31 @@ class TestMainGroup:
         assert swoop.__version__ in result.output
 
 
+class TestResolveQuiet:
+    """resolve_quiet auto-detects non-TTY stdout."""
+
+    def test_explicit_quiet_flag_wins(self):
+        from swoop.cli.utils import resolve_quiet
+        import sys
+        with patch.object(sys.stdout, "isatty", return_value=True):
+            assert resolve_quiet(True) is True
+        with patch.object(sys.stdout, "isatty", return_value=False):
+            assert resolve_quiet(True) is True
+
+    def test_tty_without_flag_stays_loud(self):
+        from swoop.cli.utils import resolve_quiet
+        import sys
+        with patch.object(sys.stdout, "isatty", return_value=True):
+            assert resolve_quiet(False) is False
+
+    def test_non_tty_without_flag_auto_quiets(self):
+        """The whole point: piping to jq shouldn't need a -q."""
+        from swoop.cli.utils import resolve_quiet
+        import sys
+        with patch.object(sys.stdout, "isatty", return_value=False):
+            assert resolve_quiet(False) is True
+
+
 class TestVerboseFlag:
     """--verbose flag wires swoop.* loggers to stderr at DEBUG."""
 

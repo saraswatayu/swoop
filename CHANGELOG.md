@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `BookingOption.__repr__` now surfaces both `seller_name` and `brand_label` together when both are present, and uses `repr()` on the seller name so apostrophes and quotes no longer corrupt log output.
+- One-way pricing now fetches `GetBookingResults` and returns the cheapest eligible booking option price (with `booking_options` populated and `rpc_calls` incremented by 1), instead of short-circuiting to the search-result price. Affects `check_price`, `price_selector`, and `price_legs` for single-leg trips: `PriceResult.price` may differ from `Itinerary.price` and `PriceResult.booking_options` is no longer empty for one-ways. If the booking RPC fails or returns no eligible options, the search-result price is still used as a fallback.
+- `BookingOption.__repr__` now surfaces both `seller_name` and `brand_label` together when both are present, and uses `repr()` on each so apostrophes and quotes no longer corrupt log output.
 - `_extract_seller` extracts the click URL (`opt[5]`) independently of the seller block (`opt[1]`); a missing seller no longer drops the booking URL.
 - `logo_url` is empty when Google omits `logo_code`. The previous behaviour silently constructed a logo URL from `seller_code` which 404s for OTA codes; callers that want the airline-direct fallback can construct it themselves via `{gstatic_base}/{seller_code}.png`.
 

@@ -22,6 +22,15 @@ pytest tests/ -v -m live
 pytest tests/ -v
 ```
 
+## Type checking
+
+```bash
+pyright
+```
+
+`pyright` is the canonical type checker for swoop. Run it before opening
+a PR; CI does not currently gate on it but reviewers will.
+
 ## Project structure
 
 ```

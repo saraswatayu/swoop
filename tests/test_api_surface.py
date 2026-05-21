@@ -103,6 +103,31 @@ class TestFrozenExports:
         for name in swoop.__all__:
             assert hasattr(swoop, name), f"swoop.__all__ lists {name!r} but it's not importable"
 
+    def test_no_internal_leakage_in_dir(self):
+        """`dir(swoop)` must not expose implementation details.
+
+        Tab completion uses `dir()`, not `__all__`. Anything visible there
+        is part of the perceived public surface and creates a maintenance
+        burden if someone reaches for it.
+        """
+        public = set(swoop.__all__)
+        visible = {name for name in dir(swoop) if not name.startswith("_")}
+        leaked = visible - public
+        assert leaked == set(), (
+            f"dir(swoop) exposes names that aren't in __all__: {sorted(leaked)}. "
+            "If you intentionally added a new public name, add it to __all__. "
+            "If it's internal, hide it by `_`-prefixing or `del`ing in swoop/__init__.py."
+        )
+
+    def test_submodules_still_importable(self):
+        """Hiding submodule attributes must not break `from swoop.X import Y`."""
+        from swoop.decoder import BookingOption as _BookingOption
+        from swoop.builders import CabinClass as _CabinClass
+        from swoop.rpc import search_raw as _search_raw
+        from swoop.exceptions import SwoopError as _SwoopError
+        from swoop.models import Passengers as _Passengers
+        assert all([_BookingOption, _CabinClass, _search_raw, _SwoopError, _Passengers])
+
 
 class TestFrozenDataclassFields:
     """Verify dataclass field names haven't changed."""

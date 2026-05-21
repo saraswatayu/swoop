@@ -634,3 +634,25 @@ __all__ = [
     "STOPS_ONE_OR_FEWER",
     "STOPS_TWO_OR_FEWER",
 ]
+
+
+# Hide implementation details from `dir(swoop)` and tab completion.
+# Submodules remain importable via `from swoop.X import Y` because they
+# stay in sys.modules; only the attribute on the swoop namespace is removed.
+_INTERNAL_NAMES = (
+    # Submodule attributes
+    "builders", "decoder", "exceptions", "flights_pb2", "models", "rpc",
+    # Logging plumbing
+    "logging", "logger",
+    # Typing artifacts
+    "Optional", "annotations",
+    # Internal helpers from _selection
+    "build_request_legs_from_selected", "price_selected_trip",
+    "price_trip_selector", "resolve_selected_trip", "search_trip_options",
+    # Validators (use of these is internal; raise via public functions instead)
+    "validate_adults", "validate_cabin", "validate_date",
+    "validate_iata_code", "validate_search_params", "validate_time_range",
+)
+for _name in _INTERNAL_NAMES:
+    globals().pop(_name, None)
+del _name, _INTERNAL_NAMES

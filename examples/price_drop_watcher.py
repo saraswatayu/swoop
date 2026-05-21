@@ -42,11 +42,9 @@ def cache_key(args: argparse.Namespace) -> str:
 
 
 def load_cache() -> dict[str, int]:
-    if not CACHE_PATH.exists():
-        return {}
     try:
         return json.loads(CACHE_PATH.read_text())
-    except (OSError, json.JSONDecodeError):
+    except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
@@ -80,8 +78,9 @@ def check_once(args: argparse.Namespace, cache: dict[str, int]) -> None:
         delta = last_seen - current
         print(f"  PRICE DROP: {last_seen} -> {current} {currency} (saved {delta})")
 
-    cache[key] = current
-    save_cache(cache)
+    if current != last_seen:
+        cache[key] = current
+        save_cache(cache)
 
 
 def run_loop(args: argparse.Namespace) -> int:

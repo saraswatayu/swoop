@@ -10,7 +10,7 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Deal, DealsResult, Passengers, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -44,6 +44,8 @@ class TestFrozenExports:
         "deals",
         "search_deal",
         "price_deal",
+        "watch_deals",
+        "diff_deals",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -53,7 +55,9 @@ class TestFrozenExports:
         # Types
         "CabinClass",
         "Deal",
+        "DealsDiff",
         "DealsResult",
+        "PriceChange",
         "Region",
         "Passengers",
         "TransportConfig",

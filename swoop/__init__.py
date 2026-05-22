@@ -40,7 +40,7 @@ from .decoder import (
 from ._regions import Region
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
-from .models import Deal, DealsResult, Passengers, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -650,6 +650,26 @@ def _fetch_deals_per_origin(
 # ---------------------------------------------------------------------------
 
 
+def watch_deals(
+    current_result: DealsResult,
+    *,
+    cache_path,
+) -> DealsDiff:
+    """One iteration of the deals watcher: load prior snapshot, diff, save current.
+
+    See :mod:`swoop._deals_watch` for details. Re-exported here for
+    discoverability — most callers will use this directly.
+    """
+    from ._deals_watch import watch_deals as _watch
+    return _watch(current_result, cache_path=cache_path)
+
+
+def diff_deals(prior, current) -> DealsDiff:
+    """Compute the diff between two iterables of :class:`Deal`."""
+    from ._deals_watch import diff_deals as _diff
+    return _diff(prior, current)
+
+
 def search_deal(
     deal: "Deal",
     *,
@@ -864,6 +884,8 @@ __all__ = [
     "deals",
     "search_deal",
     "price_deal",
+    "watch_deals",
+    "diff_deals",
     "get_booking_results",
     "search_raw",
     "set_country",
@@ -873,7 +895,9 @@ __all__ = [
     # Types
     "CabinClass",
     "Deal",
+    "DealsDiff",
     "DealsResult",
+    "PriceChange",
     "Region",
     "Passengers",
     "TransportConfig",

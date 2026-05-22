@@ -241,6 +241,60 @@ class DealsResult:
         return f"DealsResult({', '.join(parts)})"
 
 
+@dataclass(frozen=True)
+class PriceChange:
+    """A price movement on a deal between two watcher runs."""
+
+    prior: Deal
+    current: Deal
+
+    @property
+    def delta(self) -> int:
+        """Current price minus prior price. Negative = price drop."""
+        return self.current.price - self.prior.price
+
+    @property
+    def delta_pct(self) -> float:
+        """Percent change from prior to current price."""
+        if self.prior.price == 0:
+            return 0.0
+        return (self.current.price - self.prior.price) / self.prior.price * 100.0
+
+    def __repr__(self) -> str:
+        sign = "+" if self.delta >= 0 else ""
+        return (
+            f"PriceChange({self.current.origin}->{self.current.destination} "
+            f"{self.prior.price}->{self.current.price} ({sign}{self.delta_pct:.0f}%))"
+        )
+
+
+@dataclass(frozen=True)
+class DealsDiff:
+    """Diff between two DealsResult runs of the same query.
+
+    ``new`` are deals in the current run that weren't in the prior.
+    ``gone`` are deals in the prior that aren't in the current.
+    ``price_changes`` are deals with the same fingerprint but a different
+    price. ``unchanged`` are deals with both the same fingerprint AND the
+    same price.
+    """
+
+    new: list[Deal] = field(default_factory=list)
+    gone: list[Deal] = field(default_factory=list)
+    price_changes: list[PriceChange] = field(default_factory=list)
+    unchanged: list[Deal] = field(default_factory=list)
+
+    @property
+    def has_changes(self) -> bool:
+        return bool(self.new or self.gone or self.price_changes)
+
+    def __repr__(self) -> str:
+        return (
+            f"DealsDiff(new={len(self.new)}, gone={len(self.gone)}, "
+            f"price_changes={len(self.price_changes)}, unchanged={len(self.unchanged)})"
+        )
+
+
 @dataclass
 class PriceResult:
     """Result of a targeted price check for a specific trip.

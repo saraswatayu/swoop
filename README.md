@@ -89,6 +89,23 @@ swoop search JFK LAX 2026-06-15 -a DL -a UA --depart-after 8 --depart-before 14
 
 # Surface RPC debug logging on stderr (URLs, response sizes, retries)
 swoop search JFK LAX 2026-06-15 --verbose
+
+# Discover deals from an airport
+swoop deals JFK
+
+# Multi-origin (NYC) — single call, mixed origins
+swoop deals JFK,LGA,EWR
+
+# Parallel per-origin fetch, deduped by trip identity
+swoop deals JFK,LGA,EWR --per-origin
+
+# Europe-only summer deals, 5-10 day trips, under $700, 40%+ off
+swoop deals JFK --region europe \
+    --depart-window 2026-06-01,2026-08-31 \
+    --trip-length 5-10 --max-price 700 --min-discount 40
+
+# Delta-only deals
+swoop deals JFK -a DL
 ```
 
 </details>
@@ -241,6 +258,71 @@ for opt in options:
     if opt.booking_url:
         print(f"  book at: {opt.booking_url}")
 ```
+
+### Deals discovery
+
+`deals()` is the third primitive: instead of "what flights from A to B?"
+(`search()`) or "how much for this exact flight?" (`check_price()`),
+it answers **"where's cheap from here right now?"**
+
+```python
+from swoop import deals, search_deal, price_deal, Region
+
+# Top 30 deals from JFK (excluding basic economy by default)
+result = deals("JFK")
+for deal in result.deals[:5]:
+    print(f"{deal.destination_city:25s} ${deal.price}  {deal.discount_pct}% off")
+
+# Filter by region, budget, trip length, discount
+result = deals(
+    "JFK",
+    region=Region.EUROPE,
+    max_price=700,
+    trip_length=(5, 10),
+    min_discount_pct=40,
+    depart_window=("2026-06-01", "2026-08-31"),
+)
+
+# Multi-origin (NYC). Default: one RPC call. per_origin=True parallelizes
+# and merges by fingerprint (cheaper variant wins on collision).
+nyc = deals(["JFK", "LGA", "EWR"], per_origin=True)
+
+# Bridge to swoop's existing pricing flow — no field-shuffling.
+top = nyc.deals[0]
+itineraries = search_deal(top)            # search() with the deal's route + dates + carriers
+bookable = price_deal(top)                # cheapest matching itinerary, priced
+```
+
+Deals discovery is **roundtrip-only** — that's an upstream Google
+Flights product constraint, not a swoop limitation. The server ignores
+date and time-window slots in the payload; swoop applies those filters
+client-side over the 30 deals returned. For one-way exploration, use
+`search()` with an explicit destination.
+
+### Watching deals over time
+
+```python
+from swoop import deals, watch_deals, Region
+
+# First run: every deal goes into diff.new and the cache is created.
+# Subsequent runs: diff.new / diff.gone / diff.price_changes / diff.unchanged.
+result = deals("JFK", region=Region.EUROPE, max_price=700)
+diff = watch_deals(result, cache_path=".swoop-deals-cache.json")
+
+for change in diff.price_changes:
+    if change.delta < -50:          # $50+ drop from prior run
+        d = change.current
+        print(f"Price drop! {d.origin}->{d.destination}: "
+              f"${change.prior.price} -> ${d.price}")
+
+for new_deal in diff.new:
+    print(f"New deal: {new_deal.destination_city} ${new_deal.price}")
+```
+
+`Deal.fingerprint` (origin + destination + dates + sorted airlines)
+identifies "the same trip" across runs — a price drop on the same trip
+shows up as a `PriceChange` rather than a new+gone pair.
+`examples/deals_watcher.py` is a runnable CLI version.
 
 </details>
 

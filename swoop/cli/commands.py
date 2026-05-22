@@ -1,6 +1,7 @@
 """CLI commands for swoop: search and price."""
 
 from contextlib import nullcontext
+from typing import Optional, TypedDict
 
 import click
 from rich.console import Console
@@ -11,7 +12,35 @@ from .utils import (
     IATA_CODE,
     SORT_MAP,
     check_past_date,
+    configure_verbose_logging,
+    resolve_quiet,
 )
+
+
+class _SearchFormatKwargs(TypedDict, total=False):
+    """Shared kwargs passed to ``format_search_table`` / ``format_search_json``.
+
+    The shapes drifted between the two formatters historically; defining
+    the union here lets pyright narrow each value to its declared type
+    instead of widening to the union of all values (which is what the
+    old ``dict[str, Any]`` annotation defended against).
+
+    Note the ``origin`` / ``destination`` / ``date`` fields are non-
+    optional even though Click parses them as ``Optional[str]`` at the
+    command boundary. They are narrowed before this TypedDict is built
+    (see search_cmd) so the formatter call sites don't have to repeat
+    the narrowing.
+    """
+
+    origin: str
+    destination: str
+    date: str
+    cabin: str
+    adults: int
+    return_date: Optional[str]
+    legs: Optional[list]
+    limit: Optional[int]
+    price_commands: Optional[list[str]]
 
 
 def _err_console(no_color: bool = False) -> Console:
@@ -217,7 +246,10 @@ def _output_options(formats: list[str]):
         options = [
             click.option("-o", "--output", "output_format", type=click.Choice(formats, case_sensitive=False), default=formats[0], show_default=True, help="Output format."),
             click.option("--no-color", is_flag=True, default=False, help="Disable color output."),
-            click.option("-q", "--quiet", is_flag=True, default=False, help="Suppress spinners/headers (for piping)."),
+            click.option("-q", "--quiet", is_flag=True, default=False,
+                         help="Suppress spinners/headers. Auto-on when stdout is not a TTY."),
+            click.option("-v", "--verbose", is_flag=True, default=False,
+                         help="Show debug logging (RPC URLs, response sizes, retries) on stderr."),
         ]
         for option in reversed(options):
             f = option(f)
@@ -248,7 +280,7 @@ def search_cmd(
     country, proxy,
     timeout, retries, max_results, beam_width, time_budget,
     limit, show_price_commands,
-    output_format, no_color, quiet,
+    output_format, no_color, quiet, verbose,
 ):
     """Search for flights.
 
@@ -270,6 +302,8 @@ def search_cmd(
         format_search_table,
     )
 
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
     has_positional = any(value is not None for value in (origin, destination, date))
     has_full_positional = all(value is not None for value in (origin, destination, date))
@@ -370,9 +404,18 @@ def search_cmd(
             )
         ctx.exit(1)
 
-    display_origin = leg[0][0] if has_leg else origin
-    display_destination = leg[-1][1] if has_leg else destination
-    display_date = leg[0][2] if has_leg else date
+    assert result is not None  # narrowed by the ctx.exit(1) above
+    if has_leg:
+        display_origin: str = leg[0][0]
+        display_destination: str = leg[-1][1]
+        display_date: str = leg[0][2]
+    else:
+        # has_full_positional was enforced above via ctx.exit(2); pyright
+        # can't see through Click's exit, so re-assert here for the typer.
+        assert origin is not None and destination is not None and date is not None
+        display_origin = origin
+        display_destination = destination
+        display_date = date
     display_return_date = None if has_leg else return_date
     display_options = list(result.results[:limit]) if limit else list(result.results)
     price_commands = None
@@ -381,13 +424,17 @@ def search_cmd(
             _build_price_selector_command(option.selector)
             for option in display_options
         ]
-    fmt_kwargs = dict(
-        origin=display_origin, destination=display_destination, date=display_date,
-        cabin=cabin, adults=passengers, return_date=display_return_date,
-        legs=leg if has_leg else None,
-        limit=limit,
-        price_commands=price_commands,
-    )
+    fmt_kwargs: _SearchFormatKwargs = {
+        "origin": display_origin,
+        "destination": display_destination,
+        "date": display_date,
+        "cabin": cabin,
+        "adults": passengers,
+        "return_date": display_return_date,
+        "legs": list(leg) if has_leg else None,
+        "limit": limit,
+        "price_commands": price_commands,
+    }
 
     if output_format == "table":
         format_search_table(result, no_color=no_color, **fmt_kwargs)
@@ -422,7 +469,7 @@ def search_cmd(
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True)
 @click.option("--retries", type=int, default=2, show_default=True)
-@_output_options(["table", "json", "brief"])
+@_output_options(["table", "json", "csv", "brief"])
 @click.pass_context
 def price_cmd(
     ctx, origin, destination,
@@ -432,7 +479,7 @@ def price_cmd(
     max_stops, include_basic,
     country, proxy,
     timeout, retries,
-    output_format, no_color, quiet,
+    output_format, no_color, quiet, verbose,
 ):
     """Check the current bookable fare for a chosen itinerary.
 
@@ -452,8 +499,15 @@ def price_cmd(
     import swoop
     from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 
-    from .formatters import format_price_brief, format_price_json, format_price_table
+    from .formatters import (
+        format_price_brief,
+        format_price_csv,
+        format_price_json,
+        format_price_table,
+    )
 
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
 
     has_route_args = any(value is not None for value in (origin, destination))
@@ -524,10 +578,12 @@ def price_cmd(
                 err.print(f"[yellow]{warning}[/yellow]")
                 break
     else:
+        assert depart is not None  # not has_selector and not has_leg => has_depart
         warning = check_past_date(depart[0])
         if warning:
             err.print(f"[yellow]{warning}[/yellow]")
         elif has_return:
+            assert return_leg is not None  # has_return narrows return_leg
             warning = check_past_date(return_leg[0])
             if warning:
                 err.print(f"[yellow]{warning}[/yellow]")
@@ -562,6 +618,8 @@ def price_cmd(
                     transport=transport,
                 )
             else:
+                assert depart is not None  # has_depart guards this branch
+                assert origin is not None and destination is not None
                 pax = swoop.Passengers(
                     adults=passengers,
                     children=children,
@@ -574,8 +632,8 @@ def price_cmd(
                     origin=origin,
                     destination=destination,
                     date=depart[0],
-                    return_flight_number=return_leg[1] if has_return else None,
-                    return_date=return_leg[0] if has_return else None,
+                    return_flight_number=return_leg[1] if return_leg is not None else None,
+                    return_date=return_leg[0] if return_leg is not None else None,
                     cabin=cabin,
                     passengers=pax,
                     max_stops=max_stops,
@@ -601,8 +659,10 @@ def price_cmd(
         elif has_leg:
             err.print("[yellow]Selected itinerary was not found for the requested trip.[/yellow]")
         else:
+            assert depart is not None  # not has_selector and not has_leg => has_depart
             trip = f"{origin} -> {destination} on {depart[0]}"
             if has_return:
+                assert return_leg is not None
                 trip += f" / {destination} -> {origin} on {return_leg[0]}"
             err.print(
                 f"[yellow]Requested itinerary was not found for {trip}.[/yellow]"
@@ -610,6 +670,7 @@ def price_cmd(
         ctx.exit(1)
 
     if not has_selector and not has_leg:
+        assert depart is not None  # has_depart guards this branch
         query_legs = [
             {
                 "flight_number": depart[1],
@@ -620,6 +681,7 @@ def price_cmd(
             }
         ]
         if has_return:
+            assert return_leg is not None
             query_legs.append(
                 {
                     "flight_number": return_leg[1],
@@ -634,6 +696,8 @@ def price_cmd(
 
     if output_format == "json":
         format_price_json(result, query_legs=query_legs)
+    elif output_format == "csv":
+        format_price_csv(result, query_legs=query_legs)
     elif output_format == "brief":
         format_price_brief(result, query_legs=query_legs)
     else:
@@ -657,7 +721,7 @@ def price_cmd(
 def deals_cmd(
     ctx, origin, cabin, nonstop, max_stops, passengers,
     country, proxy, timeout, retries,
-    limit, output_format, no_color, quiet,
+    limit, output_format, no_color, quiet, verbose,
 ):
     """Discover the best flight deals from an airport.
 
@@ -678,6 +742,8 @@ def deals_cmd(
 
     import swoop
 
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
     err = _err_console(no_color)
 
     stops = max_stops

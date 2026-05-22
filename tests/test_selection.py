@@ -9,6 +9,7 @@ import pytest
 
 import swoop._selection as selection
 from swoop.decoder import BookingOption, Itinerary, RawSearchResult
+from swoop.exceptions import SwoopError, SwoopHTTPError, SwoopParseError
 from swoop.models import Passengers
 from tests.factories import make_simple_itinerary as _make_itinerary, make_raw_result as _raw_result
 
@@ -393,6 +394,128 @@ class TestSelectedTripResolution:
 
 
 class TestExactPricing:
+    def test_price_selected_trip_fetches_booking_options_for_one_way(self, monkeypatch):
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+        ]
+        itinerary = _make_itinerary(
+            origin="JFK",
+            destination="LAX",
+            date="2026-04-15",
+            airline="DL",
+            flight_number="2300",
+            price=342,
+            booking_token="token-out",
+        )
+        options = [
+            BookingOption(
+                price=319,
+                brand_label="Main Cabin",
+                brand_code="MAIN",
+                seller_name="Delta Air Lines",
+                booking_url="https://www.google.com/travel/clk/f?u=tok&v=1",
+                _cabin_bucket="economy",
+            )
+        ]
+        calls = []
+
+        def fake_fetch_trip_booking(legs, itineraries, **kwargs):
+            calls.append((legs, itineraries, kwargs))
+            return options
+
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", fake_fetch_trip_booking)
+
+        result = selection.price_selected_trip(
+            request_legs,
+            [itinerary],
+            cabin="economy",
+            include_basic_economy=False,
+        )
+
+        assert result is not None
+        assert result.price == 319
+        assert result.fare_brand == "Main Cabin"
+        assert result.booking_options == options
+        assert result.rpc_calls == 1
+        assert calls[0][0] == request_legs
+        assert calls[0][1] == [itinerary]
+
+    def test_price_selected_trip_skips_booking_lookup_without_one_way_token(self, monkeypatch):
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+        ]
+        itinerary = _make_itinerary(
+            origin="JFK",
+            destination="LAX",
+            date="2026-04-15",
+            airline="DL",
+            flight_number="2300",
+            price=342,
+            booking_token="",
+        )
+        calls = []
+
+        def fake_fetch_trip_booking(*args, **kwargs):
+            calls.append((args, kwargs))
+            return [BookingOption(price=319, brand_label="Main Cabin", _cabin_bucket="economy")]
+
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", fake_fetch_trip_booking)
+
+        result = selection.price_selected_trip(
+            request_legs,
+            [itinerary],
+            cabin="economy",
+            include_basic_economy=False,
+        )
+
+        assert result is not None
+        assert result.price == 342
+        assert result.booking_options == []
+        assert result.rpc_calls == 0
+        assert calls == []
+
+    @pytest.mark.parametrize(
+        "raised",
+        [
+            SwoopError("boom"),
+            SwoopHTTPError(502),
+            SwoopParseError("bad json"),
+        ],
+    )
+    def test_price_selected_trip_falls_back_to_base_price_when_booking_rpc_raises(
+        self, monkeypatch, raised
+    ):
+        """One-way booking RPC failures fall back to base_price for any SwoopError subclass."""
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+        ]
+        itinerary = _make_itinerary(
+            origin="JFK",
+            destination="LAX",
+            date="2026-04-15",
+            airline="DL",
+            flight_number="2300",
+            price=342,
+            booking_token="token-out",
+        )
+
+        def boom(*args, **kwargs):
+            raise raised
+
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", boom)
+
+        result = selection.price_selected_trip(
+            request_legs,
+            [itinerary],
+            cabin="economy",
+            include_basic_economy=False,
+        )
+
+        assert result is not None
+        assert result.price == 342
+        assert result.booking_options == []
+        assert result.rpc_calls == 0
+
     @pytest.mark.parametrize(
         ("cabin", "options", "expected_price", "expected_brand"),
         [
@@ -607,3 +730,72 @@ class TestExactPricing:
         assert result.price == 1199
         assert result.fare_brand is None
         assert result.booking_options == options
+
+
+class _StubLeg:
+    """Minimal duck-typed leg for build_request_legs_from_selected."""
+
+    def __init__(self, origin: str, destination: str, date: str) -> None:
+        self.origin = origin
+        self.destination = destination
+        self.date = date
+
+
+class TestBuildRequestLegsFromSelected:
+    """Cover the carrier_filters branches in build_request_legs_from_selected.
+
+    The function feeds airlines into the RPC request when the caller wants
+    to pin the carrier per leg. None means "no airline pin," and silent
+    misbehaviour here is hard to spot from higher-level tests (a missing
+    filter just means Google returns more candidates than expected).
+    """
+
+    def test_none_filters_omits_airlines(self):
+        legs = [_StubLeg("JFK", "LAX", "2026-06-15")]
+        out = selection.build_request_legs_from_selected(legs)
+        assert len(out) == 1
+        assert out[0]["origin"] == "JFK"
+        assert out[0]["destination"] == "LAX"
+        assert out[0]["date"] == "2026-06-15"
+        assert out[0]["airlines"] is None
+
+    def test_empty_filters_list_treated_as_no_pin(self):
+        """An empty carrier_filters list is falsy and must not raise
+        IndexError on the first leg — it means "no pins anywhere."
+        """
+        legs = [_StubLeg("JFK", "LAX", "2026-06-15")]
+        out = selection.build_request_legs_from_selected(legs, carrier_filters=[])
+        assert out[0]["airlines"] is None
+
+    def test_all_none_filters_omits_airlines_on_every_leg(self):
+        legs = [
+            _StubLeg("JFK", "LAX", "2026-06-15"),
+            _StubLeg("LAX", "SFO", "2026-06-18"),
+        ]
+        out = selection.build_request_legs_from_selected(
+            legs, carrier_filters=[None, None]
+        )
+        assert [leg["airlines"] for leg in out] == [None, None]
+
+    def test_mixed_filters_apply_per_leg(self):
+        legs = [
+            _StubLeg("JFK", "LAX", "2026-06-15"),
+            _StubLeg("LAX", "SFO", "2026-06-18"),
+        ]
+        out = selection.build_request_legs_from_selected(
+            legs, carrier_filters=["DL", None]
+        )
+        assert out[0]["airlines"] == ["DL"]
+        assert out[1]["airlines"] is None
+
+    def test_length_mismatch_raises_indexerror(self):
+        """Pinning the contract: a too-short filters list must raise
+        IndexError rather than silently dropping pins. If we ever wrap
+        this in a friendlier error, this test catches the API change.
+        """
+        legs = [
+            _StubLeg("JFK", "LAX", "2026-06-15"),
+            _StubLeg("LAX", "SFO", "2026-06-18"),
+        ]
+        with pytest.raises(IndexError):
+            selection.build_request_legs_from_selected(legs, carrier_filters=["DL"])

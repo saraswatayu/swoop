@@ -2,11 +2,12 @@
 
 import click
 
+from .. import __version__
 from .commands import deals_cmd, price_cmd, search_cmd
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(package_name="swoop-flights")
+@click.version_option(version=__version__, prog_name="swoop")
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """Swoop — search Google Flights from the terminal."""

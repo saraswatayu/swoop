@@ -631,6 +631,13 @@ def format_price_json(
                 "brand_code": opt.brand_code,
                 "price": opt.price,
                 "is_basic": opt.is_basic,
+                "fare_family": opt.fare_family,
+                "rebookability_signal": opt.rebookability_signal,
+                "seller_name": opt.seller_name,
+                "seller_code": opt.seller_code,
+                "booking_url": opt.booking_url,
+                "logo_url": opt.logo_url,
+                "is_airline_direct": opt.is_airline_direct,
             }
             for opt in result.booking_options
         ] if result.booking_options else [],
@@ -661,6 +668,79 @@ def format_price_brief(
     trip_type = f"{len(query_legs or result.resolved_legs or [])}-leg"
     brand = f" ({result.fare_brand})" if result.fare_brand else ""
     print(f"{_format_price(result.price, result.currency)}{brand} {trip_type}")
+
+
+def format_price_csv(
+    result,
+    *,
+    query_legs=None,
+) -> None:
+    """Render a price check result as CSV to stdout.
+
+    One row per booking option, so callers can sort/filter fares
+    across sellers in a spreadsheet. The header row always exists
+    even when the result has no booking_options (the chosen fare
+    is still emitted as a single row).
+    """
+    # Lowercase so spreadsheet filters like `is_airline_direct == TRUE`
+    # match — Python's str(True) is "True", which is parsed as text by
+    # most consumers and trips up case-sensitive comparisons.
+    def _b(v: bool) -> str:
+        return "true" if v else "false"
+
+    # CSV-injection guard: when Excel/Sheets/LibreOffice open a CSV and
+    # see a cell beginning with `=`, `+`, `-`, `@`, tab, or CR, they
+    # treat it as a formula. Google's RPC returns seller/brand strings
+    # that swoop passes through opaquely; if any of those ever start
+    # with one of those characters, opening the CSV could execute
+    # attacker-controlled content. Prefix with a single quote to neuter
+    # the cell while keeping it human-readable after manual unquoting.
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        if value.startswith(_DANGEROUS_PREFIXES):
+            return "'" + value
+        return value
+
+    currency = result.currency or ""
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "price", "currency", "fare_brand", "is_basic_economy",
+        "brand_label", "brand_code", "is_basic",
+        "fare_family", "rebookability_signal",
+        "seller_name", "seller_code", "is_airline_direct",
+        "booking_url", "logo_url",
+    ])
+    if result.booking_options:
+        for opt in result.booking_options:
+            writer.writerow([
+                opt.price,
+                currency,
+                _s(result.fare_brand),
+                _b(result.is_basic_economy),
+                _s(opt.brand_label),
+                _s(opt.brand_code),
+                _b(opt.is_basic),
+                _s(opt.fare_family),
+                _s(opt.rebookability_signal),
+                _s(opt.seller_name),
+                _s(opt.seller_code),
+                _b(opt.is_airline_direct),
+                _s(opt.booking_url),
+                _s(opt.logo_url),
+            ])
+    else:
+        # No booking options surfaced — emit a single row with the chosen fare
+        # so downstream tooling still has data to work with.
+        writer.writerow([
+            result.price,
+            currency,
+            _s(result.fare_brand),
+            _b(result.is_basic_economy),
+            "", "", "", "", "", "", "", "", "", "",
+        ])
 
 
 # ---------------------------------------------------------------------------

@@ -69,13 +69,17 @@ def _safe_get(data: Any, path: list[int], default: Any = None) -> Any:
 
 
 def _safe_tuple(val: Any, length: int, defaults: list) -> tuple:
-    """Convert a value to a tuple of fixed length with defaults for missing elements."""
-    if val is None:
-        return tuple(defaults[:length])
-    if isinstance(val, (list, tuple)):
-        result = list(val) + defaults
-        return tuple(result[:length])
-    return tuple(defaults[:length])
+    """Convert a value to a tuple of fixed length with defaults for missing or None elements.
+
+    Google Flights sometimes encodes a leading-zero hour by omitting it, sending
+    e.g. ``[None, 5]`` for ``00:05``, so None inside the list is treated the
+    same as a missing element.
+    """
+    seq: list = list(val) if isinstance(val, (list, tuple)) else []
+    return tuple(
+        seq[i] if i < len(seq) and seq[i] is not None else defaults[i]
+        for i in range(length)
+    )
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -289,13 +293,33 @@ class RawSearchResult:
 
 @dataclass
 class BookingOption:
-    """A single fare option from GetBookingResults."""
+    """A single fare option from GetBookingResults.
+
+    Seller fields (``seller_name``, ``seller_code``, ``booking_url``, ``logo_url``,
+    ``is_airline_direct``) describe who is selling the fare and how to reach the
+    booking page:
+
+    * ``booking_url`` is a ``google.com/travel/clk/f`` redirect reconstructed
+      from the RPC response. swoop only exposes it when the base URL is the
+      expected ``https://www.google.com/travel/clk/f`` endpoint; malformed,
+      reshaped, or non-Google bases produce an empty string.
+    * ``logo_url`` points at ``gstatic.com/flights/partner_logos/70px/...`` only
+      when Google explicitly provides ``logo_code``; empty otherwise. Consumers
+      that want a best-effort airline logo can construct the URL themselves
+      via ``{gstatic_base}/{seller_code}.png`` (works for IATA-style codes,
+      404s for OTA codes).
+    """
     price: int = 0
     brand_label: str = ""
     brand_code: str = ""
     is_basic: bool = False
     fare_family: str = ""
     rebookability_signal: str = ""
+    seller_name: str = ""        # e.g. "Gotogate", "Qatar Airways"
+    seller_code: str = ""        # e.g. "ETRAVELI_Gotogate", "QR"
+    booking_url: str = ""
+    logo_url: str = ""
+    is_airline_direct: bool = False
     _is_basic_by_flags: bool = False
     _is_basic_by_text: bool = False
     _option_index: Optional[int] = None
@@ -316,8 +340,10 @@ class BookingOption:
 
     def __repr__(self) -> str:
         parts = [f"price={self.price}"]
+        if self.seller_name:
+            parts.append(f"seller={self.seller_name!r}")
         if self.brand_label:
-            parts.append(f"'{self.brand_label}'")
+            parts.append(f"{self.brand_label!r}")
         if self.is_basic:
             parts.append("basic")
         return f"BookingOption({' '.join(parts)})"

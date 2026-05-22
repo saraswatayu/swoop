@@ -17,6 +17,8 @@ import pytest
 
 import swoop._booking as _booking
 import swoop.rpc as rpc
+from swoop._booking import _extract_booking_url, _extract_seller
+from swoop.decoder import BookingOption
 from swoop.rpc import (
     _build_booking_f_req,
     _build_filters_from_legs,
@@ -586,6 +588,209 @@ def test_booking_parser_logs_debug_for_partial_drops_and_warning_for_total_drop(
     dropped_text = encode_rpc_outer([None, [dropped_payload]])
     assert rpc._parse_booking_rpc_response(dropped_text) == []
     assert any(record.levelno >= logging.WARNING for record in caplog.records)
+
+
+def test_booking_option_seller_fields_populated() -> None:
+    """OTA seller name, code, booking URL, and logo URL are parsed from opt[1] and opt[5]."""
+    payload = [
+        make_booking_option(
+            price=559,
+            brand_code="ECONOMY",
+            brand_label="Economy",
+            seller_code="ETRAVELI_Mytrip",
+            seller_name="Mytrip",
+            logo_code="ETRAVELI_Mytrip",
+            booking_url_token="tok_abc123",
+        ),
+    ]
+    text = encode_rpc_outer([None, [payload]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    opt = options[0]
+    assert opt.seller_name == "Mytrip"
+    assert opt.seller_code == "ETRAVELI_Mytrip"
+    assert opt.booking_url == "https://www.google.com/travel/clk/f?u=tok_abc123&v=1"
+    assert opt.logo_url == "https://www.gstatic.com/flights/partner_logos/70px/ETRAVELI_Mytrip.png"
+    assert opt.is_airline_direct is False
+
+
+def test_booking_option_logo_url_empty_when_logo_code_absent() -> None:
+    """When opt[1][0][2] is None, logo_url is empty — library does not guess a URL that may 404."""
+    payload = [
+        make_booking_option(
+            price=600,
+            brand_code="ECONOMY",
+            brand_label="Economy",
+            seller_code="QR",
+            seller_name="Qatar Airways",
+            logo_code=None,
+            is_airline_direct=True,
+            booking_url_token="tok_qr",
+        ),
+    ]
+    text = encode_rpc_outer([None, [payload]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    opt = options[0]
+    assert opt.seller_name == "Qatar Airways"
+    assert opt.seller_code == "QR"
+    assert opt.logo_url == ""
+    assert opt.is_airline_direct is True
+
+
+def test_booking_option_seller_fields_empty_when_absent() -> None:
+    """Options without a seller block (airline-direct without opt[1]) leave seller fields empty."""
+    payload = [
+        make_booking_option(price=250, brand_code="DELTA MAIN CLASSIC", brand_label="Delta Main Classic"),
+    ]
+    text = encode_rpc_outer([None, [payload]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    opt = options[0]
+    assert opt.seller_name == ""
+    assert opt.seller_code == ""
+    assert opt.booking_url == ""
+    assert opt.logo_url == ""
+    assert opt.is_airline_direct is False
+
+
+def test_booking_option_booking_url_extracted_independently_of_seller_block() -> None:
+    """opt[5] click URL is parsed even when opt[1] seller block is missing."""
+    payload = [
+        make_booking_option(
+            price=400,
+            brand_code="ECONOMY",
+            brand_label="Economy",
+            booking_url_token="tok_orphan",
+        ),
+    ]
+    text = encode_rpc_outer([None, [payload]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    opt = options[0]
+    assert opt.seller_name == ""
+    assert opt.seller_code == ""
+    assert opt.booking_url == "https://www.google.com/travel/clk/f?u=tok_orphan&v=1"
+    assert opt.logo_url == ""
+
+
+@pytest.mark.parametrize(
+    "clk_base",
+    [
+        "javascript:alert(1)",
+        "http://www.google.com/travel/clk/f",
+        "https://evil.example/travel/clk/f",
+        "https://www.google.com.evil.example/travel/clk/f",
+        "https://www.google.com/travel/clk/other",
+        "https://www.google.com/travel/clk/f#fragment",
+        "https://attacker@www.google.com/travel/clk/f",
+        "https://user:pw@www.google.com/travel/clk/f",
+        "https://www.google.com:444/travel/clk/f",
+        "https://www.google.com/travel/clk/f?u=preset",
+    ],
+)
+def test_booking_option_booking_url_rejects_untrusted_redirect_base(clk_base: str) -> None:
+    """Only the expected HTTPS Google Flights click redirect is exposed."""
+    option = make_booking_option(
+        price=400,
+        brand_code="ECONOMY",
+        brand_label="Economy",
+        booking_url_token="tok_orphan",
+    )
+    option[5][2][0] = clk_base
+    text = encode_rpc_outer([None, [[option]]])
+    options = rpc._parse_booking_rpc_response(text)
+
+    assert len(options) == 1
+    assert options[0].booking_url == ""
+
+
+def test_booking_option_multi_seller_logs_debug_and_picks_first(caplog) -> None:
+    """When opt[1] carries multiple seller entries we use the first and log at DEBUG."""
+    option = make_booking_option(price=400, brand_code="ECONOMY", brand_label="Economy")
+    option[1] = [
+        ["PRIMARY", "Primary Seller", "PRIMARY", True],
+        ["SECONDARY", "Secondary Seller", "SECONDARY", False],
+    ]
+    text = encode_rpc_outer([None, [[option]]])
+    with caplog.at_level(logging.DEBUG, logger="swoop._booking"):
+        options = rpc._parse_booking_rpc_response(text)
+
+    assert options[0].seller_code == "PRIMARY"
+    assert any("2 seller entries" in record.message for record in caplog.records)
+
+
+def test_booking_option_repr_shows_seller_when_present() -> None:
+    opt = BookingOption(price=594, seller_name="Mytrip", brand_label="Economy")
+    rendered = repr(opt)
+    assert "seller='Mytrip'" in rendered
+    assert "price=594" in rendered
+    assert "'Economy'" in rendered  # brand_label still surfaced alongside seller
+
+
+def test_booking_option_repr_escapes_seller_name_with_apostrophe() -> None:
+    """Seller names with apostrophes/quotes don't corrupt the repr output."""
+    opt = BookingOption(price=300, seller_name="Bob's Travel")
+    rendered = repr(opt)
+    assert "Bob's Travel" in rendered
+    assert rendered.count("seller=") == 1
+    assert rendered.endswith(")")
+
+
+def test_booking_option_logo_url_path_escapes_logo_code() -> None:
+    """logo_code is path-escaped so unexpected characters don't break the URL."""
+    option = [None] * 25
+    option[1] = [["CODE", "Name", "weird/code?x=1", False]]
+    seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)
+    assert "weird%2Fcode%3Fx%3D1" in logo_url
+    assert logo_url.endswith(".png")
+
+
+@pytest.mark.parametrize(
+    "opt1",
+    [
+        {"unexpected": "dict"},
+        "scalar-string",
+        42,
+        [],
+        ["scalar-instead-of-list-entry"],
+        [{"wrong": "shape"}],
+    ],
+)
+def test_extract_seller_returns_empty_for_non_list_opt1_shapes(opt1) -> None:
+    """opt[1] reshapes that aren't a non-empty list-of-lists fall through to empty fields."""
+    option = [None] * 25
+    option[1] = opt1
+    seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)
+    assert seller_name == ""
+    assert seller_code == ""
+    assert booking_url == ""
+    assert logo_url == ""
+    assert is_airline_direct is False
+
+
+@pytest.mark.parametrize(
+    "url_block",
+    [
+        None,
+        [],
+        ["only-one"],
+        ["a", "b"],
+        ["a", None, "scalar-instead-of-list"],
+        ["a", None, ["url-but-no-params"]],
+        ["a", None, ["https://www.google.com/travel/clk/f", "params-not-list"]],
+        # All param pairs filtered out — kv_pairs empty, validator rejects empty params:
+        ["a", None, ["https://www.google.com/travel/clk/f", [[None, "v"], ["k", None]]]],
+        ["a", None, ["https://www.google.com/travel/clk/f", [["short-pair"]]]],
+    ],
+)
+def test_extract_booking_url_returns_empty_for_malformed_opt5(url_block) -> None:
+    """opt[5] reshapes that don't yield a usable clk_base + kv pairs produce an empty URL."""
+    assert _extract_booking_url(url_block) == ""
 
 
 def test_parse_rpc_response_null_and_decode(monkeypatch) -> None:

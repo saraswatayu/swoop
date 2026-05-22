@@ -22,3 +22,9 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+
+# Local tooling artifacts (gstack browse audits, etc.)
+.gstack/
+
+# examples/price_drop_watcher.py cache (written to CWD)
+.swoop-watch-cache.json

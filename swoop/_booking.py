@@ -8,6 +8,7 @@ cohesion — this module handles response parsing, not request building.
 import base64
 import json
 import logging
+import urllib.parse
 from typing import Any
 
 from .builders import CABIN_CLASS_MAP, ItinerarySummary
@@ -250,6 +251,104 @@ def _extract_segment_identity_from_context(context_segment_token_b64: str) -> di
     return fields
 
 
+_GSTATIC_LOGO_BASE = "https://www.gstatic.com/flights/partner_logos/70px"
+_GOOGLE_CLK_SCHEME = "https"
+_GOOGLE_CLK_HOST = "www.google.com"
+_GOOGLE_CLK_PATH = "/travel/clk/f"
+
+
+def _extract_seller(option: list[Any]) -> tuple[str, str, str, str, bool]:
+    """Extract (seller_name, seller_code, booking_url, logo_url, is_airline_direct) from a booking option.
+
+    opt[1]: [[seller_code, seller_name, logo_code_or_None, is_airline_bool], ...]
+    opt[5]: [display_url, None, [clk_base_url, [["u", token], ["v", "1"]]]]
+
+    Seller identity (opt[1]) and click URL (opt[5]) are extracted independently:
+    a missing seller block does not block URL extraction, and vice versa.
+
+    logo_url is ``{_GSTATIC_LOGO_BASE}/<logo_code>.png`` only when Google
+    explicitly provides logo_code in opt[1][0][2]. When logo_code is absent
+    logo_url is empty — callers wanting a best-effort airline-direct logo
+    can construct one themselves via ``{_GSTATIC_LOGO_BASE}/{seller_code}.png``
+    (works for IATA-style codes; will 404 for OTA seller codes).
+
+    is_airline_direct is True when Google flags the seller as the operating
+    carrier (booking goes directly to the airline rather than an OTA).
+    """
+    booking_url = _extract_booking_url(_safe_get(option, [5]))
+
+    opt1_list = _safe_get(option, [1])
+    if not isinstance(opt1_list, list) or not opt1_list:
+        return "", "", booking_url, "", False
+    seller_entry = opt1_list[0]
+    if not isinstance(seller_entry, list):
+        return "", "", booking_url, "", False
+
+    # Multi-seller opt[1] lists are not observed in our corpus but the wire
+    # format permits them. Log so we can detect this if Google ever changes.
+    if len(opt1_list) > 1:
+        logger.debug(
+            "booking option has %d seller entries; using the first (%s)",
+            len(opt1_list),
+            _safe_get(seller_entry, [0]),
+        )
+
+    seller_code = str(_safe_get(seller_entry, [0], "") or "")
+    seller_name = str(_safe_get(seller_entry, [1], "") or "")
+    logo_code = str(_safe_get(seller_entry, [2], "") or "")
+    is_airline_direct = _safe_get(seller_entry, [3], None) is True
+
+    logo_url = (
+        f"{_GSTATIC_LOGO_BASE}/{urllib.parse.quote(logo_code, safe='')}.png"
+        if logo_code else ""
+    )
+    return seller_name, seller_code, booking_url, logo_url, is_airline_direct
+
+
+def _is_google_clk_base(value: str) -> bool:
+    """Return whether *value* is the expected Google Flights booking redirect base.
+
+    Accepts only ``https://www.google.com/travel/clk/f`` with no userinfo,
+    no port other than the default 443, no pre-existing query string, and
+    no fragment. Rejecting a pre-existing query prevents an RPC reshape
+    from injecting a competing ``u=`` parameter that Google's redirect
+    could prefer over the one we reconstruct from ``opt[5]``.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == _GOOGLE_CLK_SCHEME
+        and parsed.hostname == _GOOGLE_CLK_HOST
+        and parsed.path == _GOOGLE_CLK_PATH
+        and parsed.port in (None, 443)
+        and not parsed.username
+        and not parsed.password
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def _extract_booking_url(url_block: Any) -> str:
+    """Reconstruct the validated clk redirect URL from opt[5]."""
+    if not (isinstance(url_block, list) and len(url_block) >= 3):
+        return ""
+    clk_block = url_block[2]
+    if not (isinstance(clk_block, list) and len(clk_block) >= 2):
+        return ""
+    clk_base = clk_block[0] if isinstance(clk_block[0], str) else ""
+    params = clk_block[1] if isinstance(clk_block[1], list) else []
+    kv_pairs = [
+        (str(p[0]), str(p[1]))
+        for p in params
+        if isinstance(p, list) and len(p) >= 2 and p[0] is not None and p[1] is not None
+    ]
+    if not (clk_base and kv_pairs and _is_google_clk_base(clk_base)):
+        return ""
+    return clk_base + "?" + urllib.parse.urlencode(kv_pairs)
+
+
 def _normalize_attribute_vector(value: Any) -> list[Any]:
     """Normalize brand attribute vector to scalar-only values for diagnostics."""
     if not isinstance(value, list):
@@ -419,6 +518,7 @@ def _parse_booking_rpc_response(
         cabin_bucket = _cabin_bucket_from_brand_block(brand_block)
         rebookability_signal = _infer_rebookability_signal(fare_family, is_basic=is_basic)
         attribute_vector = _normalize_attribute_vector(_safe_get(brand_block, [1], []))
+        seller_name, seller_code, booking_url, logo_url, is_airline_direct = _extract_seller(option)
 
         parsed_option = BookingOption(
             price=int(round(price)),
@@ -427,6 +527,11 @@ def _parse_booking_rpc_response(
             is_basic=is_basic,
             fare_family=fare_family,
             rebookability_signal=rebookability_signal,
+            seller_name=seller_name,
+            seller_code=seller_code,
+            booking_url=booking_url,
+            logo_url=logo_url,
+            is_airline_direct=is_airline_direct,
             _is_basic_by_flags=is_basic_by_flags,
             _is_basic_by_text=is_basic_by_text,
             _option_index=option_index,

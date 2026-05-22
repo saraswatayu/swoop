@@ -36,8 +36,10 @@ cli = ["click>=8.2", "rich>=13.0", "babel>=2.14"]
 swoop = "swoop.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/saraswatayu/swoop"
+Homepage = "https://ayushsaraswat.com/projects/swoop"
+Repository = "https://github.com/saraswatayu/swoop"
 Issues = "https://github.com/saraswatayu/swoop/issues"
+"How it works" = "https://ayushsaraswat.com/writing/reverse-engineering-google-flights"
 
 [tool.hatch.version]
 path = "swoop/__init__.py"

@@ -339,22 +339,23 @@ def set_proxy(proxy: Optional[str]) -> None:
         _default_proxy = proxy
 
 
-def _get_client(proxy: Optional[str] = None) -> Any:
-    """Return a Client for the given proxy, with connection reuse.
+def _get_client(proxy: Optional[str] = None, impersonate: Optional[str] = None) -> Any:
+    """Return a Client for the given proxy + impersonate profile, with connection reuse.
 
-    Maintains separate Client instances per proxy so that different
-    proxy routes don't interfere with each other's connection state.
+    Maintains separate Client instances per (proxy, impersonate) so that different
+    proxy routes and fingerprint profiles don't interfere with each other.
     """
     from primp import Client
 
     effective_proxy = proxy if proxy is not None else _default_proxy
-    key = effective_proxy or ""
+    effective_impersonate = impersonate or "chrome"
+    key = f"{effective_proxy or ''}|{effective_impersonate}"
     if key not in _clients:
         # Evict oldest entry if cache is full to prevent unbounded growth
-        # when callers rotate through many proxy URLs.
+        # when callers rotate through many proxy URLs or impersonate profiles.
         if len(_clients) >= _MAX_CLIENTS:
             _clients.pop(next(iter(_clients)))
-        kwargs: dict[str, Any] = {"impersonate": "chrome"}
+        kwargs: dict[str, Any] = {"impersonate": effective_impersonate}
         if effective_proxy:
             kwargs["proxy"] = effective_proxy
         _clients[key] = Client(**kwargs)
@@ -394,7 +395,7 @@ def _http_post(
     import time
 
     url = _apply_country(url, transport.country)
-    client = _get_client(transport.proxy)
+    client = _get_client(transport.proxy, transport.impersonate)
     headers = {"content-type": "application/x-www-form-urlencoded;charset=UTF-8"}
 
     for attempt in range(1 + transport.retries):

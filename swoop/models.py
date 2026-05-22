@@ -24,6 +24,7 @@ class TransportConfig:
     retries: int = 2
     country: Optional[str] = None
     proxy: Optional[str] = None
+    impersonate: Optional[str] = None
 
 
 @dataclass

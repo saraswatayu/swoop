@@ -166,14 +166,37 @@ def make_price_block(price: object = 250, token: str = "token") -> list:
     return [[None, price], token]
 
 
-def make_booking_option(*, price: object | None = 250, brand_code: str | None = "DELTA MAIN CLASSIC", brand_label: str | None = "Delta Main Classic") -> list:
-    """Build a raw booking option list."""
+def make_booking_option(
+    *,
+    price: object | None = 250,
+    brand_code: str | None = "DELTA MAIN CLASSIC",
+    brand_label: str | None = "Delta Main Classic",
+    seller_code: str | None = None,
+    seller_name: str | None = None,
+    logo_code: str | None = None,
+    is_airline_direct: bool = False,
+    booking_url_token: str | None = None,
+) -> list:
+    """Build a raw booking option list.
+
+    Pass *seller_code* / *seller_name* to populate opt[1] (seller identity).
+    Pass *is_airline_direct* to set the opt[1][0][3] boolean.
+    Pass *booking_url_token* to populate opt[5] (redirect URL).
+    """
     option = [None] * 25
     option[19] = json.dumps(["", [""]])
     if price is not None:
         option[7] = make_price_block(price)
     if brand_code is not None and brand_label is not None:
         option[21] = make_brand_block(brand_code, brand_label)
+    if seller_code is not None or seller_name is not None:
+        option[1] = [[seller_code or "", seller_name or "", logo_code, is_airline_direct]]
+    if booking_url_token is not None:
+        option[5] = [
+            "www.example.com/...",
+            None,
+            ["https://www.google.com/travel/clk/f", [["u", booking_url_token], ["v", "1"]]],
+        ]
     return option
 
 

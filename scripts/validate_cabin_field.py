@@ -6,36 +6,18 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from swoop.rpc import search_raw, _http_post, _build_filters_from_legs, _build_booking_f_req, _build_selected_legs, _normalize_rpc_leg, BOOKING_RPC_URL, SORT_DEPARTURE_TIME
-from swoop._booking import parse_booking_payload, _extract_brand_block, _extract_price_block, _safe_get
+from swoop import CabinClass
+from swoop.rpc import search_raw
+from swoop._booking import _extract_brand_block, _extract_price_block, _safe_get
+
+from _booking_helper import fetch_booking_results
 
 SEAT_NAMES = {1: "ECONOMY", 2: "PREMIUM_ECONOMY", 3: "BUSINESS", 4: "FIRST"}
 
 
 def fetch_raw_booking_options(itinerary, cabin):
-    booking_token = itinerary.booking_token
-    origin = itinerary.departure_airport_code
-    destination = itinerary.arrival_airport_code
-    dep = itinerary.departure_date
-    date = f"{dep[0]:04d}-{dep[1]:02d}-{dep[2]:02d}"
-    selected_legs = _build_selected_legs(itinerary)
-
-    legs = [_normalize_rpc_leg(origin, destination, date)]
-    filters = _build_filters_from_legs(
-        legs, cabin=cabin, adults=1, children=0,
-        infants_in_seat=0, infants_on_lap=0, sort=SORT_DEPARTURE_TIME,
-    )
-    filter_block = filters[1]
-    encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
-    if not encoded_body:
-        return []
-
-    res = _http_post(
-        BOOKING_RPC_URL,
-        content=f"f.req={encoded_body}".encode(),
-        timeout=90, retries=2,
-    )
-    return parse_booking_payload(res.text)
+    raw_options, _ = fetch_booking_results(itinerary, cabin)
+    return raw_options or []
 
 
 def analyze_options(raw_options, label):
@@ -68,7 +50,7 @@ def analyze_options(raw_options, label):
 
 
 def main():
-    tests = [
+    tests: list[tuple[str, str, str, CabinClass]] = [
         ("JFK", "LHR", "2026-06-15", "economy"),
         ("JFK", "LHR", "2026-06-15", "business"),
         ("JFK", "LHR", "2026-06-15", "first"),
@@ -78,6 +60,9 @@ def main():
     for origin, dest, date, cabin in tests:
         print(f"\n\nSearching {origin}->{dest} cabin={cabin}...")
         result = search_raw(origin, dest, date, cabin=cabin)
+        if result is None:
+            print("  No result")
+            continue
         all_itins = (result.best or []) + (result.other or [])
 
         if not all_itins:

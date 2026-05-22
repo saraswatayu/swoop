@@ -178,6 +178,21 @@ class TestPriceFormatters:
         result = PriceResult(
             price=342,
             fare_brand="Main Cabin",
+            booking_options=[
+                BookingOption(
+                    price=342,
+                    brand_label="Main Cabin",
+                    brand_code="MAIN",
+                    is_basic=False,
+                    fare_family="standard",
+                    rebookability_signal="standard_rebookable",
+                    seller_name="Delta Air Lines",
+                    seller_code="DL",
+                    booking_url="https://www.google.com/travel/clk/f?u=tok&v=1",
+                    logo_url="https://www.gstatic.com/flights/partner_logos/70px/DL.png",
+                    is_airline_direct=True,
+                )
+            ],
             itinerary=itinerary,
             resolved_legs=[
                 ResolvedLeg(
@@ -201,3 +216,18 @@ class TestPriceFormatters:
         assert payload["itinerary"]["flight_summary"] == "DL 2300"
         assert payload["resolved_legs"][0]["selection"] == "explicit"
         assert payload["resolved_legs"][0]["itinerary"]["departure_airport_code"] == "JFK"
+        assert payload["booking_options"] == [
+            {
+                "brand_label": "Main Cabin",
+                "brand_code": "MAIN",
+                "price": 342,
+                "is_basic": False,
+                "fare_family": "standard",
+                "rebookability_signal": "standard_rebookable",
+                "seller_name": "Delta Air Lines",
+                "seller_code": "DL",
+                "booking_url": "https://www.google.com/travel/clk/f?u=tok&v=1",
+                "logo_url": "https://www.gstatic.com/flights/partner_logos/70px/DL.png",
+                "is_airline_direct": True,
+            }
+        ]

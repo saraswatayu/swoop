@@ -12,19 +12,17 @@ from swoop import search
 
 results = search("JFK", "LAX", "2026-06-15")
 for option in results.results[:3]:
-    print(f"${option.price}")
-    for leg in option.legs:
-        itinerary = leg.itinerary
-        airline = ", ".join(itinerary.airline_names) if itinerary else "Unknown"
-        print(f"  {leg.origin} -> {leg.destination} — {airline}")
+    print(f"${option.price} — {', '.join(option.legs[0].itinerary.airline_names)}")
 ```
 
 > [!NOTE]
-> Swoop is not affiliated with Google. It calls undocumented RPC endpoints that can change without notice.
+> swoop is not affiliated with Google. It calls undocumented RPC endpoints that can change without notice.
 
-Swoop calls Google Flights' internal `GetShoppingResults` and `GetBookingResults` RPC endpoints — the same ones the web app uses when you search for flights. Requests use TLS fingerprint impersonation via [primp](https://github.com/deedy5/primp) to match a real browser session. Responses are deeply nested lists (matching an internal protobuf schema) decoded into typed Python dataclasses.
+swoop calls Google Flights' internal `GetShoppingResults` and `GetBookingResults` RPC endpoints, the same ones the web app uses when you search for flights. Requests use TLS fingerprint impersonation via [primp](https://github.com/deedy5/primp) to match a real browser session. Responses are deeply nested lists (matching an internal protobuf schema) decoded into typed Python dataclasses.
 
-[Perch](https://perchtravel.com) uses Swoop in production to monitor booked flights for price drops, saving users an average of $247 per trip.
+[Perch](https://perchtravel.com) uses swoop in production to monitor booked flights for price drops, saving users an average of $247 per trip.
+
+**[Landing page](https://ayushsaraswat.com/projects/swoop)** · **[How I built this](https://ayushsaraswat.com/writing/reverse-engineering-google-flights)**
 
 ---
 
@@ -80,11 +78,17 @@ swoop price --leg JFK LAX 2026-06-15 DL2300 --leg LAX SFO 2026-06-18 UA544 --leg
 # CSV for spreadsheets
 swoop search JFK LAX 2026-06-15 -o csv -q > flights.csv
 
+# Price CSV (one row per booking option, with seller and booking_url)
+swoop price JFK LAX --depart 2026-06-15 DL2300 -o csv -q > fares.csv
+
 # Search JSON for piping
 swoop search JFK LAX 2026-06-15 -o json -q | jq '.results[0] | {selector, price, legs}'
 
 # Filter by airline and time window
 swoop search JFK LAX 2026-06-15 -a DL -a UA --depart-after 8 --depart-before 14
+
+# Surface RPC debug logging on stderr (URLs, response sizes, retries)
+swoop search JFK LAX 2026-06-15 --verbose
 ```
 
 </details>
@@ -93,6 +97,21 @@ Run `swoop search --help` for all options.
 
 > [!TIP]
 > Search shows shopping totals for browsing. Use `--show-price-commands` for copy/paste `swoop price --selector ...` commands in human output, or use `selector` from JSON with `swoop price --selector ...` in scripts.
+
+### Shell completion
+
+```bash
+# bash (~/.bashrc)
+eval "$(_SWOOP_COMPLETE=bash_source swoop)"
+
+# zsh (~/.zshrc)
+eval "$(_SWOOP_COMPLETE=zsh_source swoop)"
+
+# fish (~/.config/fish/config.fish)
+_SWOOP_COMPLETE=fish_source swoop | source
+```
+
+After reloading your shell, `swoop <TAB>`, `swoop search --<TAB>`, and `-o <TAB>` will autocomplete.
 
 ## Python API
 
@@ -117,6 +136,8 @@ print(results.is_complete)
 ```
 
 `search()` and `search_legs()` return shopping totals. Use `check_price()`, `price_legs()`, or `price_selector()` when you need the bookable fare for one chosen itinerary.
+
+Each price-check call costs ~2 RPCs (one search, one booking lookup) — including one-way trips, so `PriceResult.booking_options` is populated and `booking_url` is available. For high-volume scoring of many fares, expect rate-limit pressure to scale accordingly; increase `retries` or pace your calls.
 
 <details>
 <summary>More examples</summary>
@@ -215,7 +236,10 @@ itinerary = option.legs[0].itinerary
 options = get_booking_results(itinerary)
 
 for opt in options:
-    print(f"${opt.price} — {opt.brand_label} ({opt.fare_family})")
+    label = opt.seller_name or "airline-direct"
+    print(f"${opt.price} — {opt.brand_label} ({opt.fare_family}) via {label}")
+    if opt.booking_url:
+        print(f"  book at: {opt.booking_url}")
 ```
 
 </details>
@@ -223,16 +247,37 @@ for opt in options:
 > [!TIP]
 > Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
 
+### Runnable examples
+
+Real-world patterns are in [`examples/`](examples/):
+
+- [`examples/price_drop_watcher.py`](examples/price_drop_watcher.py) — Watch a known flight for price drops on a schedule (the pattern Perch uses to save users ~$247/trip).
+- [`examples/multi_city_finder.py`](examples/multi_city_finder.py) — Multi-city / open-jaw search with beam-search tuning knobs.
+
 ## How it works
 
-Swoop reverse-engineers the `FlightsFrontendService` RPC interface that powers Google Flights. Search parameters are encoded as nested JSON arrays matching Google's internal protobuf schema, then sent as HTTP POST requests. The HTTP client uses TLS fingerprint impersonation (via [primp](https://github.com/deedy5/primp)) so requests are indistinguishable from a real Chrome session.
+swoop reverse-engineers the `FlightsFrontendService` RPC interface that powers Google Flights. Search parameters are encoded as nested JSON arrays matching Google's internal protobuf schema, then sent as HTTP POST requests. The HTTP client uses TLS fingerprint impersonation (via [primp](https://github.com/deedy5/primp)) so requests are indistinguishable from a real Chrome session.
 
-Responses arrive as deeply nested list structures — no field names, just positional indices. Swoop's decoder walks these structures and maps them to typed Python dataclasses (`Itinerary`, `Segment`, `Layover`, `CarbonEmissions`, etc.) with named attributes.
+Responses arrive as deeply nested list structures, no field names, just positional indices. swoop's decoder walks these structures and maps them to typed Python dataclasses (`Itinerary`, `Segment`, `Layover`, `CarbonEmissions`, etc.) with named attributes.
 
-```mermaid
-graph LR
-    A["search()"] --> B["RPC request"] --> C["Google Flights"] --> D["nested lists"] --> E["typed dataclasses"]
 ```
+                                    ┌─────────────────────────────────────┐
+                                    │         Google Flights              │
+                                    │    FlightsFrontendService RPC       │
+                                    └──────────┬──────────────────────────┘
+                                               │
+                                    protobuf response
+                                    (nested arrays, no field names)
+                                               │
+┌──────────────┐   HTTP POST    ┌──────────────▼──────────────┐   typed    ┌──────────────────┐
+│  search()    │──────────────▶ │     TLS fingerprint         │──────────▶│  Itinerary       │
+│  price()     │  JSON-in-JSON  │     impersonation (primp)   │  Python   │  Segment         │
+│  check_price │  URL-encoded   │                             │  dataclass│  Layover         │
+└──────────────┘                └─────────────────────────────┘           │  CarbonEmissions │
+                                                                          └──────────────────┘
+```
+
+For the full reverse-engineering story (744 lines of handmade schema, binary protobuf decoding, cabin class debugging), read **[How I built this](https://ayushsaraswat.com/writing/reverse-engineering-google-flights)**.
 
 <details>
 <summary>API reference</summary>
@@ -310,7 +355,7 @@ Returns `PriceResult | None`. `PriceResult` has `price`, `fare_brand`, `is_basic
 
 ### `get_booking_results(itinerary_or_token, **kwargs)`
 
-Get fare options for a specific itinerary. Pass an `Itinerary` object directly, or a booking token string with explicit `origin`, `destination`, `date`, and `selected_legs`. Returns `list[BookingOption]` with `price`, `brand_label`, `brand_code`, `fare_family`, etc.
+Get fare options for a specific itinerary. Pass an `Itinerary` object directly, or a booking token string with explicit `origin`, `destination`, `date`, and `selected_legs`. Returns `list[BookingOption]` with `price`, `brand_label`, `brand_code`, `is_basic`, `fare_family`, `rebookability_signal`, plus seller fields `seller_name`, `seller_code`, `booking_url`, `logo_url`, and `is_airline_direct` for routing users to the actual booking page.
 
 ### `set_country(country_code)`
 

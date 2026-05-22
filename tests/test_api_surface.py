@@ -290,8 +290,9 @@ class TestFrozenDataclassFields:
         expected = {
             "origin", "destination", "destination_city", "destination_country",
             "departure_date", "return_date", "price", "typical_price",
-            "discount_pct", "airline_code", "airline_name",
-            "duration_minutes", "stops", "trip_days", "currency", "booking_url",
+            "discount_pct", "airlines", "airline_names",
+            "duration_minutes", "stops", "trip_days", "destination_region",
+            "currency", "booking_url",
         }
         assert self._field_names(Deal) == expected
 

@@ -11,6 +11,7 @@ import urllib.parse
 from datetime import date, timedelta
 from typing import Any, Optional
 
+from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get
 from .exceptions import SwoopParseError
@@ -247,6 +248,13 @@ def _parse_deal(item: list[Any], currency: Optional[str] = None) -> Optional[Dea
         if isinstance(booking_path, str) and booking_path:
             booking_url = "https://www.google.com" + booking_path
 
+        # Upstream surfaces one primary carrier per deal today; list shape
+        # is forward-compatible for multi-carrier disclosure later. The "*"
+        # sentinel for "multiple airlines" is preserved as a single-element
+        # list — callers can detect and handle it.
+        airlines_list = [airline_code] if airline_code else []
+        airline_names_list = [airline_name] if airline_name else []
+
         return Deal(
             origin=origin or "",
             destination=destination or "",
@@ -257,11 +265,12 @@ def _parse_deal(item: list[Any], currency: Optional[str] = None) -> Optional[Dea
             price=int(price),
             typical_price=int(typical_price) if typical_price is not None else None,
             discount_pct=int(discount_pct) if discount_pct is not None else None,
-            airline_code=airline_code or "",
-            airline_name=airline_name or "",
+            airlines=airlines_list,
+            airline_names=airline_names_list,
             duration_minutes=int(duration_minutes) if duration_minutes is not None else None,
             stops=int(stops) if stops is not None else 0,
             trip_days=int(trip_days) if trip_days is not None else None,
+            destination_region=region_for_iata(destination),
             currency=currency,
             booking_url=booking_url,
         )

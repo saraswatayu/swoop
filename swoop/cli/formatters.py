@@ -816,6 +816,9 @@ def format_deals_table(
 
         dur = format_duration(deal.duration_minutes) if deal.duration_minutes else "\u2014"
 
+        # Prefer human names; fall back to codes; "*" sentinel means multi-airline.
+        airline_label = ", ".join(deal.airline_names) or ", ".join(deal.airlines)
+
         table.add_row(
             str(i),
             dest_text,
@@ -823,7 +826,7 @@ def format_deals_table(
             _format_price(deal.price, currency),
             _format_price(deal.typical_price, currency),
             savings,
-            deal.airline_name or deal.airline_code,
+            airline_label,
             _deals_stops_text(deal.stops),
             dur,
         )
@@ -855,11 +858,13 @@ def format_deals_json(
                 "price": d.price,
                 "typical_price": d.typical_price,
                 "discount_pct": d.discount_pct,
-                "airline_code": d.airline_code,
-                "airline_name": d.airline_name,
+                "airlines": d.airlines,
+                "airline_names": d.airline_names,
                 "duration_minutes": d.duration_minutes,
                 "stops": d.stops,
                 "trip_days": d.trip_days,
+                "destination_region": d.destination_region.value if d.destination_region else None,
+                "fingerprint": d.fingerprint,
                 "booking_url": d.booking_url,
             }
             for i, d in enumerate(deals, 1)
@@ -878,17 +883,19 @@ def format_deals_csv(
     writer = csv.writer(sys.stdout)
     writer.writerow([
         "origin", "destination", "destination_city", "destination_country",
+        "destination_region",
         "departure_date", "return_date", "price", "typical_price",
-        "discount_pct", "airline_code", "airline_name",
-        "duration_minutes", "stops", "trip_days",
+        "discount_pct", "airlines", "airline_names",
+        "duration_minutes", "stops", "trip_days", "fingerprint",
     ])
     for d in deals:
         writer.writerow([
             d.origin, d.destination, d.destination_city, d.destination_country,
+            d.destination_region.value if d.destination_region else "",
             d.departure_date, d.return_date or "", d.price,
             d.typical_price or "", d.discount_pct or "",
-            d.airline_code, d.airline_name,
-            d.duration_minutes or "", d.stops, d.trip_days or "",
+            "|".join(d.airlines), "|".join(d.airline_names),
+            d.duration_minutes or "", d.stops, d.trip_days or "", d.fingerprint,
         ])
 
 
@@ -905,4 +912,5 @@ def format_deals_brief(
         savings = f"  {d.discount_pct}% off" if d.discount_pct else ""
         stops = "Nonstop" if d.stops == 0 else f"{d.stops} stop{'s' if d.stops != 1 else ''}"
         dates = _deals_date_range(d)
-        print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {d.airline_name}")
+        airline_label = ", ".join(d.airline_names) or ", ".join(d.airlines)
+        print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {airline_label}")

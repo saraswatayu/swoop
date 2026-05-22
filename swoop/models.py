@@ -1,8 +1,10 @@
 """Public result models for staged trip search and pricing."""
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ._regions import Region
 from .decoder import BookingOption, Itinerary, PriceRange, _flight_summary_repr
 
 
@@ -136,6 +138,18 @@ class Deal:
 
     ``price`` and ``typical_price`` are in the currency's major unit
     (e.g. 342 for $342 USD).
+
+    ``airlines`` and ``airline_names`` are parallel lists — a deal can
+    span multiple carriers on a roundtrip. The upstream surfaces a single
+    primary carrier today; this list shape is forward-compatible.
+
+    ``destination_region`` is derived from the destination IATA via the
+    optional ``airportsdata`` dependency. When that dependency isn't
+    installed, the field is ``None``.
+
+    ``fingerprint`` is a stable identity hash useful for caching and
+    diffing across runs. It excludes ``price`` so a deal that drops in
+    price still hashes to the same id.
     """
 
     origin: str
@@ -147,13 +161,27 @@ class Deal:
     price: int
     typical_price: Optional[int]
     discount_pct: Optional[int]
-    airline_code: str
-    airline_name: str
-    duration_minutes: Optional[int]
-    stops: int
-    trip_days: Optional[int]
+    airlines: list[str] = field(default_factory=list)
+    airline_names: list[str] = field(default_factory=list)
+    duration_minutes: Optional[int] = None
+    stops: int = 0
+    trip_days: Optional[int] = None
+    destination_region: Optional[Region] = None
     currency: Optional[str] = None
     booking_url: Optional[str] = None
+
+    @property
+    def fingerprint(self) -> str:
+        """Stable identity hash for caching and diff. Excludes price."""
+        parts = [
+            self.origin,
+            self.destination,
+            self.departure_date,
+            self.return_date or "",
+            ",".join(sorted(self.airlines)),
+        ]
+        joined = "|".join(parts)
+        return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]
 
     def __repr__(self) -> str:
         parts = [f"{self.origin}->{self.destination}"]

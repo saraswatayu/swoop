@@ -104,8 +104,8 @@ class TestParseDeal:
         assert deal.price == 342
         assert deal.typical_price == 1069
         assert deal.discount_pct == 68
-        assert deal.airline_code == "TP"
-        assert deal.airline_name == "Tap Air Portugal"
+        assert deal.airlines == ["TP"]
+        assert deal.airline_names == ["Tap Air Portugal"]
         assert deal.duration_minutes == 420
         assert deal.stops == 0
         assert deal.trip_days == 7
@@ -283,7 +283,7 @@ class TestDealsResultModel:
             origin="JFK", destination="LIS", destination_city="Lisbon",
             destination_country="Portugal", departure_date="2026-05-15",
             return_date="2026-05-22", price=342, typical_price=1069,
-            discount_pct=68, airline_code="TP", airline_name="TAP",
+            discount_pct=68, airlines=["TP"], airline_names=["TAP"],
             duration_minutes=420, stops=0, trip_days=7, currency="EUR",
         )
         r = DealsResult(deals=[deal], origin="JFK")
@@ -292,6 +292,75 @@ class TestDealsResultModel:
     def test_repr(self):
         r = DealsResult(deals=[], origin="JFK")
         assert "JFK" in repr(r)
+
+
+class TestDealFingerprint:
+    def _deal(self, **overrides):
+        defaults = dict(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=342, typical_price=1069,
+            discount_pct=68, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="EUR",
+        )
+        defaults.update(overrides)
+        return Deal(**defaults)
+
+    def test_fingerprint_is_stable(self):
+        d1 = self._deal()
+        d2 = self._deal()
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_excludes_price(self):
+        # Same trip at a different price hashes the same — this is the
+        # signal the watcher uses to detect price drops.
+        d1 = self._deal(price=342)
+        d2 = self._deal(price=300)
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_differs_by_destination(self):
+        d1 = self._deal(destination="LIS")
+        d2 = self._deal(destination="MAD")
+        assert d1.fingerprint != d2.fingerprint
+
+    def test_fingerprint_differs_by_dates(self):
+        d1 = self._deal(departure_date="2026-05-15")
+        d2 = self._deal(departure_date="2026-05-16")
+        assert d1.fingerprint != d2.fingerprint
+
+    def test_fingerprint_differs_by_airlines(self):
+        d1 = self._deal(airlines=["TP"])
+        d2 = self._deal(airlines=["LH"])
+        assert d1.fingerprint != d2.fingerprint
+
+    def test_fingerprint_independent_of_airline_order(self):
+        d1 = self._deal(airlines=["TP", "LH"])
+        d2 = self._deal(airlines=["LH", "TP"])
+        assert d1.fingerprint == d2.fingerprint
+
+
+class TestDealRegion:
+    def test_region_populated_from_iata(self):
+        # JFK is in the US → NORTH_AMERICA. Requires airportsdata.
+        try:
+            import airportsdata  # noqa
+        except ImportError:
+            pytest.skip("airportsdata not installed")
+        raw = _make_raw_deal(destination="JFK")
+        deal = _parse_deal(raw, currency="USD")
+        from swoop._regions import Region
+        assert deal is not None
+        assert deal.destination_region == Region.NORTH_AMERICA
+
+    def test_region_none_for_unknown_iata(self):
+        try:
+            import airportsdata  # noqa
+        except ImportError:
+            pytest.skip("airportsdata not installed")
+        raw = _make_raw_deal(destination="ZZZ")
+        deal = _parse_deal(raw, currency="USD")
+        assert deal is not None
+        assert deal.destination_region is None
 
 
 # ---------------------------------------------------------------------------

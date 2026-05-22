@@ -711,6 +711,8 @@ def price_cmd(
 @click.option("-n", "--nonstop", is_flag=True, default=False, help="Nonstop flights only.")
 @click.option("--max-stops", type=click.IntRange(0, 2), default=None, help="Max stops (0, 1, or 2).")
 @click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
+@click.option("--include-basic", is_flag=True, default=False,
+              help="Include basic-economy fares (default: excluded, matching `swoop search`).")
 @click.option("--country", type=str, default=None, help="Point-of-sale country code.")
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
@@ -719,7 +721,7 @@ def price_cmd(
 @_output_options(["table", "json", "csv", "brief"])
 @click.pass_context
 def deals_cmd(
-    ctx, origin, cabin, nonstop, max_stops, passengers,
+    ctx, origin, cabin, nonstop, max_stops, passengers, include_basic,
     country, proxy, timeout, retries,
     limit, output_format, no_color, quiet, verbose,
 ):
@@ -760,7 +762,8 @@ def deals_cmd(
         try:
             result = swoop.deals(
                 origin, cabin=cabin, max_stops=stops,
-                passengers=pax, transport=transport,
+                passengers=pax, include_basic_economy=include_basic,
+                transport=transport,
             )
         except ValueError as e:
             err.print(f"[red]Error: {e}[/red]")

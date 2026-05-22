@@ -190,6 +190,25 @@ class TestBuildDealsPayload:
         # The encoded payload should contain cabin code 3
         assert isinstance(result, str)
 
+    def test_exclude_basic_economy_by_default(self):
+        # The encoded payload's inner-array slot 28 should be 1 (exclude
+        # basic economy) when include_basic_economy is False (the default).
+        import urllib.parse
+        result = _build_deals_payload("JFK")
+        # _encode_f_req_payload wraps as [None, json_string]; unwrap.
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        inner = payload[1]
+        assert inner[28] == 1, "default should exclude basic economy (slot 28 = 1)"
+
+    def test_include_basic_economy_clears_slot(self):
+        import urllib.parse
+        result = _build_deals_payload("JFK", include_basic_economy=True)
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        inner = payload[1]
+        assert inner[28] is None, "include_basic_economy=True should clear slot 28"
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _currency_header

@@ -595,6 +595,7 @@ def deals(
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
     passengers: Passengers = Passengers(),
+    include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> DealsResult:
     """Discover the best flight deals from an origin airport.
@@ -603,11 +604,19 @@ def deals(
     value from the given origin. Each deal includes destination, dates,
     price, and discount percentage.
 
+    Deals discovery is roundtrip-only — this is an upstream Google Flights
+    product constraint, not a swoop limitation. For one-way exploration,
+    use :func:`search` with an explicit destination.
+
     Args:
         origin: Origin airport IATA code (e.g. ``"JFK"``).
         cabin: Cabin class (default ``"economy"``).
         max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
         passengers: Passenger counts (default ``Passengers()``).
+        include_basic_economy: When ``False`` (default), basic-economy fares
+            are excluded — matching :func:`search`'s default. This prevents
+            the "$200 to Lisbon" surprise that turns out to be a
+            no-carry-on fare at checkout. Set ``True`` to include them.
         transport: HTTP transport configuration (default ``TransportConfig()``).
 
     Returns:
@@ -632,6 +641,7 @@ def deals(
         cabin=cabin,
         max_stops=max_stops,
         passengers=passengers,
+        include_basic_economy=include_basic_economy,
         transport=transport,
     )
 

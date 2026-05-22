@@ -380,7 +380,10 @@ class TestSearchSignature:
     def test_deals_params(self):
         sig = inspect.signature(swoop.deals)
         param_names = list(sig.parameters.keys())
-        expected = ["origin", "cabin", "max_stops", "passengers", "transport"]
+        expected = [
+            "origin", "cabin", "max_stops", "passengers",
+            "include_basic_economy", "transport",
+        ]
         assert param_names == expected
 
 

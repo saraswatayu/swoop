@@ -56,8 +56,13 @@ def _build_deals_payload(
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
     passengers: Passengers = Passengers(),
+    include_basic_economy: bool = False,
 ) -> str:
-    """Build and encode the deals request payload."""
+    """Build and encode the deals request payload.
+
+    Slot indexing on the inner array mirrors swoop.rpc._build_request — keep
+    the two structures aligned so behavior parity is easy to maintain.
+    """
     cabin_code = CABIN_CLASS_MAP.get(cabin, 1)
 
     if max_stops is None:
@@ -65,47 +70,51 @@ def _build_deals_payload(
     else:
         stops_val = max_stops + 1  # 0 -> 1 (nonstop), 1 -> 2, etc.
 
-    # Dates are required by the format but ignored by the server.
+    # Dates are required by the payload structure but ignored by the server
+    # (probed: shifting date 90d ahead returns the same 30 deals byte-for-byte).
+    # The server picks its own forward window (~4 months).
     tomorrow = date.today() + timedelta(days=1)
     date_out = tomorrow.isoformat()
     date_ret = (tomorrow + timedelta(days=7)).isoformat()
 
+    outbound_segment = [
+        [[[origin, 0]]],   # [0] origin IATA
+        [],                # [1] destination: anywhere
+        None,              # [2] time restrictions (probed: ignored)
+        stops_val,         # [3] max stops
+        None,              # [4] airlines filter
+        None,              # [5] placeholder
+        date_out,          # [6] travel date (probed: ignored)
+    ]
+    return_segment = [
+        [],
+        [[[origin, 0]]],
+        None,
+        stops_val,
+        None,
+        None,
+        date_ret,
+    ]
+
     payload = [
         [],
         [
-            None, None,
-            1,           # trip type: roundtrip
-            None, [],
-            cabin_code,
-            [passengers.adults, passengers.children,
+            None, None,                              # [0], [1]
+            1,                                       # [2] trip type
+            None, [],                                # [3], [4]
+            cabin_code,                              # [5]
+            [passengers.adults, passengers.children, # [6] passengers
              passengers.infants_in_seat, passengers.infants_on_lap],
-            None, None, None, None, None, None,
-            [
-                # Outbound segment
-                [
-                    [[[origin, 0]]],  # origin IATA
-                    [],               # destination: anywhere
-                    None,
-                    stops_val,
-                    None, None,
-                    date_out,
-                ],
-                # Return segment
-                [
-                    [],
-                    [[[origin, 0]]],
-                    None,
-                    stops_val,
-                    None, None,
-                    date_ret,
-                ],
-            ],
-            None, None, None,
-            1,  # roundtrip flag
-            None, None, None, None, None, None, None,
-            None, None, None, None, None,
-            [None, None, None, None, None, 1, None, None, 1],
-            3,
+            None, None, None, None, None, None,     # [7]-[12]
+            [outbound_segment, return_segment],     # [13] segments
+            None, None, None,                        # [14]-[16]
+            1,                                       # [17] roundtrip flag
+            None, None, None, None, None, None, None,  # [18]-[24]
+            None, None, None,                                       # [25]-[27]
+            None if include_basic_economy else 1,                   # [28] exclude basic economy (probed)
+            None,                                                   # [29]
+            [None, None, None, None, None, 1, None, None, 1],       # [30]
+            3,                                                       # [31]
         ],
         "",    # query (empty = no AI search)
         "c1",  # session token
@@ -287,6 +296,7 @@ def fetch_deals(
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
     passengers: Passengers = Passengers(),
+    include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> DealsResult:
     """Fetch flight deals from Google Flights.
@@ -302,6 +312,7 @@ def fetch_deals(
     # Step 2: Build and send request
     encoded_payload = _build_deals_payload(
         origin, cabin=cabin, max_stops=max_stops, passengers=passengers,
+        include_basic_economy=include_basic_economy,
     )
     url = _apply_country(DEALS_RPC_URL, transport.country)
     body = f"f.req={encoded_payload}".encode()

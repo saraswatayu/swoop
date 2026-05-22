@@ -594,6 +594,7 @@ def deals(
     *,
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
+    airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
@@ -612,6 +613,9 @@ def deals(
         origin: Origin airport IATA code (e.g. ``"JFK"``).
         cabin: Cabin class (default ``"economy"``).
         max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
+        airlines: Filter to specific airline IATA codes (e.g. ``["DL", "UA"]``).
+            Treated as an OR filter — a deal qualifies if any of its carriers
+            is in the list. ``None`` (default) returns deals across all carriers.
         passengers: Passenger counts (default ``Passengers()``).
         include_basic_economy: When ``False`` (default), basic-economy fares
             are excluded — matching :func:`search`'s default. This prevents
@@ -626,13 +630,17 @@ def deals(
 
         from swoop import deals
 
+        # All carriers
         result = deals("JFK", cabin="business", max_stops=0)
-        for deal in result.deals:
-            print(f"{deal.destination_city} ${deal.price} ({deal.discount_pct}% off)")
+
+        # Delta-only deals
+        result = deals("JFK", airlines=["DL"])
     """
     validate_iata_code(origin, "origin")
     validate_cabin(cabin)
     validate_adults(passengers.adults)
+    # Airlines codes are 2-letter (e.g. "DL"); no validation here — matches
+    # the search() pass-through approach. Bad codes simply return no deals.
 
     from ._deals import fetch_deals
 
@@ -640,6 +648,7 @@ def deals(
         origin,
         cabin=cabin,
         max_stops=max_stops,
+        airlines=airlines,
         passengers=passengers,
         include_basic_economy=include_basic_economy,
         transport=transport,

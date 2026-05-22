@@ -710,6 +710,8 @@ def price_cmd(
               default="economy", show_default=True, help="Cabin class.")
 @click.option("-n", "--nonstop", is_flag=True, default=False, help="Nonstop flights only.")
 @click.option("--max-stops", type=click.IntRange(0, 2), default=None, help="Max stops (0, 1, or 2).")
+@click.option("-a", "--airline", "airlines", multiple=True,
+              help="Filter to specific airline IATA codes (e.g. -a DL -a UA). Repeatable.")
 @click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
 @click.option("--include-basic", is_flag=True, default=False,
               help="Include basic-economy fares (default: excluded, matching `swoop search`).")
@@ -721,7 +723,7 @@ def price_cmd(
 @_output_options(["table", "json", "csv", "brief"])
 @click.pass_context
 def deals_cmd(
-    ctx, origin, cabin, nonstop, max_stops, passengers, include_basic,
+    ctx, origin, cabin, nonstop, max_stops, airlines, passengers, include_basic,
     country, proxy, timeout, retries,
     limit, output_format, no_color, quiet, verbose,
 ):
@@ -762,6 +764,7 @@ def deals_cmd(
         try:
             result = swoop.deals(
                 origin, cabin=cabin, max_stops=stops,
+                airlines=list(airlines) if airlines else None,
                 passengers=pax, include_basic_economy=include_basic,
                 transport=transport,
             )

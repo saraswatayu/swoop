@@ -209,6 +209,36 @@ class TestBuildDealsPayload:
         inner = payload[1]
         assert inner[28] is None, "include_basic_economy=True should clear slot 28"
 
+    def test_airlines_filter_in_both_segments(self):
+        # Airlines should land in slot 4 of both segments, sorted.
+        import urllib.parse
+        result = _build_deals_payload("JFK", airlines=["UA", "DL"])
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        segments = payload[1][13]
+        assert segments[0][4] == ["DL", "UA"]
+        assert segments[1][4] == ["DL", "UA"]
+
+    def test_no_airlines_filter_leaves_slot_none(self):
+        import urllib.parse
+        result = _build_deals_payload("JFK")
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        segments = payload[1][13]
+        assert segments[0][4] is None
+        assert segments[1][4] is None
+
+    def test_multi_origin_list_in_slot_zero(self):
+        # Internal helper accepts list[str] for origins. The airport_set
+        # nests all codes at the same level inside slot 0.
+        import urllib.parse
+        result = _build_deals_payload(["JFK", "LGA", "EWR"])
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        outbound = payload[1][13][0]
+        # slot 0 = [[[JFK,0],[LGA,0],[EWR,0]]]
+        assert outbound[0] == [[["JFK", 0], ["LGA", 0], ["EWR", 0]]]
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _currency_header

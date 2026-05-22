@@ -51,10 +51,11 @@ def _establish_session(
 # ---------------------------------------------------------------------------
 
 def _build_deals_payload(
-    origin: str,
+    origin: str | list[str],
     *,
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
+    airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
 ) -> str:
@@ -77,21 +78,33 @@ def _build_deals_payload(
     date_out = tomorrow.isoformat()
     date_ret = (tomorrow + timedelta(days=7)).isoformat()
 
+    # Multi-origin: accept either a single IATA string or a list. The RPC
+    # accepts a list inside the airport_set structure (probed).
+    if isinstance(origin, str):
+        origin_codes = [origin]
+    else:
+        origin_codes = list(origin)
+    origin_set = [[[code, 0] for code in origin_codes]]
+
+    # Airlines filter: RPC slot 4 of each segment (probed). Pass sorted
+    # list of IATA codes; the upstream treats it as OR-filter.
+    airlines_slot = sorted(airlines) if airlines else None
+
     outbound_segment = [
-        [[[origin, 0]]],   # [0] origin IATA
+        origin_set,        # [0] origin IATA(s)
         [],                # [1] destination: anywhere
         None,              # [2] time restrictions (probed: ignored)
         stops_val,         # [3] max stops
-        None,              # [4] airlines filter
+        airlines_slot,     # [4] airlines filter (probed: honored)
         None,              # [5] placeholder
         date_out,          # [6] travel date (probed: ignored)
     ]
     return_segment = [
         [],
-        [[[origin, 0]]],
+        origin_set,
         None,
         stops_val,
-        None,
+        airlines_slot,
         None,
         date_ret,
     ]
@@ -291,10 +304,11 @@ def _currency_header(country: Optional[str]) -> str:
 # ---------------------------------------------------------------------------
 
 def fetch_deals(
-    origin: str,
+    origin: str | list[str],
     *,
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
+    airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
@@ -311,7 +325,8 @@ def fetch_deals(
 
     # Step 2: Build and send request
     encoded_payload = _build_deals_payload(
-        origin, cabin=cabin, max_stops=max_stops, passengers=passengers,
+        origin, cabin=cabin, max_stops=max_stops, airlines=airlines,
+        passengers=passengers,
         include_basic_economy=include_basic_economy,
     )
     url = _apply_country(DEALS_RPC_URL, transport.country)
@@ -331,11 +346,15 @@ def fetch_deals(
 
     res = _post_with_retry(client, url, body, headers, transport=transport)
 
+    # DealsResult.origin is a single string; collapse list to comma-joined
+    # for multi-origin calls. Phase 3c (per_origin) revisits this.
+    origin_label = origin if isinstance(origin, str) else ",".join(origin)
+
     # Step 3: Parse streaming response
     raw_deals = _parse_streaming_response(res.text)
     if not raw_deals:
         logger.debug("No deals found in response")
-        return DealsResult(deals=[], origin=origin)
+        return DealsResult(deals=[], origin=origin_label)
 
     # Determine currency from country
     cc = (transport.country or "US").upper()
@@ -348,5 +367,5 @@ def fetch_deals(
         if deal is not None:
             deals.append(deal)
 
-    logger.debug("Parsed %d deals from %s", len(deals), origin)
-    return DealsResult(deals=deals, origin=origin)
+    logger.debug("Parsed %d deals from %s", len(deals), origin_label)
+    return DealsResult(deals=deals, origin=origin_label)

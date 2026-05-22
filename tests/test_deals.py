@@ -339,6 +339,91 @@ class TestDealFingerprint:
         assert d1.fingerprint == d2.fingerprint
 
 
+class TestPerOriginMode:
+    """Tests for per_origin=True parallel multi-origin fetch and merge."""
+
+    def _deal(self, **overrides):
+        defaults = dict(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=400, typical_price=900,
+            discount_pct=55, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="USD",
+        )
+        defaults.update(overrides)
+        return Deal(**defaults)
+
+    def test_per_origin_false_single_call(self, monkeypatch):
+        # Default behavior: single RPC call with the airport set in slot 0.
+        import swoop
+        captured = {"calls": []}
+
+        def fake_fetch(origin, **kwargs):
+            captured["calls"].append(origin)
+            return DealsResult(deals=[self._deal()], origin=origin if isinstance(origin, str) else ",".join(origin))
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "LGA", "EWR"], per_origin=False)
+        # One call, list-shaped origin passed through.
+        assert len(captured["calls"]) == 1
+        assert captured["calls"][0] == ["JFK", "LGA", "EWR"]
+        assert len(result.deals) == 1
+
+    def test_per_origin_true_parallel_calls(self, monkeypatch):
+        import swoop
+        calls: list[str] = []
+
+        def fake_fetch(origin, **kwargs):
+            assert isinstance(origin, str), "per_origin should call fetch with str origins"
+            calls.append(origin)
+            return DealsResult(
+                deals=[self._deal(origin=origin, destination=f"DST{origin}")],
+                origin=origin,
+            )
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "LGA", "EWR"], per_origin=True)
+        assert sorted(calls) == ["EWR", "JFK", "LGA"]
+        # Three distinct destinations → three deals.
+        assert len(result.deals) == 3
+
+    def test_per_origin_merge_keeps_cheaper(self, monkeypatch):
+        # Two origins produce a same-fingerprint duplicate at different prices.
+        # The merge keeps the cheaper one.
+        import swoop
+
+        def fake_fetch(origin, **kwargs):
+            # Same destination, dates, airline → identical fingerprint regardless of origin.
+            # Wait: fingerprint includes origin, so JFK→LIS and LGA→LIS are
+            # different fingerprints. To force a collision we share origin.
+            # The realistic merge case: same origin in two calls (unusual but
+            # possible). Use this test to verify the dedupe logic.
+            return DealsResult(
+                deals=[self._deal(origin="JFK", price=500 if origin == "JFK" else 400)],
+                origin=origin,
+            )
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        # Two origins, both return a JFK-origin deal (one cheap, one expensive)
+        result = swoop.deals(["JFK", "LGA"], per_origin=True)
+        # Same fingerprint → cheaper wins.
+        assert len(result.deals) == 1
+        assert result.deals[0].price == 400
+
+    def test_per_origin_false_for_single_string_origin(self, monkeypatch):
+        import swoop
+        captured = {"calls": []}
+
+        def fake_fetch(origin, **kwargs):
+            captured["calls"].append(origin)
+            return DealsResult(deals=[], origin=origin)
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        swoop.deals("JFK", per_origin=True)
+        # Single string + per_origin=True is harmless: still one call.
+        assert captured["calls"] == ["JFK"]
+
+
 class TestDealBridges:
     """Tests for Deal.to_search_kwargs(), swoop.search_deal, swoop.price_deal."""
 

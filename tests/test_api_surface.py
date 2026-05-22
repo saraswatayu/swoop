@@ -388,6 +388,7 @@ class TestSearchSignature:
             "origin",
             # Native RPC filters
             "cabin", "max_stops", "airlines", "passengers", "include_basic_economy",
+            "per_origin",
             # Client-side filters
             "depart_window", "trip_length", "destinations", "exclude_destinations",
             "region", "max_price", "min_discount_pct",

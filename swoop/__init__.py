@@ -586,6 +586,66 @@ def check_price(
 
 
 # ---------------------------------------------------------------------------
+# Internal: parallel multi-origin fetch
+# ---------------------------------------------------------------------------
+
+
+def _fetch_deals_per_origin(
+    origins: list[str],
+    *,
+    cabin: CabinClass,
+    max_stops: Optional[int],
+    airlines: Optional[list[str]],
+    passengers: Passengers,
+    include_basic_economy: bool,
+    transport: TransportConfig,
+) -> DealsResult:
+    """Fetch deals for each origin in parallel, merge and dedupe by fingerprint."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from ._deals import fetch_deals
+
+    by_fingerprint: dict[str, "Deal"] = {}
+
+    def _one(origin_code: str) -> DealsResult:
+        return fetch_deals(
+            origin_code,
+            cabin=cabin,
+            max_stops=max_stops,
+            airlines=airlines,
+            passengers=passengers,
+            include_basic_economy=include_basic_economy,
+            transport=transport,
+        )
+
+    # Modest concurrency to avoid triggering upstream rate-limits when the
+    # user passes many origins.
+    max_workers = min(len(origins), 4)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_one, o) for o in origins]
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception as exc:
+                logger.warning("per-origin deals fetch failed for one origin: %s", exc)
+                continue
+            for deal in r.deals:
+                fp = deal.fingerprint
+                existing = by_fingerprint.get(fp)
+                # Keep cheaper when same fingerprint — same trip, different
+                # PoS or carrier-class rounding can produce nominal duplicates.
+                if existing is None or deal.price < existing.price:
+                    by_fingerprint[fp] = deal
+
+    # Sort by discount_pct desc (best deals first), then price asc as tiebreak.
+    merged = sorted(
+        by_fingerprint.values(),
+        key=lambda d: (-(d.discount_pct or 0), d.price),
+    )
+    return DealsResult(deals=merged, origin=",".join(origins))
+
+
+# ---------------------------------------------------------------------------
 # Deal bridges — connect deals discovery into search/price flows.
 # ---------------------------------------------------------------------------
 
@@ -648,7 +708,7 @@ def price_deal(
 
 
 def deals(
-    origin: str,
+    origin: str | list[str],
     *,
     # Native RPC filters (passed to upstream)
     cabin: CabinClass = "economy",
@@ -656,6 +716,7 @@ def deals(
     airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
+    per_origin: bool = False,
     # Client-side filters (applied to the 30 deals returned by the RPC)
     depart_window: Optional[tuple[str, str]] = None,
     trip_length: Optional[tuple[int, int]] = None,
@@ -687,13 +748,20 @@ def deals(
       ``exclude_destinations``, ``region``, ``max_price``, ``min_discount_pct``.
 
     Args:
-        origin: Origin airport IATA code (e.g. ``"JFK"``).
+        origin: Origin airport IATA code (e.g. ``"JFK"``) or a list of codes
+            for multi-origin discovery (e.g. ``["JFK", "LGA", "EWR"]`` for NYC).
         cabin: Cabin class (default ``"economy"``).
         max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
         airlines: Filter to specific airline IATA codes (e.g. ``["DL", "UA"]``).
         passengers: Passenger counts (default ``Passengers()``).
         include_basic_economy: When ``False`` (default), basic-economy fares
             are excluded — matching :func:`search`'s default.
+        per_origin: Multi-origin behavior toggle. ``False`` (default) issues
+            one RPC call with all origins in the airport set — returns up to
+            30 deals split across origins (Google's "best deals from NYC"
+            view). ``True`` issues one parallel call per origin, returning up
+            to ``30 × N`` deals, deduped by Deal.fingerprint (cheaper wins).
+            Only meaningful when ``origin`` is a list.
         depart_window: Inclusive (start, end) date range (``YYYY-MM-DD``) for the
             outbound departure. Client-side; the upstream picks its own window.
         trip_length: Inclusive (min_nights, max_nights) trip length filter.
@@ -727,7 +795,15 @@ def deals(
         # Only this summer
         result = deals("JFK", depart_window=("2026-06-01", "2026-08-31"))
     """
-    validate_iata_code(origin, "origin")
+    # Normalize + validate origins
+    if isinstance(origin, str):
+        origin_list = [origin]
+    else:
+        origin_list = list(origin)
+    if not origin_list:
+        raise ValueError("origin must be a non-empty string or list")
+    for idx, code in enumerate(origin_list):
+        validate_iata_code(code, f"origin[{idx}]" if len(origin_list) > 1 else "origin")
     validate_cabin(cabin)
     validate_adults(passengers.adults)
     # Airlines codes are 2-letter (e.g. "DL"); no validation here — matches
@@ -736,15 +812,27 @@ def deals(
     from ._deals import fetch_deals
     from ._deals_filter import filter_deals
 
-    result = fetch_deals(
-        origin,
-        cabin=cabin,
-        max_stops=max_stops,
-        airlines=airlines,
-        passengers=passengers,
-        include_basic_economy=include_basic_economy,
-        transport=transport,
-    )
+    if per_origin and len(origin_list) > 1:
+        result = _fetch_deals_per_origin(
+            origin_list,
+            cabin=cabin,
+            max_stops=max_stops,
+            airlines=airlines,
+            passengers=passengers,
+            include_basic_economy=include_basic_economy,
+            transport=transport,
+        )
+    else:
+        # Single string OR list as one RPC call (slot-0 native multi-origin).
+        result = fetch_deals(
+            origin_list[0] if len(origin_list) == 1 else origin_list,
+            cabin=cabin,
+            max_stops=max_stops,
+            airlines=airlines,
+            passengers=passengers,
+            include_basic_economy=include_basic_economy,
+            transport=transport,
+        )
 
     # Apply client-side filters if any are set.
     any_filter = any(v is not None for v in (

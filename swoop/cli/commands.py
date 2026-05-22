@@ -705,7 +705,7 @@ def price_cmd(
 
 
 @click.command("deals")
-@click.argument("origin", type=IATA_CODE)
+@click.argument("origin", type=str)
 @click.option("-c", "--cabin", type=click.Choice(CABIN_CHOICES, case_sensitive=False),
               default="economy", show_default=True, help="Cabin class.")
 @click.option("-n", "--nonstop", is_flag=True, default=False, help="Nonstop flights only.")
@@ -713,6 +713,9 @@ def price_cmd(
 @click.option("-a", "--airline", "airlines", multiple=True,
               help="Filter to specific airline IATA codes (e.g. -a DL -a UA). Repeatable.")
 @click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
+@click.option("--per-origin", is_flag=True, default=False,
+              help="When origin is a comma-separated list, fetch each origin "
+                   "in parallel and merge (vs one RPC call with the airport set).")
 @click.option("--include-basic", is_flag=True, default=False,
               help="Include basic-economy fares (default: excluded, matching `swoop search`).")
 @click.option("--depart-window", type=str, default=None,
@@ -739,7 +742,8 @@ def price_cmd(
 @_output_options(["table", "json", "csv", "brief"])
 @click.pass_context
 def deals_cmd(
-    ctx, origin, cabin, nonstop, max_stops, airlines, passengers, include_basic,
+    ctx, origin, cabin, nonstop, max_stops, airlines, passengers, per_origin,
+    include_basic,
     depart_window, trip_length, dest_whitelist, dest_blacklist, region_name,
     max_price, min_discount,
     country, proxy, timeout, retries,
@@ -777,6 +781,13 @@ def deals_cmd(
         timeout=timeout, retries=retries, country=country, proxy=proxy,
     )
 
+    # Multi-origin: comma-separated string → list of IATAs.
+    origin_arg: str | list[str]
+    if "," in origin:
+        origin_arg = [code.strip().upper() for code in origin.split(",") if code.strip()]
+    else:
+        origin_arg = origin.upper()
+
     # Parse client-side filter inputs from their CLI shapes.
     parsed_depart_window: Optional[tuple[str, str]] = None
     if depart_window:
@@ -801,9 +812,11 @@ def deals_cmd(
     with spinner:
         try:
             result = swoop.deals(
-                origin, cabin=cabin, max_stops=stops,
+                origin_arg, cabin=cabin, max_stops=stops,
                 airlines=list(airlines) if airlines else None,
-                passengers=pax, include_basic_economy=include_basic,
+                passengers=pax,
+                include_basic_economy=include_basic,
+                per_origin=per_origin,
                 depart_window=parsed_depart_window,
                 trip_length=parsed_trip_length,
                 destinations=list(dest_whitelist) if dest_whitelist else None,

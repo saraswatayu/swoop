@@ -7,17 +7,15 @@ by first loading the deals page (for cookies).
 
 import json
 import logging
-import random
-import time
 import urllib.parse
 from datetime import date, timedelta
 from typing import Any, Optional
 
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get
-from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+from .exceptions import SwoopParseError
 from .models import Deal, DealsResult, Passengers, TransportConfig
-from .rpc import _apply_country, _encode_f_req_payload, _get_client
+from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -320,22 +318,7 @@ def fetch_deals(
         origin, cabin, max_stops,
     )
 
-    # Retry loop (mirrors rpc._http_post)
-    for attempt in range(1 + transport.retries):
-        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
-        if res.status_code == 200:
-            break
-        if res.status_code == 429 and attempt < transport.retries:
-            delay = (2 ** attempt) + random.uniform(0, 1)
-            logger.info(
-                "HTTP 429, retrying in %.1fs (attempt %d/%d)",
-                delay, attempt + 1, transport.retries,
-            )
-            time.sleep(delay)
-            continue
-        if res.status_code == 429:
-            raise SwoopRateLimitError()
-        raise SwoopHTTPError(res.status_code)
+    res = _post_with_retry(client, url, body, headers, transport=transport)
 
     # Step 3: Parse streaming response
     raw_deals = _parse_streaming_response(res.text)

@@ -371,6 +371,46 @@ def _apply_country(url: str, country: Optional[str]) -> str:
     return url
 
 
+def _post_with_retry(
+    client: Any,
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> Any:
+    """POST with exponential-backoff retry on HTTP 429.
+
+    Lower-level helper used by both :func:`_http_post` (which manages its
+    own client) and the deals fetch path (which manages its own client +
+    session). Lets both share one retry implementation.
+
+    Raises:
+        SwoopRateLimitError: If 429 persists after all retries.
+        SwoopHTTPError: If a non-200/non-429 response is received.
+    """
+    import random
+    import time
+
+    short_url = url.split("/")[-1]
+    for attempt in range(1 + transport.retries):
+        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+        if res.status_code == 200:
+            logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))
+            return res
+        if res.status_code == 429 and attempt < transport.retries:
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            logger.info(
+                "HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)",
+                short_url, delay, attempt + 1, transport.retries,
+            )
+            time.sleep(delay)
+            continue
+        if res.status_code == 429:
+            raise SwoopRateLimitError()
+        raise SwoopHTTPError(res.status_code)
+
+
 def _http_post(
     url: str,
     content: bytes,
@@ -391,26 +431,10 @@ def _http_post(
         SwoopRateLimitError: If 429 persists after all retries.
         SwoopHTTPError: If a non-200/non-429 response is received.
     """
-    import random
-    import time
-
     url = _apply_country(url, transport.country)
     client = _get_client(transport.proxy, transport.impersonate)
     headers = {"content-type": "application/x-www-form-urlencoded;charset=UTF-8"}
-
-    for attempt in range(1 + transport.retries):
-        res = client.post(url, content=content, headers=headers, timeout=transport.timeout)
-        if res.status_code == 200:
-            logger.debug("HTTP 200 from %s (%d bytes)", url.split("/")[-1], len(res.text))
-            return res
-        if res.status_code == 429 and attempt < transport.retries:
-            delay = (2 ** attempt) + random.uniform(0, 1)
-            logger.info("HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)", url.split("/")[-1], delay, attempt + 1, transport.retries)
-            time.sleep(delay)
-            continue
-        if res.status_code == 429:
-            raise SwoopRateLimitError()
-        raise SwoopHTTPError(res.status_code)
+    return _post_with_retry(client, url, content, headers, transport=transport)
 
 
 def search_raw(

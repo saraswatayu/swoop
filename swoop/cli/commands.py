@@ -715,6 +715,22 @@ def price_cmd(
 @click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
 @click.option("--include-basic", is_flag=True, default=False,
               help="Include basic-economy fares (default: excluded, matching `swoop search`).")
+@click.option("--depart-window", type=str, default=None,
+              help="Outbound depart window YYYY-MM-DD,YYYY-MM-DD (inclusive). Client-side filter.")
+@click.option("--trip-length", type=str, default=None,
+              help="Trip length range MIN-MAX nights (e.g. 5-10). Client-side filter.")
+@click.option("--destination", "dest_whitelist", multiple=True,
+              help="Whitelist destination IATA. Repeatable. Client-side filter.")
+@click.option("--exclude-destination", "dest_blacklist", multiple=True,
+              help="Exclude destination IATA. Repeatable. Client-side filter.")
+@click.option("--region", "region_name", type=click.Choice(
+    ["north-america", "caribbean", "latin-america", "europe", "africa", "middle-east", "asia-pacific"],
+    case_sensitive=False), default=None,
+    help="Limit to a region. Requires airportsdata. Client-side filter.")
+@click.option("--max-price", type=int, default=None,
+              help="Max price per passenger. Client-side filter.")
+@click.option("--min-discount", type=int, default=None,
+              help="Min discount percentage. Client-side filter.")
 @click.option("--country", type=str, default=None, help="Point-of-sale country code.")
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
@@ -724,6 +740,8 @@ def price_cmd(
 @click.pass_context
 def deals_cmd(
     ctx, origin, cabin, nonstop, max_stops, airlines, passengers, include_basic,
+    depart_window, trip_length, dest_whitelist, dest_blacklist, region_name,
+    max_price, min_discount,
     country, proxy, timeout, retries,
     limit, output_format, no_color, quiet, verbose,
 ):
@@ -759,6 +777,26 @@ def deals_cmd(
         timeout=timeout, retries=retries, country=country, proxy=proxy,
     )
 
+    # Parse client-side filter inputs from their CLI shapes.
+    parsed_depart_window: Optional[tuple[str, str]] = None
+    if depart_window:
+        bits = [b.strip() for b in depart_window.split(",")]
+        if len(bits) != 2:
+            err.print("[red]Error: --depart-window must be START,END (YYYY-MM-DD,YYYY-MM-DD)[/red]")
+            ctx.exit(2)
+        parsed_depart_window = (bits[0], bits[1])
+    parsed_trip_length: Optional[tuple[int, int]] = None
+    if trip_length:
+        bits = [b.strip() for b in trip_length.split("-")]
+        try:
+            parsed_trip_length = (int(bits[0]), int(bits[1]))
+        except (IndexError, ValueError):
+            err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
+            ctx.exit(2)
+    parsed_region: Optional[swoop.Region] = None
+    if region_name:
+        parsed_region = swoop.Region(region_name.lower())
+
     spinner = err.status("[bold]Searching deals...[/bold]") if (not quiet and output_format == "table") else nullcontext()
     with spinner:
         try:
@@ -766,6 +804,13 @@ def deals_cmd(
                 origin, cabin=cabin, max_stops=stops,
                 airlines=list(airlines) if airlines else None,
                 passengers=pax, include_basic_economy=include_basic,
+                depart_window=parsed_depart_window,
+                trip_length=parsed_trip_length,
+                destinations=list(dest_whitelist) if dest_whitelist else None,
+                exclude_destinations=list(dest_blacklist) if dest_blacklist else None,
+                region=parsed_region,
+                max_price=max_price,
+                min_discount_pct=min_discount,
                 transport=transport,
             )
         except ValueError as e:

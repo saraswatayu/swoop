@@ -37,6 +37,7 @@ from .decoder import (
     RawSearchResult,
     itinerary_matches_flight,
 )
+from ._regions import Region
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
 from .models import Deal, DealsResult, Passengers, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
@@ -649,11 +650,21 @@ def price_deal(
 def deals(
     origin: str,
     *,
+    # Native RPC filters (passed to upstream)
     cabin: CabinClass = "economy",
     max_stops: Optional[int] = None,
     airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
+    # Client-side filters (applied to the 30 deals returned by the RPC)
+    depart_window: Optional[tuple[str, str]] = None,
+    trip_length: Optional[tuple[int, int]] = None,
+    destinations: Optional[list[str]] = None,
+    exclude_destinations: Optional[list[str]] = None,
+    region: Optional["Region"] = None,
+    max_price: Optional[int] = None,
+    min_discount_pct: Optional[int] = None,
+    # Transport
     transport: TransportConfig = TransportConfig(),
 ) -> DealsResult:
     """Discover the best flight deals from an origin airport.
@@ -666,32 +677,55 @@ def deals(
     product constraint, not a swoop limitation. For one-way exploration,
     use :func:`search` with an explicit destination.
 
+    Filters split into two groups by cost:
+
+    * **Native filters** go to the RPC and affect which 30 deals come back:
+      ``cabin``, ``max_stops``, ``airlines``, ``passengers``,
+      ``include_basic_economy``.
+    * **Client-side filters** apply in memory after the fetch and only
+      narrow the result: ``depart_window``, ``trip_length``, ``destinations``,
+      ``exclude_destinations``, ``region``, ``max_price``, ``min_discount_pct``.
+
     Args:
         origin: Origin airport IATA code (e.g. ``"JFK"``).
         cabin: Cabin class (default ``"economy"``).
         max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
         airlines: Filter to specific airline IATA codes (e.g. ``["DL", "UA"]``).
-            Treated as an OR filter — a deal qualifies if any of its carriers
-            is in the list. ``None`` (default) returns deals across all carriers.
         passengers: Passenger counts (default ``Passengers()``).
         include_basic_economy: When ``False`` (default), basic-economy fares
-            are excluded — matching :func:`search`'s default. This prevents
-            the "$200 to Lisbon" surprise that turns out to be a
-            no-carry-on fare at checkout. Set ``True`` to include them.
+            are excluded — matching :func:`search`'s default.
+        depart_window: Inclusive (start, end) date range (``YYYY-MM-DD``) for the
+            outbound departure. Client-side; the upstream picks its own window.
+        trip_length: Inclusive (min_nights, max_nights) trip length filter.
+        destinations: Whitelist of destination IATA codes. Only deals to one
+            of these airports are returned.
+        exclude_destinations: Blacklist of destination IATA codes.
+        region: Limit to deals whose destination is in this :class:`Region`.
+            Requires ``airportsdata`` to be installed (optional dependency).
+        max_price: Maximum price per passenger in the response currency.
+        min_discount_pct: Minimum discount percentage. Deals without a known
+            discount are dropped.
         transport: HTTP transport configuration (default ``TransportConfig()``).
 
     Returns:
-        A :class:`DealsResult` containing up to 30 :class:`Deal` objects.
+        A :class:`DealsResult` containing up to 30 :class:`Deal` objects
+        that passed every active filter.
 
     Example::
 
-        from swoop import deals
+        from swoop import deals, Region
 
         # All carriers
         result = deals("JFK", cabin="business", max_stops=0)
 
-        # Delta-only deals
-        result = deals("JFK", airlines=["DL"])
+        # Delta-only deals to Europe under $700 with 5-10 day trips
+        result = deals(
+            "JFK", airlines=["DL"], region=Region.EUROPE,
+            max_price=700, trip_length=(5, 10),
+        )
+
+        # Only this summer
+        result = deals("JFK", depart_window=("2026-06-01", "2026-08-31"))
     """
     validate_iata_code(origin, "origin")
     validate_cabin(cabin)
@@ -700,8 +734,9 @@ def deals(
     # the search() pass-through approach. Bad codes simply return no deals.
 
     from ._deals import fetch_deals
+    from ._deals_filter import filter_deals
 
-    return fetch_deals(
+    result = fetch_deals(
         origin,
         cabin=cabin,
         max_stops=max_stops,
@@ -710,6 +745,25 @@ def deals(
         include_basic_economy=include_basic_economy,
         transport=transport,
     )
+
+    # Apply client-side filters if any are set.
+    any_filter = any(v is not None for v in (
+        depart_window, trip_length, destinations, exclude_destinations,
+        region, max_price, min_discount_pct,
+    ))
+    if any_filter:
+        filtered = filter_deals(
+            result.deals,
+            depart_window=depart_window,
+            trip_length=trip_length,
+            destinations=destinations,
+            exclude_destinations=exclude_destinations,
+            region=region,
+            max_price=max_price,
+            min_discount_pct=min_discount_pct,
+        )
+        result = DealsResult(deals=filtered, origin=result.origin)
+    return result
 
 
 __all__ = [
@@ -732,6 +786,7 @@ __all__ = [
     "CabinClass",
     "Deal",
     "DealsResult",
+    "Region",
     "Passengers",
     "TransportConfig",
     "PriceResult",

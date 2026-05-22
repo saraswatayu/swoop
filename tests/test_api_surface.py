@@ -54,6 +54,7 @@ class TestFrozenExports:
         "CabinClass",
         "Deal",
         "DealsResult",
+        "Region",
         "Passengers",
         "TransportConfig",
         "PriceResult",
@@ -384,8 +385,14 @@ class TestSearchSignature:
         sig = inspect.signature(swoop.deals)
         param_names = list(sig.parameters.keys())
         expected = [
-            "origin", "cabin", "max_stops", "airlines", "passengers",
-            "include_basic_economy", "transport",
+            "origin",
+            # Native RPC filters
+            "cabin", "max_stops", "airlines", "passengers", "include_basic_economy",
+            # Client-side filters
+            "depart_window", "trip_length", "destinations", "exclude_destinations",
+            "region", "max_price", "min_discount_pct",
+            # Transport
+            "transport",
         ]
         assert param_names == expected
 

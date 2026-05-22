@@ -42,6 +42,8 @@ class TestFrozenExports:
         "price_selector",
         "price_legs",
         "deals",
+        "search_deal",
+        "price_deal",
         "get_booking_results",
         "search_raw",
         "set_country",

@@ -585,6 +585,63 @@ def check_price(
 
 
 # ---------------------------------------------------------------------------
+# Deal bridges — connect deals discovery into search/price flows.
+# ---------------------------------------------------------------------------
+
+
+def search_deal(
+    deal: "Deal",
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> SearchResult:
+    """Resolve a :class:`Deal` to the actual itineraries that match.
+
+    The deals endpoint surfaces the price and dates but not the specific
+    flight options. ``search_deal`` runs a :func:`search` constrained to
+    the deal's route, dates, and carriers and returns the matching
+    :class:`SearchResult`.
+
+    Args:
+        deal: A :class:`Deal` from :func:`deals`.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`SearchResult` with itineraries that match the deal.
+    """
+    return search(transport=transport, **deal.to_search_kwargs())
+
+
+def price_deal(
+    deal: "Deal",
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> Optional[PriceResult]:
+    """Get the current bookable price for a :class:`Deal`.
+
+    Runs :func:`search_deal` and prices the cheapest matching itinerary
+    via :func:`price_selector`. Returns ``None`` if no itineraries match
+    (the deal may have expired or its carriers may no longer operate
+    the route on those dates).
+
+    Args:
+        deal: A :class:`Deal` from :func:`deals`.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`PriceResult`, or ``None`` if the deal can't be priced.
+    """
+    result = search_deal(deal, transport=transport)
+    if not result.results:
+        return None
+    # Cheapest itinerary first (the deal listed the cheapest known price).
+    cheapest = min(
+        result.results,
+        key=lambda opt: opt.price if opt.price is not None else float("inf"),
+    )
+    return price_selector(cheapest.selector, transport=transport)
+
+
+# ---------------------------------------------------------------------------
 # deals() — discover the best flight deals from an origin airport.
 # ---------------------------------------------------------------------------
 
@@ -663,6 +720,8 @@ __all__ = [
     "price_selector",
     "price_legs",
     "deals",
+    "search_deal",
+    "price_deal",
     "get_booking_results",
     "search_raw",
     "set_country",

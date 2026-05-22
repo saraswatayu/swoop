@@ -183,6 +183,33 @@ class Deal:
         joined = "|".join(parts)
         return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]
 
+    def to_search_kwargs(self) -> dict:
+        """Convert this Deal into keyword arguments for :func:`swoop.search`.
+
+        Useful when you want to see the specific itineraries that make up
+        a deal — the deals endpoint surfaces the price and dates but not
+        the actual flight options. Filter sentinel "*" (multi-airline)
+        is dropped so the airlines list contains only real IATA codes.
+
+        Example::
+
+            from swoop import deals, search
+            result = deals("JFK")
+            top_deal = result.deals[0]
+            itineraries = search(**top_deal.to_search_kwargs())
+        """
+        real_airlines = [a for a in self.airlines if a and a != "*"]
+        kwargs: dict = {
+            "origin": self.origin,
+            "destination": self.destination,
+            "date": self.departure_date,
+        }
+        if self.return_date:
+            kwargs["return_date"] = self.return_date
+        if real_airlines:
+            kwargs["airlines"] = real_airlines
+        return kwargs
+
     def __repr__(self) -> str:
         parts = [f"{self.origin}->{self.destination}"]
         if self.destination_city:

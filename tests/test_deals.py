@@ -339,6 +339,101 @@ class TestDealFingerprint:
         assert d1.fingerprint == d2.fingerprint
 
 
+class TestDealBridges:
+    """Tests for Deal.to_search_kwargs(), swoop.search_deal, swoop.price_deal."""
+
+    def _deal(self, **overrides):
+        defaults = dict(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=342, typical_price=1069,
+            discount_pct=68, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="EUR",
+        )
+        defaults.update(overrides)
+        return Deal(**defaults)
+
+    def test_to_search_kwargs_roundtrip(self):
+        d = self._deal()
+        kwargs = d.to_search_kwargs()
+        assert kwargs == {
+            "origin": "JFK",
+            "destination": "LIS",
+            "date": "2026-05-15",
+            "return_date": "2026-05-22",
+            "airlines": ["TP"],
+        }
+
+    def test_to_search_kwargs_oneway(self):
+        d = self._deal(return_date=None)
+        kwargs = d.to_search_kwargs()
+        assert "return_date" not in kwargs
+
+    def test_to_search_kwargs_drops_multi_airline_sentinel(self):
+        d = self._deal(airlines=["*"])
+        kwargs = d.to_search_kwargs()
+        assert "airlines" not in kwargs
+
+    def test_to_search_kwargs_no_airlines(self):
+        d = self._deal(airlines=[])
+        kwargs = d.to_search_kwargs()
+        assert "airlines" not in kwargs
+
+    def test_search_deal_delegates_to_search(self, monkeypatch):
+        import swoop
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured.update(kwargs)
+            return swoop.SearchResult(results=[], is_complete=True)
+
+        monkeypatch.setattr(swoop, "search", fake_search)
+        d = self._deal()
+        result = swoop.search_deal(d)
+        assert captured["origin"] == "JFK"
+        assert captured["destination"] == "LIS"
+        assert captured["date"] == "2026-05-15"
+        assert captured["airlines"] == ["TP"]
+        assert "transport" in captured
+        assert result.results == []
+
+    def test_price_deal_returns_none_when_no_results(self, monkeypatch):
+        import swoop
+
+        def fake_search(**kwargs):
+            return swoop.SearchResult(results=[], is_complete=True)
+
+        monkeypatch.setattr(swoop, "search", fake_search)
+        d = self._deal()
+        assert swoop.price_deal(d) is None
+
+    def test_price_deal_prices_cheapest(self, monkeypatch):
+        import swoop
+
+        cheap = swoop.TripOption(
+            selector="cheap-sel", price=300, currency="EUR", legs=[],
+        )
+        expensive = swoop.TripOption(
+            selector="expensive-sel", price=500, currency="EUR", legs=[],
+        )
+
+        def fake_search(**kwargs):
+            return swoop.SearchResult(results=[expensive, cheap], is_complete=True)
+
+        captured = {}
+
+        def fake_price_selector(selector, *, transport):
+            captured["selector"] = selector
+            return swoop.PriceResult(price=290, currency="EUR")
+
+        monkeypatch.setattr(swoop, "search", fake_search)
+        monkeypatch.setattr(swoop, "price_selector", fake_price_selector)
+        d = self._deal()
+        result = swoop.price_deal(d)
+        assert captured["selector"] == "cheap-sel"
+        assert result is not None and result.price == 290
+
+
 class TestDealRegion:
     def test_region_populated_from_iata(self):
         # JFK is in the US → NORTH_AMERICA. Requires airportsdata.

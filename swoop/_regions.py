@@ -9,13 +9,28 @@ countries. Edge cases (where the political/geographic answer differs from
 the aviation-marketing answer) are noted inline.
 """
 
+import functools
 import logging
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 _AIRPORTSDATA_WARNED = False
+
+
+@functools.lru_cache(maxsize=1)
+def _airports_db() -> Optional[dict[str, Any]]:
+    """Cached IATA → airport-info db from the optional `airportsdata`
+    package. Loaded once per process (the dataset is ~30k rows and
+    pulling it from package data on every region_for_iata call adds
+    ~37ms × 30 deals = ~1s of overhead per deals() fetch).
+    """
+    try:
+        import airportsdata
+    except ImportError:
+        return None
+    return airportsdata.load("IATA")
 
 
 class Region(str, Enum):
@@ -296,13 +311,17 @@ def region_for_iata(iata: Optional[str]) -> Optional[Region]:
     the optional `airportsdata` dependency is not installed. The first
     missing-dep miss in a process logs a warning so the silent-empty
     failure mode at filter sites is at least visible in logs.
+
+    Uses `_airports_db()` (lru_cached) so the IATA database loads once
+    per process rather than once per deal — a 30-deal fetch goes from
+    ~1.1s of region overhead to a single sub-millisecond dict lookup
+    per deal.
     """
     global _AIRPORTSDATA_WARNED
     if not iata:
         return None
-    try:
-        import airportsdata
-    except ImportError:
+    db = _airports_db()
+    if db is None:
         if not _AIRPORTSDATA_WARNED:
             logger.warning(
                 "airportsdata not installed; Deal.destination_region will be "
@@ -312,7 +331,6 @@ def region_for_iata(iata: Optional[str]) -> Optional[Region]:
             )
             _AIRPORTSDATA_WARNED = True
         return None
-    db = airportsdata.load("IATA")
     airport = db.get(iata.upper())
     if not airport:
         return None

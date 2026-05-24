@@ -105,3 +105,35 @@ class TestRegionForIata:
             import pytest
             pytest.skip("airportsdata not installed")
         assert region_for_iata("jfk") == Region.NORTH_AMERICA
+
+    def test_airports_db_loaded_once(self):
+        # Regression: airportsdata.load("IATA") was called per
+        # region_for_iata invocation, ~37ms each. A 30-deal fetch
+        # spent ~1.1s in region lookups. The lru_cache should mean
+        # the load function is called exactly once across many calls.
+        try:
+            import airportsdata  # noqa
+        except ImportError:
+            import pytest
+            pytest.skip("airportsdata not installed")
+        from swoop import _regions
+        # Clear the cache so we can count loads cleanly.
+        _regions._airports_db.cache_clear()
+        load_count = {"n": 0}
+        original_load = airportsdata.load
+
+        def counting_load(*args, **kwargs):
+            load_count["n"] += 1
+            return original_load(*args, **kwargs)
+
+        airportsdata.load = counting_load
+        try:
+            for code in ["JFK", "LAX", "ORD", "MIA", "BOS", "DFW", "ATL", "SEA"]:
+                region_for_iata(code)
+        finally:
+            airportsdata.load = original_load
+            _regions._airports_db.cache_clear()
+        assert load_count["n"] == 1, (
+            f"airportsdata.load should be called once across 8 lookups, "
+            f"got {load_count['n']}"
+        )

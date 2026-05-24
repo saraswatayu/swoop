@@ -170,7 +170,13 @@ def _normalize_url(value: Any) -> Optional[str]:
         return f"https:{value}"
     if value.startswith("/"):
         return f"https://www.google.com{value}"
-    return value
+    # Only pass through absolute http(s) URLs. Values come from Google's
+    # RPC opaquely; dropping any other scheme (e.g. javascript:, data:)
+    # keeps a malicious or malformed value from being surfaced in a field
+    # that a consumer might render as a clickable link.
+    if value.startswith(("https://", "http://")):
+        return value
+    return None
 
 
 def _price_value(block: Any) -> Optional[int]:

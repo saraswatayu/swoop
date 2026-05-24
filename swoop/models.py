@@ -248,10 +248,18 @@ class Deal:
 
 @dataclass
 class DealsResult:
-    """Result of a deals discovery query."""
+    """Result of a deals discovery query.
+
+    ``partial`` is ``True`` when this result is missing data because one
+    or more origins failed to fetch in ``per_origin=True`` mode. The
+    watcher uses this to refuse to overwrite the cache on partial
+    failures (otherwise the missing-origin's deals would be wrongly
+    diff'd as ``gone`` and persisted as the new baseline).
+    """
 
     deals: list[Deal] = field(default_factory=list)
     origin: str = ""
+    partial: bool = False
 
     @property
     def currency(self) -> Optional[str]:
@@ -263,6 +271,8 @@ class DealsResult:
         parts = [f"{n} deal{'s' if n != 1 else ''}"]
         if self.origin:
             parts.append(f"from {self.origin}")
+        if self.partial:
+            parts.append("(partial)")
         return f"DealsResult({', '.join(parts)})"
 
 

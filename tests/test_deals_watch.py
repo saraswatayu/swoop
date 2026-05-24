@@ -217,6 +217,62 @@ class TestWatchDeals:
         diff = swoop.watch_deals(result, cache_path=cache)
         assert isinstance(diff, DealsDiff)
 
+    def test_empty_current_does_not_overwrite_nonempty_prior(self, tmp_path):
+        # Transient upstream failure (anti-bot, brief outage) returns
+        # zero deals — the watcher must NOT clobber the prior snapshot.
+        cache = tmp_path / "cache.json"
+        watch_deals(
+            DealsResult(deals=[_deal(destination="LIS")], origin="JFK"),
+            cache_path=cache,
+        )
+        original_mtime = cache.stat().st_mtime_ns
+
+        diff = watch_deals(DealsResult(deals=[], origin="JFK"), cache_path=cache)
+        assert diff.new == []
+        assert diff.gone == []  # NOT [deal] — that would be the bug
+        assert diff.price_changes == []
+        # Cache untouched.
+        assert cache.stat().st_mtime_ns == original_mtime
+
+    def test_empty_current_allowed_when_allow_empty(self, tmp_path):
+        cache = tmp_path / "cache.json"
+        watch_deals(
+            DealsResult(deals=[_deal(destination="LIS")], origin="JFK"),
+            cache_path=cache,
+        )
+        diff = watch_deals(
+            DealsResult(deals=[], origin="JFK"),
+            cache_path=cache,
+            allow_empty=True,
+        )
+        assert len(diff.gone) == 1
+
+    def test_partial_does_not_overwrite(self, tmp_path):
+        # per_origin parallel mode returns partial=True when an origin
+        # fails; the watcher refuses to save a partial snapshot.
+        cache = tmp_path / "cache.json"
+        watch_deals(
+            DealsResult(
+                deals=[_deal(origin="JFK", destination="LIS"),
+                       _deal(origin="LGA", destination="MAD")],
+                origin="JFK,LGA",
+            ),
+            cache_path=cache,
+        )
+        original_mtime = cache.stat().st_mtime_ns
+
+        # LGA "failed" — only JFK deals in current; partial=True.
+        diff = watch_deals(
+            DealsResult(
+                deals=[_deal(origin="JFK", destination="LIS")],
+                origin="JFK,LGA",
+                partial=True,
+            ),
+            cache_path=cache,
+        )
+        assert diff.gone == []
+        assert cache.stat().st_mtime_ns == original_mtime
+
 
 class TestDealsDiff:
     def test_repr_shows_counts(self):

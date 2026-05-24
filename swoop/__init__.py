@@ -62,7 +62,8 @@ from .rpc import (
 # ---------------------------------------------------------------------------
 
 import logging
-from typing import Optional
+import os
+from typing import Iterable, Optional
 
 from ._selection import (
     build_request_legs_from_selected,
@@ -621,13 +622,22 @@ def _fetch_deals_per_origin(
     # Modest concurrency to avoid triggering upstream rate-limits when the
     # user passes many origins.
     max_workers = min(len(origins), 4)
+    failed_origins = 0
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [pool.submit(_one, o) for o in origins]
         for fut in as_completed(futures):
             try:
                 r = fut.result()
             except Exception as exc:
+                failed_origins += 1
                 logger.warning("per-origin deals fetch failed for one origin: %s", exc)
+                continue
+            # Treat a 0-deal response as a partial failure for this origin
+            # (most likely an upstream blip — anti-bot, brief rate-limit, geo
+            # block — caught silently by the parser). Without this, a single
+            # transient causes watch_deals to flood diff.gone for that origin.
+            if not r.deals:
+                failed_origins += 1
                 continue
             for deal in r.deals:
                 fp = deal.fingerprint
@@ -642,7 +652,11 @@ def _fetch_deals_per_origin(
         by_fingerprint.values(),
         key=lambda d: (-(d.discount_pct or 0), d.price),
     )
-    return DealsResult(deals=merged, origin=",".join(origins))
+    return DealsResult(
+        deals=merged,
+        origin=",".join(origins),
+        partial=failed_origins > 0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +667,8 @@ def _fetch_deals_per_origin(
 def watch_deals(
     current_result: DealsResult,
     *,
-    cache_path,
+    cache_path: str | os.PathLike,
+    allow_empty: bool = False,
 ) -> DealsDiff:
     """One iteration of the deals watcher: load prior snapshot, diff, save current.
 
@@ -661,10 +676,12 @@ def watch_deals(
     discoverability — most callers will use this directly.
     """
     from ._deals_watch import watch_deals as _watch
-    return _watch(current_result, cache_path=cache_path)
+    return _watch(current_result, cache_path=cache_path, allow_empty=allow_empty)
 
 
-def diff_deals(prior, current) -> DealsDiff:
+def diff_deals(
+    prior: Iterable[Deal], current: Iterable[Deal]
+) -> DealsDiff:
     """Compute the diff between two iterables of :class:`Deal`."""
     from ._deals_watch import diff_deals as _diff
     return _diff(prior, current)

@@ -163,13 +163,13 @@ def watch_deals(
     current_result: DealsResult,
     *,
     cache_path: str | os.PathLike,
+    allow_empty: bool = False,
 ) -> DealsDiff:
     """One iteration of the watcher pattern: load prior, diff, save current.
 
     Typical usage::
 
-        from swoop import deals
-        from swoop._deals_watch import watch_deals
+        from swoop import deals, watch_deals
 
         result = deals("JFK", region=Region.EUROPE, max_price=700)
         diff = watch_deals(result, cache_path=".swoop-deals-cache.json")
@@ -181,9 +181,36 @@ def watch_deals(
     supplied ``current_result``, then persists ``current_result`` as
     the new snapshot. On first run (no prior cache), every deal appears
     in ``diff.new`` and ``diff.gone`` is empty.
+
+    ``allow_empty`` (default ``False``): when ``current_result.deals`` is
+    empty AND a prior snapshot with deals exists, the cache is NOT
+    overwritten and an empty :class:`DealsDiff` is returned. This
+    protects against transient upstream failures (anti-bot challenges,
+    brief geo-blocks, momentary outages) wiping the watcher's baseline
+    and producing a flood of fake ``new``/``gone`` events on the next
+    run. Set ``allow_empty=True`` when you genuinely want to record an
+    all-gone state (e.g. all deals have legitimately expired). The same
+    flag also overrides the partial-result guard documented below.
     """
     prior = load_snapshot(cache_path)
     prior_deals = prior.deals if prior else []
+    if not current_result.deals and prior_deals and not allow_empty:
+        logger.warning(
+            "watch_deals: current run returned 0 deals but prior had %d; "
+            "refusing to overwrite cache. Pass allow_empty=True to override.",
+            len(prior_deals),
+        )
+        return DealsDiff()
+    # Per-origin parallel mode marks the result `partial` when any origin
+    # failed. Saving a partial snapshot turns the missing-origin's prior
+    # deals into spurious `gone` events on the next diff. Refuse unless the
+    # caller explicitly opts in via allow_empty.
+    if current_result.partial and not allow_empty:
+        logger.warning(
+            "watch_deals: current run is partial (per-origin failure); "
+            "refusing to overwrite cache. Pass allow_empty=True to override.",
+        )
+        return DealsDiff()
     diff = diff_deals(prior_deals, current_result.deals)
     save_snapshot(cache_path, current_result)
     return diff

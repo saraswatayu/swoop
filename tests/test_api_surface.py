@@ -305,7 +305,7 @@ class TestFrozenDataclassFields:
         assert self._field_names(Deal) == expected
 
     def test_deals_result_fields(self):
-        expected = {"deals", "origin"}
+        expected = {"deals", "origin", "partial"}
         assert self._field_names(DealsResult) == expected
 
     def test_deals_result_currency_property(self):

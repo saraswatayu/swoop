@@ -293,7 +293,10 @@ def _parse_deal(
             airlines=airlines_list,
             airline_names=airline_names_list,
             duration_minutes=int(duration_minutes) if duration_minutes is not None else None,
-            stops=int(stops) if stops is not None else 0,
+            # Keep stops=None when upstream doesn't report it. Mapping to
+            # 0 would silently misrender as "Nonstop" — the user clicks
+            # through expecting a nonstop and books a 2-stop itinerary.
+            stops=int(stops) if stops is not None else None,
             trip_days=int(trip_days) if trip_days is not None else None,
             destination_region=region_for_iata(destination),
             currency=currency,

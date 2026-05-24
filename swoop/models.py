@@ -164,7 +164,7 @@ class Deal:
     airlines: list[str] = field(default_factory=list)
     airline_names: list[str] = field(default_factory=list)
     duration_minutes: Optional[int] = None
-    stops: int = 0
+    stops: Optional[int] = None
     trip_days: Optional[int] = None
     destination_region: Optional[Region] = None
     currency: Optional[str] = None

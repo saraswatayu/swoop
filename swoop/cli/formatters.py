@@ -748,8 +748,15 @@ def format_price_csv(
 # ---------------------------------------------------------------------------
 
 
-def _deals_stops_text(stops: int) -> Text:
-    """Colored stop count for deals."""
+def _deals_stops_text(stops: Optional[int]) -> Text:
+    """Colored stop count for deals.
+
+    ``None`` means upstream didn't report stops — render "?" in dim
+    rather than collapsing to "Nonstop" (which would mislead the user
+    into booking a multi-stop itinerary).
+    """
+    if stops is None:
+        return Text("?", style="dim")
     if stops == 0:
         return Text("Nonstop", style="green")
     label = f"{stops} stop{'s' if stops != 1 else ''}"
@@ -932,7 +939,12 @@ def format_deals_brief(
     for i, d in enumerate(deals, 1):
         price_str = _format_price(d.price, currency)
         savings = f"  {d.discount_pct}% off" if d.discount_pct else ""
-        stops = "Nonstop" if d.stops == 0 else f"{d.stops} stop{'s' if d.stops != 1 else ''}"
+        if d.stops is None:
+            stops = "?"
+        elif d.stops == 0:
+            stops = "Nonstop"
+        else:
+            stops = f"{d.stops} stop{'s' if d.stops != 1 else ''}"
         dates = _deals_date_range(d)
         airline_label = ", ".join(d.airline_names) or ", ".join(d.airlines)
         print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {airline_label}")

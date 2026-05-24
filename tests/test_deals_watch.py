@@ -200,17 +200,18 @@ class TestSavedAndLoadSnapshot:
         assert loaded.deals[0].airlines == []
         assert loaded.deals[0].airline_names == []
 
-    def test_load_returns_none_on_null_stops(self, tmp_path):
+    def test_load_preserves_null_stops_as_none(self, tmp_path):
+        # stops is Optional[int] — null in cache stays None on load so
+        # the CLI can render "?" instead of mislabeling as "Nonstop".
         cache = tmp_path / "null-stops.json"
         cache.write_text(json.dumps({
             "schema_version": 2, "origin": "JFK",
             "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
                        "stops": None}],
         }))
-        # _coerce_int(None, 0) returns 0, so this is actually LOAD-ABLE.
         loaded = load_snapshot(cache)
         assert loaded is not None
-        assert loaded.deals[0].stops == 0
+        assert loaded.deals[0].stops is None
 
     def test_load_rejects_string_bool_for_basic_economy(self, tmp_path):
         # Regression: bool("false") returns True, silently flipping the

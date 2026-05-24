@@ -164,6 +164,25 @@ class TestParseDeal:
         assert deal is not None
         assert deal.booking_url == "https://www.google.com/travel/flights?tfs=ok"
 
+    def test_stops_none_stays_none_not_zero(self):
+        # Regression: stops used to default to 0 when upstream sent None,
+        # silently mislabeling the deal as "Nonstop" in the CLI. The
+        # field is now Optional[int] and stays None for the "unknown"
+        # case so renderers can distinguish.
+        raw = _make_raw_deal()
+        raw[8] = None  # upstream didn't report stops
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.stops is None
+
+    def test_stops_text_renders_none_distinctly(self):
+        # CLI must render unknown stops as "?", not "Nonstop".
+        from swoop.cli.formatters import _deals_stops_text
+        assert str(_deals_stops_text(None)) == "?"
+        assert str(_deals_stops_text(0)) == "Nonstop"
+        assert str(_deals_stops_text(1)) == "1 stop"
+        assert str(_deals_stops_text(2)) == "2 stops"
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _parse_streaming_response

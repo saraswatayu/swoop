@@ -122,7 +122,7 @@ def _dict_to_deal(d: dict) -> Deal:
         airlines=_coerce_list(d.get("airlines")),
         airline_names=_coerce_list(d.get("airline_names")),
         duration_minutes=d.get("duration_minutes"),
-        stops=_coerce_int(d.get("stops"), 0),
+        stops=d.get("stops") if d.get("stops") is None else _coerce_int(d.get("stops"), 0),
         trip_days=d.get("trip_days"),
         destination_region=region,
         currency=d.get("currency"),

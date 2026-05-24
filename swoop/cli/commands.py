@@ -806,6 +806,16 @@ def deals_cmd(
             ctx.exit(2)
     parsed_region: Optional[swoop.Region] = None
     if region_name:
+        from swoop._regions import _airportsdata_available
+        if not _airportsdata_available():
+            err.print(
+                "[red]Error: --region requires the optional `airportsdata` "
+                "dependency.[/red] Install with: "
+                "[yellow]pip install airportsdata[/yellow] (or "
+                "[yellow]pip install swoop[validation][/yellow])."
+            )
+            ctx.exit(2)
+            return
         parsed_region = swoop.Region(region_name.lower())
 
     spinner = err.status("[bold]Searching deals...[/bold]") if (not quiet and output_format == "table") else nullcontext()

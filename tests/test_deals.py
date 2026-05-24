@@ -707,3 +707,15 @@ class TestDealsCLI:
         assert result.exit_code == 0
         lines = result.output.strip().split("\n")
         assert len(lines) == 5
+
+    def test_region_without_airportsdata_exits(self, fake_primp_deals, monkeypatch):
+        # When airportsdata can't be imported, --region must fail fast at
+        # the CLI rather than silently returning 0 deals.
+        from swoop.cli import commands as commands_module
+        from swoop import _regions
+        fake_primp_deals()
+        monkeypatch.setattr(_regions, "_airportsdata_available", lambda: False)
+        runner = CliRunner()
+        result = runner.invoke(commands_module.deals_cmd, ["JFK", "--region", "europe"])
+        assert result.exit_code == 2
+        assert "airportsdata" in result.output

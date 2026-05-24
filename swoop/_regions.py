@@ -9,8 +9,13 @@ countries. Edge cases (where the political/geographic answer differs from
 the aviation-marketing answer) are noted inline.
 """
 
+import logging
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+_AIRPORTSDATA_WARNED = False
 
 
 class Region(str, Enum):
@@ -288,16 +293,36 @@ def region_for_iata(iata: Optional[str]) -> Optional[Region]:
     """Map a 3-letter IATA airport code to a Region.
 
     Returns None if the IATA is unknown, the country has no mapping, or
-    the optional `airportsdata` dependency is not installed.
+    the optional `airportsdata` dependency is not installed. The first
+    missing-dep miss in a process logs a warning so the silent-empty
+    failure mode at filter sites is at least visible in logs.
     """
+    global _AIRPORTSDATA_WARNED
     if not iata:
         return None
     try:
         import airportsdata
     except ImportError:
+        if not _AIRPORTSDATA_WARNED:
+            logger.warning(
+                "airportsdata not installed; Deal.destination_region will be "
+                "None and Region-based filters will silently drop every deal. "
+                "Install with `pip install airportsdata` (or `pip install "
+                "swoop[validation]`)."
+            )
+            _AIRPORTSDATA_WARNED = True
         return None
     db = airportsdata.load("IATA")
     airport = db.get(iata.upper())
     if not airport:
         return None
     return region_for_country(airport.get("country"))
+
+
+def _airportsdata_available() -> bool:
+    """True if the optional airportsdata dependency can be imported."""
+    try:
+        import airportsdata  # noqa: F401
+        return True
+    except ImportError:
+        return False

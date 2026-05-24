@@ -598,6 +598,16 @@ class TestFetchDeals:
         with pytest.raises(ValueError, match="cabin"):
             deals("JFK", cabin="ultra")
 
+    def test_empty_origin_list_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            deals([])
+
+    def test_html_response_raises_parse_error(self, fake_primp_deals):
+        from swoop.exceptions import SwoopParseError
+        fake_primp_deals(post_text="<!DOCTYPE html><html><body>Consent</body></html>")
+        with pytest.raises(SwoopParseError, match="HTML"):
+            deals("JFK")
+
 
 # ---------------------------------------------------------------------------
 # CLI tests

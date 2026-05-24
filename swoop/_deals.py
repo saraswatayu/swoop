@@ -13,6 +13,7 @@ from typing import Any, Optional
 from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get
+from .exceptions import SwoopParseError
 from .models import Deal, DealsResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
@@ -169,6 +170,17 @@ def _parse_streaming_response(text: str) -> list[Any]:
 
     if not text:
         return []
+
+    # Detect anti-bot / consent / geo-block responses: Google returns HTTP
+    # 200 with an HTML body in these cases. Without this guard the parser
+    # silently treats the response as zero deals, which can wipe the
+    # watcher's snapshot baseline.
+    _head = text[:200].lower()
+    if _head.startswith("<!doctype") or _head.startswith("<html") or "consent.google.com" in _head:
+        raise SwoopParseError(
+            "Google returned an HTML response (anti-bot challenge, "
+            "consent wall, or geo-block) instead of JSON deals data."
+        )
 
     # Try format 1: single JSON array with multiple entries
     try:

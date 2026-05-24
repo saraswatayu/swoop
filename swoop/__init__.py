@@ -632,13 +632,12 @@ def _fetch_deals_per_origin(
                 failed_origins += 1
                 logger.warning("per-origin deals fetch failed for one origin: %s", exc)
                 continue
-            # Treat a 0-deal response as a partial failure for this origin
-            # (most likely an upstream blip — anti-bot, brief rate-limit, geo
-            # block — caught silently by the parser). Without this, a single
-            # transient causes watch_deals to flood diff.gone for that origin.
-            if not r.deals:
-                failed_origins += 1
-                continue
+            # A 0-deal response is NOT counted as a failure: an obscure or
+            # off-season origin can legitimately return zero deals every run.
+            # Loud failures (anti-bot/HTML) now raise SwoopParseError from
+            # the parser (commit dabbfd7), which is caught above. Treating
+            # 0-deal as a transient blip would make small-airport queries
+            # permanently partial=True and break the watcher.
             for deal in r.deals:
                 fp = deal.fingerprint
                 existing = by_fingerprint.get(fp)

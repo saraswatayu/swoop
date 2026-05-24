@@ -460,6 +460,38 @@ class TestPerOriginMode:
         # Single string + per_origin=True is harmless: still one call.
         assert captured["calls"] == ["JFK"]
 
+    def test_per_origin_zero_deals_is_not_a_failure(self, monkeypatch):
+        # Regression: per_origin used to count `not r.deals` as a failure,
+        # which made an obscure origin with no deals permanently flip
+        # partial=True. Loud upstream failures raise SwoopParseError
+        # (caught above). A genuinely empty origin should NOT mark the
+        # result partial.
+        import swoop
+
+        def fake_fetch(origin, **kwargs):
+            return DealsResult(deals=[], origin=origin)
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "SCE"], per_origin=True)
+        assert result.partial is False, "0-deal upstream must not mark result partial"
+
+    def test_per_origin_exception_marks_partial(self, monkeypatch):
+        # Real failure (raised exception, e.g. from rate-limit retry
+        # exhaustion) must still set partial=True.
+        import swoop
+
+        call_count = {"n": 0}
+
+        def fake_fetch(origin, **kwargs):
+            call_count["n"] += 1
+            if origin == "LGA":
+                raise RuntimeError("simulated transient")
+            return DealsResult(deals=[self._deal(origin=origin)], origin=origin)
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "LGA"], per_origin=True)
+        assert result.partial is True
+
     def test_partial_flag_survives_client_filter(self, monkeypatch):
         # Regression: deals() rebuilds DealsResult after filtering without
         # forwarding `partial`, dropping the per-origin-failure signal

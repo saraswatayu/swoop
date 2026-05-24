@@ -151,6 +151,31 @@ class TestSavedAndLoadSnapshot:
         save_snapshot(cache, DealsResult(deals=[_deal()], origin="JFK"))
         assert cache.exists()
 
+    def test_load_tolerates_unknown_region_value(self, tmp_path):
+        # A cache written by a future swoop with a region value this
+        # version's enum doesn't recognize must NOT nuke the whole
+        # snapshot — the affected deal falls back to region=None.
+        cache = tmp_path / "future.json"
+        cache.write_text(json.dumps({
+            "schema_version": 1,
+            "origin": "JFK",
+            "deals": [{
+                "origin": "JFK", "destination": "AKL",
+                "destination_city": "Auckland", "destination_country": "New Zealand",
+                "departure_date": "2026-09-01", "return_date": "2026-09-14",
+                "price": 1200, "typical_price": 1800, "discount_pct": 33,
+                "airlines": ["NZ"], "airline_names": ["Air New Zealand"],
+                "duration_minutes": 1080, "stops": 1, "trip_days": 13,
+                "destination_region": "oceania",  # not in current Region enum
+                "currency": "USD", "booking_url": None,
+            }],
+        }))
+        loaded = load_snapshot(cache)
+        assert loaded is not None
+        assert len(loaded.deals) == 1
+        assert loaded.deals[0].destination_region is None
+        assert loaded.deals[0].destination == "AKL"
+
 
 class TestWatchDeals:
     def test_first_run_all_new(self, tmp_path):

@@ -501,6 +501,21 @@ class TestDealBridges:
         kwargs = d.to_search_kwargs()
         assert "airlines" not in kwargs
 
+    def test_to_search_kwargs_forwards_query_context(self):
+        from swoop import Passengers
+        d = self._deal(query_cabin="business", query_adults=2, query_include_basic_economy=True)
+        kwargs = d.to_search_kwargs()
+        assert kwargs.get("cabin") == "business"
+        assert kwargs.get("passengers") == Passengers(adults=2)
+        assert kwargs.get("include_basic_economy") is True
+
+    def test_to_search_kwargs_defaults_skip_query_context(self):
+        d = self._deal()  # defaults: cabin=None, adults=1, basic_economy=False
+        kwargs = d.to_search_kwargs()
+        assert "cabin" not in kwargs
+        assert "passengers" not in kwargs
+        assert "include_basic_economy" not in kwargs
+
     def test_search_deal_delegates_to_search(self, monkeypatch):
         import swoop
         captured = {}

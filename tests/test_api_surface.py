@@ -300,6 +300,7 @@ class TestFrozenDataclassFields:
             "discount_pct", "airlines", "airline_names",
             "duration_minutes", "stops", "trip_days", "destination_region",
             "currency", "booking_url",
+            "query_cabin", "query_adults", "query_include_basic_economy",
         }
         assert self._field_names(Deal) == expected
 

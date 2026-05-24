@@ -66,7 +66,20 @@ def _deal_to_dict(deal: Deal) -> dict:
 
 def _dict_to_deal(d: dict) -> Deal:
     region_raw = d.get("destination_region")
-    region = Region(region_raw) if region_raw else None
+    # Tolerate enum evolution: an unknown region value (e.g. a future
+    # snapshot wrote a value this version's enum doesn't recognize)
+    # falls back to None rather than killing the whole snapshot.
+    if region_raw:
+        try:
+            region = Region(region_raw)
+        except ValueError:
+            logger.warning(
+                "unknown Region value %r in cache; falling back to None",
+                region_raw,
+            )
+            region = None
+    else:
+        region = None
     return Deal(
         origin=d["origin"],
         destination=d["destination"],
@@ -85,6 +98,9 @@ def _dict_to_deal(d: dict) -> Deal:
         destination_region=region,
         currency=d.get("currency"),
         booking_url=d.get("booking_url"),
+        query_cabin=d.get("query_cabin"),
+        query_adults=int(d.get("query_adults", 1)),
+        query_include_basic_economy=bool(d.get("query_include_basic_economy", False)),
     )
 
 

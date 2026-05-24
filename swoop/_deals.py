@@ -230,7 +230,14 @@ def _format_date(raw: Any) -> Optional[str]:
         return None
 
 
-def _parse_deal(item: list[Any], currency: Optional[str] = None) -> Optional[Deal]:
+def _parse_deal(
+    item: list[Any],
+    currency: Optional[str] = None,
+    *,
+    query_cabin: Optional[str] = None,
+    query_adults: int = 1,
+    query_include_basic_economy: bool = False,
+) -> Optional[Deal]:
     """Parse a single deal item from the response."""
     try:
         departure_date = _format_date(_safe_get(item, [1]))
@@ -291,6 +298,9 @@ def _parse_deal(item: list[Any], currency: Optional[str] = None) -> Optional[Dea
             destination_region=region_for_iata(destination),
             currency=currency,
             booking_url=booking_url,
+            query_cabin=query_cabin,
+            query_adults=query_adults,
+            query_include_basic_economy=query_include_basic_economy,
         )
     except (TypeError, IndexError, ValueError) as exc:
         logger.debug("Failed to parse deal item: %s", exc)
@@ -390,7 +400,13 @@ def fetch_deals(
     # Step 4: Parse individual deals
     deals: list[Deal] = []
     for item in raw_deals:
-        deal = _parse_deal(item, currency=currency)
+        deal = _parse_deal(
+            item,
+            currency=currency,
+            query_cabin=cabin,
+            query_adults=passengers.adults,
+            query_include_basic_economy=include_basic_economy,
+        )
         if deal is not None:
             deals.append(deal)
 

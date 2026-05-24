@@ -169,6 +169,13 @@ class Deal:
     destination_region: Optional[Region] = None
     currency: Optional[str] = None
     booking_url: Optional[str] = None
+    # Query context: the deals() filters in effect when this Deal was
+    # discovered. Persisted so search_deal()/price_deal() can resolve to
+    # the SAME product (e.g. business class, basic economy) rather than
+    # silently re-pricing as default economy / 1 adult / no basic.
+    query_cabin: Optional[str] = None
+    query_adults: int = 1
+    query_include_basic_economy: bool = False
 
     @property
     def fingerprint(self) -> str:
@@ -215,6 +222,17 @@ class Deal:
             kwargs["return_date"] = self.return_date
         if real_airlines:
             kwargs["airlines"] = real_airlines
+        # Carry the deals() query context forward so the bridge resolves
+        # to the SAME product the user discovered (cabin/passengers/basic-
+        # economy inclusion). Defaults match search()'s defaults so no-op
+        # when the deal was discovered with the deals() defaults.
+        if self.query_cabin:
+            kwargs["cabin"] = self.query_cabin
+        if self.query_adults != 1:
+            from .models import Passengers
+            kwargs["passengers"] = Passengers(adults=self.query_adults)
+        if self.query_include_basic_economy:
+            kwargs["include_basic_economy"] = True
         return kwargs
 
     def __repr__(self) -> str:

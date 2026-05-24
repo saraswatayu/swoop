@@ -375,6 +375,29 @@ class TestDealFingerprint:
         d2 = self._deal(departure_date=" 2026-05-15 ", return_date=" 2026-05-22 ")
         assert d1.fingerprint == d2.fingerprint
 
+    def test_fingerprint_distinguishes_cabin(self):
+        # Regression: fingerprint used to exclude query_cabin/adults/basic,
+        # so business vs economy on the same trip collided to one identity.
+        d_business = self._deal(query_cabin="business")
+        d_economy = self._deal(query_cabin="economy")
+        assert d_business.fingerprint != d_economy.fingerprint
+
+    def test_fingerprint_distinguishes_passenger_count(self):
+        d_1pax = self._deal(query_adults=1)
+        d_2pax = self._deal(query_adults=2)
+        assert d_1pax.fingerprint != d_2pax.fingerprint
+
+    def test_fingerprint_distinguishes_basic_economy(self):
+        d_no_basic = self._deal(query_include_basic_economy=False)
+        d_with_basic = self._deal(query_include_basic_economy=True)
+        assert d_no_basic.fingerprint != d_with_basic.fingerprint
+
+    def test_fingerprint_cabin_case_insensitive(self):
+        # Cabin is normalized to lowercase for stability.
+        d1 = self._deal(query_cabin="Business")
+        d2 = self._deal(query_cabin="business")
+        assert d1.fingerprint == d2.fingerprint
+
 
 class TestPerOriginMode:
     """Tests for per_origin=True parallel multi-origin fetch and merge."""

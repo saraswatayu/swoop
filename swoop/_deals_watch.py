@@ -23,7 +23,7 @@ from .models import Deal, DealsDiff, DealsResult, PriceChange
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2  # v2: Deal.fingerprint now includes query context
 
 
 def diff_deals(prior: Iterable[Deal], current: Iterable[Deal]) -> DealsDiff:

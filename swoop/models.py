@@ -185,6 +185,14 @@ class Deal:
         strip on airlines) so cosmetic upstream drift (casing,
         whitespace) does not invent ``new``/``gone`` diff events for the
         same trip across runs.
+
+        Includes the discovery query context (``query_cabin``,
+        ``query_adults``, ``query_include_basic_economy``) — otherwise
+        the same route discovered under different filters (e.g. business
+        vs economy) collides on fingerprint and is diffed as a fake
+        price_change instead of being separate identities. The cache
+        schema_version was bumped to 2 when this changed; older v1
+        snapshots are treated as no-prior-cache.
         """
         airlines = sorted(a.strip().upper() for a in self.airlines if a)
         parts = [
@@ -193,6 +201,9 @@ class Deal:
             self.departure_date.strip(),
             (self.return_date or "").strip(),
             ",".join(airlines),
+            (self.query_cabin or "").strip().lower(),
+            str(self.query_adults),
+            "1" if self.query_include_basic_economy else "0",
         ]
         joined = "|".join(parts)
         return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]

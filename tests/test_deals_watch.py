@@ -157,7 +157,7 @@ class TestSavedAndLoadSnapshot:
         # snapshot — the affected deal falls back to region=None.
         cache = tmp_path / "future.json"
         cache.write_text(json.dumps({
-            "schema_version": 1,
+            "schema_version": 2,
             "origin": "JFK",
             "deals": [{
                 "origin": "JFK", "destination": "AKL",
@@ -181,7 +181,7 @@ class TestSavedAndLoadSnapshot:
         # crashing the watcher. Now treated as malformed cache.
         cache = tmp_path / "null-price.json"
         cache.write_text(json.dumps({
-            "schema_version": 1, "origin": "JFK",
+            "schema_version": 2, "origin": "JFK",
             "deals": [{"origin": "JFK", "destination": "LIS", "price": None}],
         }))
         assert load_snapshot(cache) is None
@@ -191,7 +191,7 @@ class TestSavedAndLoadSnapshot:
         # to an empty list — the deal still loads (with no carriers).
         cache = tmp_path / "null-airlines.json"
         cache.write_text(json.dumps({
-            "schema_version": 1, "origin": "JFK",
+            "schema_version": 2, "origin": "JFK",
             "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
                        "airlines": None, "airline_names": None}],
         }))
@@ -203,7 +203,7 @@ class TestSavedAndLoadSnapshot:
     def test_load_returns_none_on_null_stops(self, tmp_path):
         cache = tmp_path / "null-stops.json"
         cache.write_text(json.dumps({
-            "schema_version": 1, "origin": "JFK",
+            "schema_version": 2, "origin": "JFK",
             "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
                        "stops": None}],
         }))
@@ -218,7 +218,7 @@ class TestSavedAndLoadSnapshot:
         # now rejects non-bool values via ValueError → load returns None.
         cache = tmp_path / "string-bool.json"
         cache.write_text(json.dumps({
-            "schema_version": 1, "origin": "JFK",
+            "schema_version": 2, "origin": "JFK",
             "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
                        "query_include_basic_economy": "false"}],
         }))
@@ -227,7 +227,7 @@ class TestSavedAndLoadSnapshot:
     def test_load_accepts_real_bool_for_basic_economy(self, tmp_path):
         cache = tmp_path / "real-bool.json"
         cache.write_text(json.dumps({
-            "schema_version": 1, "origin": "JFK",
+            "schema_version": 2, "origin": "JFK",
             "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
                        "query_include_basic_economy": True}],
         }))

@@ -460,6 +460,28 @@ class TestPerOriginMode:
         # Single string + per_origin=True is harmless: still one call.
         assert captured["calls"] == ["JFK"]
 
+    def test_partial_flag_survives_client_filter(self, monkeypatch):
+        # Regression: deals() rebuilds DealsResult after filtering without
+        # forwarding `partial`, dropping the per-origin-failure signal
+        # whenever any client-side filter is set. Watch_deals then thinks
+        # the result is clean and overwrites the cache with partial data.
+        import swoop
+        from swoop.models import DealsResult as DR
+        from swoop._regions import Region
+
+        def fake_per_origin(*args, **kwargs):
+            # Simulate the per-origin path having already detected a failure.
+            return DR(
+                deals=[self._deal(destination="LIS", destination_region=Region.EUROPE)],
+                origin="JFK,LGA",
+                partial=True,
+            )
+
+        monkeypatch.setattr("swoop._fetch_deals_per_origin", fake_per_origin)
+        # Trigger the filter path with a region filter.
+        result = swoop.deals(["JFK", "LGA"], per_origin=True, region=Region.EUROPE)
+        assert result.partial is True, "partial must survive the filter rebuild"
+
 
 class TestDealBridges:
     """Tests for Deal.to_search_kwargs(), swoop.search_deal, swoop.price_deal."""

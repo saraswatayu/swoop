@@ -887,7 +887,9 @@ def deals(
             max_price=max_price,
             min_discount_pct=min_discount_pct,
         )
-        result = DealsResult(deals=filtered, origin=result.origin)
+        result = DealsResult(
+            deals=filtered, origin=result.origin, partial=result.partial,
+        )
     return result
 
 

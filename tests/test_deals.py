@@ -917,6 +917,50 @@ class TestDealsCLI:
         result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "5-10-15"])
         assert result.exit_code == 2
 
+    def test_deals_json_includes_partial_and_query_context(self, fake_primp_deals, monkeypatch):
+        # Regression: format_deals_json used to omit DealsResult.partial
+        # and the 3 new Deal query-context fields. CLI-orchestrated cron
+        # pipelines couldn't detect partial responses or reproduce
+        # search_deal(d) faithfully.
+        from swoop.cli.commands import deals_cmd
+        from swoop import _deals as _deals_mod
+        fake_primp_deals()
+
+        def fake_fetch(origin, **kw):
+            from swoop.models import Deal, DealsResult
+            d = Deal(
+                origin=origin if isinstance(origin, str) else origin[0],
+                destination="LIS",
+                destination_city="Lisbon",
+                destination_country="Portugal",
+                departure_date="2026-05-15",
+                return_date="2026-05-22",
+                price=342,
+                typical_price=1069,
+                discount_pct=68,
+                airlines=["TP"],
+                airline_names=["TAP"],
+                duration_minutes=420,
+                stops=0,
+                trip_days=7,
+                currency="USD",
+                query_cabin="business",
+                query_adults=2,
+                query_include_basic_economy=True,
+            )
+            return DealsResult(deals=[d], origin="JFK", partial=True)
+
+        monkeypatch.setattr(_deals_mod, "fetch_deals", fake_fetch)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "json", "-q"])
+        assert result.exit_code == 0
+        import json as _json
+        payload = _json.loads(result.output)
+        assert payload["partial"] is True
+        assert payload["deals"][0]["query_cabin"] == "business"
+        assert payload["deals"][0]["query_adults"] == 2
+        assert payload["deals"][0]["query_include_basic_economy"] is True
+
     def test_deals_csv_escapes_formula_prefix(self, fake_primp_deals, monkeypatch):
         # CSV cells starting with =, +, -, @ are formulas when opened in
         # Excel/Sheets. Verify the deals CSV path prefixes them with a quote.

@@ -861,6 +861,12 @@ def format_deals_json(
         "query": {"origin": result.origin, "cabin": cabin},
         "currency": result.currency,
         "total_deals": len(result.deals),
+        # `partial` surfaces the per-origin-failure signal so CLI-orchestrated
+        # cron pipelines (jq-style diffing) can detect partial responses and
+        # refuse to overwrite their own baselines. Without this key, a script
+        # comparing today's vs yesterday's JSON would treat a failed-origin's
+        # deals as legitimately gone.
+        "partial": result.partial,
         "deals": [
             {
                 "index": i,
@@ -881,6 +887,12 @@ def format_deals_json(
                 "destination_region": d.destination_region.value if d.destination_region else None,
                 "fingerprint": d.fingerprint,
                 "booking_url": d.booking_url,
+                # Query context: downstream consumers need these to
+                # reproduce search_deal(d) faithfully (same cabin /
+                # passenger count / basic-economy inclusion).
+                "query_cabin": d.query_cabin,
+                "query_adults": d.query_adults,
+                "query_include_basic_economy": d.query_include_basic_economy,
             }
             for i, d in enumerate(deals, 1)
         ],

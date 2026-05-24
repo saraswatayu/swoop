@@ -329,7 +329,55 @@ class TestWatchDeals:
             ),
             cache_path=cache,
         )
+        # LGA's prior deal must NOT show up in gone — that's the bug fix
+        # commit ff26721 was for. Partial-guard scopes the diff.
         assert diff.gone == []
+        assert cache.stat().st_mtime_ns == original_mtime
+
+    def test_partial_still_surfaces_diff_for_successful_origins(self, tmp_path):
+        # Regression: the partial-guard used to return an empty
+        # DealsDiff(), losing visibility into price changes / new deals
+        # from origins that DID succeed. The scoped-diff fix surfaces
+        # those signals while still refusing to save the cache.
+        cache = tmp_path / "cache.json"
+        # Prior: JFK has LIS at $500 + MAD at $700, LGA has BCN at $600.
+        watch_deals(
+            DealsResult(
+                deals=[
+                    _deal(origin="JFK", destination="LIS", price=500),
+                    _deal(origin="JFK", destination="MAD", price=700),
+                    _deal(origin="LGA", destination="BCN", price=600),
+                ],
+                origin="JFK,LGA",
+            ),
+            cache_path=cache,
+        )
+        original_mtime = cache.stat().st_mtime_ns
+
+        # Current: LGA failed; JFK now has LIS at $400 (drop!) and a new
+        # AMS deal; MAD is gone.
+        diff = watch_deals(
+            DealsResult(
+                deals=[
+                    _deal(origin="JFK", destination="LIS", price=400),
+                    _deal(origin="JFK", destination="AMS", price=350),
+                ],
+                origin="JFK,LGA",
+                partial=True,
+            ),
+            cache_path=cache,
+        )
+        # The JFK price drop is surfaced.
+        assert len(diff.price_changes) == 1
+        assert diff.price_changes[0].current.destination == "LIS"
+        assert diff.price_changes[0].delta == -100
+        # The new JFK AMS deal is surfaced.
+        assert {d.destination for d in diff.new} == {"AMS"}
+        # MAD genuinely gone from JFK shows in diff.gone.
+        assert {d.destination for d in diff.gone} == {"MAD"}
+        # LGA's BCN is NOT in diff.gone (LGA failed, scope excludes it).
+        assert "BCN" not in {d.destination for d in diff.gone}
+        # Cache untouched.
         assert cache.stat().st_mtime_ns == original_mtime
 
 

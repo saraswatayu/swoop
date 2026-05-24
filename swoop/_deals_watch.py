@@ -232,14 +232,21 @@ def watch_deals(
         return DealsDiff()
     # Per-origin parallel mode marks the result `partial` when any origin
     # failed. Saving a partial snapshot turns the missing-origin's prior
-    # deals into spurious `gone` events on the next diff. Refuse unless the
-    # caller explicitly opts in via allow_empty.
+    # deals into spurious `gone` events on the next diff. Refuse to save
+    # unless allow_empty=True — but still compute and return a SCOPED
+    # diff against the prior deals of the origins that DID succeed, so
+    # the user gets price-change/new signals from the working origins
+    # instead of an empty diff.
     if current_result.partial and not allow_empty:
+        succeeded_origins = {d.origin for d in current_result.deals}
+        scoped_prior = [d for d in prior_deals if d.origin in succeeded_origins]
         logger.warning(
             "watch_deals: current run is partial (per-origin failure); "
-            "refusing to overwrite cache. Pass allow_empty=True to override.",
+            "computing diff over %d succeeded origin(s) but refusing to "
+            "overwrite cache. Pass allow_empty=True to override.",
+            len(succeeded_origins),
         )
-        return DealsDiff()
+        return diff_deals(scoped_prior, current_result.deals)
     diff = diff_deals(prior_deals, current_result.deals)
     save_snapshot(cache_path, current_result)
     return diff

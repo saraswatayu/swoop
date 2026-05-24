@@ -604,11 +604,21 @@ def _fetch_deals_per_origin(
     """Fetch deals for each origin in parallel, merge and dedupe by fingerprint."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    from primp import Client
     from ._deals import fetch_deals
 
     by_fingerprint: dict[str, "Deal"] = {}
 
     def _one(origin_code: str) -> DealsResult:
+        # Construct a fresh primp.Client per worker so each thread has
+        # its own cookie jar. Without this, all workers share one Client
+        # via _get_client and the concurrent _establish_session GETs
+        # interleave-overwrite Google's session cookies mid-flight,
+        # leading to mismatched-session POSTs and transient empty deals.
+        kwargs: dict = {"impersonate": transport.impersonate or "chrome"}
+        if transport.proxy:
+            kwargs["proxy"] = transport.proxy
+        worker_client = Client(**kwargs)
         return fetch_deals(
             origin_code,
             cabin=cabin,
@@ -617,6 +627,7 @@ def _fetch_deals_per_origin(
             passengers=passengers,
             include_basic_economy=include_basic_economy,
             transport=transport,
+            _client=worker_client,
         )
 
     # Modest concurrency to avoid triggering upstream rate-limits when the

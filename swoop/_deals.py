@@ -349,13 +349,21 @@ def fetch_deals(
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
+    _client: Any = None,
 ) -> DealsResult:
     """Fetch flight deals from Google Flights.
 
     Establishes a session, builds the request, and parses the streaming
     response into a :class:`DealsResult`.
+
+    ``_client`` (internal) lets a caller (notably
+    ``_fetch_deals_per_origin``) inject a per-worker primp.Client so
+    multiple parallel calls don't share one cookie jar. When ``None``,
+    falls back to the shared, lock-protected ``_get_client`` cache.
     """
-    client = _get_client(transport.proxy, transport.impersonate)
+    client = _client if _client is not None else _get_client(
+        transport.proxy, transport.impersonate,
+    )
 
     # Step 1: Establish session cookies
     _establish_session(client, transport=transport)

@@ -101,7 +101,20 @@ def _parse_trip_length(raw: Optional[str]) -> Optional[tuple[int, int]]:
 
 def fetch_once(args: argparse.Namespace) -> int:
     """One iteration: fetch, diff, report. Returns the exit code."""
-    region = swoop.Region(args.region) if args.region else None
+    region: swoop.Region | None = None
+    if args.region:
+        # Hard-fail when the optional airportsdata dep is missing,
+        # matching the CLI's `swoop deals` behavior. Otherwise the
+        # region filter silently drops every deal and the watcher
+        # reports `[no change]` forever with no actionable signal.
+        from swoop._regions import _airportsdata_available
+        if not _airportsdata_available():
+            raise SystemExit(
+                "--region requires the optional `airportsdata` dependency. "
+                "Install with: pip install airportsdata "
+                "(or pip install swoop[validation])."
+            )
+        region = swoop.Region(args.region)
     try:
         result = swoop.deals(
             _origin_arg(args.origin),
@@ -118,8 +131,14 @@ def fetch_once(args: argparse.Namespace) -> int:
             min_discount_pct=args.min_discount,
         )
     except swoop.SwoopRateLimitError:
-        print(f"[rate-limit] sleeping {RATE_LIMIT_BACKOFF_SECONDS}s extra")
-        time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+        # Only sleep when the loop will actually use the next iteration.
+        # In --once mode we exit immediately anyway; the 15-min sleep
+        # was pure dead wall-clock time the user couldn't interrupt.
+        if args.once or args.interval == 0:
+            print("[rate-limit] retry later")
+        else:
+            print(f"[rate-limit] sleeping {RATE_LIMIT_BACKOFF_SECONDS}s extra")
+            time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
         return 0
 
     diff = swoop.watch_deals(result, cache_path=args.cache)

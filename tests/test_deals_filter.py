@@ -38,6 +38,20 @@ class TestDepartWindow:
         d = _deal(departure_date="")
         assert filter_deals([d], depart_window=("2026-06-01", "2026-06-30")) == []
 
+    def test_malformed_window_raises(self):
+        # Regression: a typoed window used to silently filter every deal
+        # to False, masking the caller error as "no matches."
+        import pytest
+        d = _deal(departure_date="2026-06-15")
+        with pytest.raises(ValueError, match="depart_window"):
+            filter_deals([d], depart_window=("garbage", "2026-06-30"))
+
+    def test_swapped_window_raises(self):
+        import pytest
+        d = _deal(departure_date="2026-06-15")
+        with pytest.raises(ValueError, match="must be <= end"):
+            filter_deals([d], depart_window=("2026-08-01", "2026-06-01"))
+
 
 class TestTripLength:
     def test_inside_range_passes(self):

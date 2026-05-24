@@ -19,15 +19,31 @@ from .models import Deal
 def _date_in_window(
     d: str | None, window: tuple[str, str] | None
 ) -> bool:
-    """True if d is within the inclusive [start, end] window."""
+    """True if d is within the inclusive [start, end] window.
+
+    A malformed window (un-parseable date, start > end) raises
+    ValueError up to the caller — previously it silently filtered every
+    deal to False, masking the typo as a "no matches" result.
+    A malformed deal date (unparseable d) still returns False; the deal
+    is dropped, not the whole filter.
+    """
     if not window:
         return True
+    try:
+        start = _date.fromisoformat(window[0])
+        end = _date.fromisoformat(window[1])
+    except (ValueError, TypeError) as exc:
+        raise ValueError(
+            f"depart_window must be (YYYY-MM-DD, YYYY-MM-DD); got {window!r}: {exc}"
+        ) from exc
+    if start > end:
+        raise ValueError(
+            f"depart_window start ({window[0]}) must be <= end ({window[1]})"
+        )
     if not d:
         return False
     try:
         target = _date.fromisoformat(d)
-        start = _date.fromisoformat(window[0])
-        end = _date.fromisoformat(window[1])
     except ValueError:
         return False
     return start <= target <= end

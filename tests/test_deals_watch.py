@@ -176,6 +176,65 @@ class TestSavedAndLoadSnapshot:
         assert loaded.deals[0].destination_region is None
         assert loaded.deals[0].destination == "AKL"
 
+    def test_load_returns_none_on_null_price(self, tmp_path):
+        # Regression: int(None) used to raise TypeError uncaught,
+        # crashing the watcher. Now treated as malformed cache.
+        cache = tmp_path / "null-price.json"
+        cache.write_text(json.dumps({
+            "schema_version": 1, "origin": "JFK",
+            "deals": [{"origin": "JFK", "destination": "LIS", "price": None}],
+        }))
+        assert load_snapshot(cache) is None
+
+    def test_load_coerces_null_airlines_to_empty_list(self, tmp_path):
+        # Regression: list(None) raised TypeError uncaught. Now coerced
+        # to an empty list — the deal still loads (with no carriers).
+        cache = tmp_path / "null-airlines.json"
+        cache.write_text(json.dumps({
+            "schema_version": 1, "origin": "JFK",
+            "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
+                       "airlines": None, "airline_names": None}],
+        }))
+        loaded = load_snapshot(cache)
+        assert loaded is not None
+        assert loaded.deals[0].airlines == []
+        assert loaded.deals[0].airline_names == []
+
+    def test_load_returns_none_on_null_stops(self, tmp_path):
+        cache = tmp_path / "null-stops.json"
+        cache.write_text(json.dumps({
+            "schema_version": 1, "origin": "JFK",
+            "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
+                       "stops": None}],
+        }))
+        # _coerce_int(None, 0) returns 0, so this is actually LOAD-ABLE.
+        loaded = load_snapshot(cache)
+        assert loaded is not None
+        assert loaded.deals[0].stops == 0
+
+    def test_load_rejects_string_bool_for_basic_economy(self, tmp_path):
+        # Regression: bool("false") returns True, silently flipping the
+        # bridge's basic-economy filter on round-trip. Strict coercion
+        # now rejects non-bool values via ValueError → load returns None.
+        cache = tmp_path / "string-bool.json"
+        cache.write_text(json.dumps({
+            "schema_version": 1, "origin": "JFK",
+            "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
+                       "query_include_basic_economy": "false"}],
+        }))
+        assert load_snapshot(cache) is None
+
+    def test_load_accepts_real_bool_for_basic_economy(self, tmp_path):
+        cache = tmp_path / "real-bool.json"
+        cache.write_text(json.dumps({
+            "schema_version": 1, "origin": "JFK",
+            "deals": [{"origin": "JFK", "destination": "LIS", "price": 400,
+                       "query_include_basic_economy": True}],
+        }))
+        loaded = load_snapshot(cache)
+        assert loaded is not None
+        assert loaded.deals[0].query_include_basic_economy is True
+
 
 class TestWatchDeals:
     def test_first_run_all_new(self, tmp_path):

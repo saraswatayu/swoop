@@ -64,6 +64,35 @@ def _deal_to_dict(deal: Deal) -> dict:
     return d
 
 
+def _coerce_int(value, default: int) -> int:
+    """int() with a None-safe fallback. Raises ValueError on un-coercible
+    non-None values so load_snapshot's outer except can treat the cache
+    as malformed."""
+    if value is None:
+        return default
+    return int(value)
+
+
+def _coerce_list(value) -> list:
+    """list() with a None-safe fallback. Catches `null` in cache that
+    would otherwise crash list(None) with TypeError."""
+    if value is None:
+        return []
+    return list(value)
+
+
+def _coerce_bool(value, default: bool) -> bool:
+    """Strict bool coercion. Only True/False/None are accepted; any
+    other value (including the strings 'true'/'false') is rejected so
+    a hand-edited or schema-drifted cache doesn't silently flip a
+    filter from False to True via bool('false') == True."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"expected bool for cached field, got {type(value).__name__}: {value!r}")
+
+
 def _dict_to_deal(d: dict) -> Deal:
     region_raw = d.get("destination_region")
     # Tolerate enum evolution: an unknown region value (e.g. a future
@@ -90,17 +119,17 @@ def _dict_to_deal(d: dict) -> Deal:
         price=int(d["price"]),
         typical_price=d.get("typical_price"),
         discount_pct=d.get("discount_pct"),
-        airlines=list(d.get("airlines", [])),
-        airline_names=list(d.get("airline_names", [])),
+        airlines=_coerce_list(d.get("airlines")),
+        airline_names=_coerce_list(d.get("airline_names")),
         duration_minutes=d.get("duration_minutes"),
-        stops=int(d.get("stops", 0)),
+        stops=_coerce_int(d.get("stops"), 0),
         trip_days=d.get("trip_days"),
         destination_region=region,
         currency=d.get("currency"),
         booking_url=d.get("booking_url"),
         query_cabin=d.get("query_cabin"),
-        query_adults=int(d.get("query_adults", 1)),
-        query_include_basic_economy=bool(d.get("query_include_basic_economy", False)),
+        query_adults=_coerce_int(d.get("query_adults"), 1),
+        query_include_basic_economy=_coerce_bool(d.get("query_include_basic_economy"), False),
     )
 
 
@@ -153,7 +182,7 @@ def load_snapshot(path: str | os.PathLike) -> Optional[DealsResult]:
         return None
     try:
         deals = [_dict_to_deal(d) for d in payload.get("deals", [])]
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError, TypeError) as exc:
         logger.warning("failed to parse cached deals from %s: %s", path, exc)
         return None
     return DealsResult(deals=deals, origin=payload.get("origin", ""))

@@ -719,3 +719,52 @@ class TestDealsCLI:
         result = runner.invoke(commands_module.deals_cmd, ["JFK", "--region", "europe"])
         assert result.exit_code == 2
         assert "airportsdata" in result.output
+
+    def test_depart_window_malformed_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--depart-window", "not-a-date,2026-06-01"])
+        assert result.exit_code == 2
+
+    def test_depart_window_swapped_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--depart-window", "2026-08-01,2026-06-01"])
+        assert result.exit_code == 2
+
+    def test_depart_window_single_part_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--depart-window", "2026-06-01"])
+        assert result.exit_code == 2
+
+    def test_trip_length_non_numeric_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "abc-def"])
+        assert result.exit_code == 2
+
+    def test_trip_length_swapped_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "10-5"])
+        assert result.exit_code == 2
+
+    def test_trip_length_out_of_range_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "5-999"])
+        assert result.exit_code == 2
+
+    def test_trip_length_three_parts_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "5-10-15"])
+        assert result.exit_code == 2

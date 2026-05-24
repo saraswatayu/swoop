@@ -70,9 +70,17 @@ def _origin_arg(raw: str) -> str | list[str]:
 def _parse_depart_window(raw: Optional[str]) -> Optional[tuple[str, str]]:
     if not raw:
         return None
+    from datetime import date as _date
     parts = [p.strip() for p in raw.split(",")]
     if len(parts) != 2:
         raise SystemExit("--depart-window must be START,END (YYYY-MM-DD,YYYY-MM-DD)")
+    try:
+        start = _date.fromisoformat(parts[0])
+        end = _date.fromisoformat(parts[1])
+    except ValueError as exc:
+        raise SystemExit(f"--depart-window dates must be ISO YYYY-MM-DD: {exc}")
+    if start > end:
+        raise SystemExit(f"--depart-window start ({parts[0]}) is after end ({parts[1]})")
     return (parts[0], parts[1])
 
 
@@ -81,9 +89,14 @@ def _parse_trip_length(raw: Optional[str]) -> Optional[tuple[int, int]]:
         return None
     parts = raw.split("-")
     try:
-        return (int(parts[0]), int(parts[1]))
+        if len(parts) != 2:
+            raise ValueError("must have exactly two parts")
+        lo, hi = int(parts[0]), int(parts[1])
     except (IndexError, ValueError) as exc:
         raise SystemExit(f"--trip-length must be MIN-MAX (e.g. 5-10): {exc}")
+    if not (0 <= lo <= hi <= 365):
+        raise SystemExit(f"--trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})")
+    return (lo, hi)
 
 
 def fetch_once(args: argparse.Namespace) -> int:

@@ -791,19 +791,40 @@ def deals_cmd(
     # Parse client-side filter inputs from their CLI shapes.
     parsed_depart_window: Optional[tuple[str, str]] = None
     if depart_window:
+        from datetime import date as _date
         bits = [b.strip() for b in depart_window.split(",")]
         if len(bits) != 2:
             err.print("[red]Error: --depart-window must be START,END (YYYY-MM-DD,YYYY-MM-DD)[/red]")
             ctx.exit(2)
+            return
+        try:
+            start = _date.fromisoformat(bits[0])
+            end = _date.fromisoformat(bits[1])
+        except ValueError as exc:
+            err.print(f"[red]Error: --depart-window dates must be ISO YYYY-MM-DD ({exc})[/red]")
+            ctx.exit(2)
+            return
+        if start > end:
+            err.print(f"[red]Error: --depart-window start ({bits[0]}) is after end ({bits[1]})[/red]")
+            ctx.exit(2)
+            return
         parsed_depart_window = (bits[0], bits[1])
     parsed_trip_length: Optional[tuple[int, int]] = None
     if trip_length:
-        bits = [b.strip() for b in trip_length.split("-")]
+        bits = trip_length.split("-")
         try:
-            parsed_trip_length = (int(bits[0]), int(bits[1]))
+            if len(bits) != 2:
+                raise ValueError("must have exactly two parts")
+            lo, hi = int(bits[0]), int(bits[1])
         except (IndexError, ValueError):
             err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
             ctx.exit(2)
+            return
+        if not (0 <= lo <= hi <= 365):
+            err.print(f"[red]Error: --trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})[/red]")
+            ctx.exit(2)
+            return
+        parsed_trip_length = (lo, hi)
     parsed_region: Optional[swoop.Region] = None
     if region_name:
         from swoop._regions import _airportsdata_available

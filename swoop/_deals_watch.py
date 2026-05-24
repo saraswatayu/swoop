@@ -60,8 +60,7 @@ def diff_deals(prior: Iterable[Deal], current: Iterable[Deal]) -> DealsDiff:
 def _deal_to_dict(deal: Deal) -> dict:
     d = asdict(deal)
     # Enum → plain string for JSON.
-    if d.get("destination_region") is not None:
-        d["destination_region"] = deal.destination_region.value if deal.destination_region else None
+    d["destination_region"] = deal.destination_region.value if deal.destination_region else None
     return d
 
 

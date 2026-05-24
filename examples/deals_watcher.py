@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Optional
 
 import swoop
-from swoop._deals_watch import watch_deals
 
 DEFAULT_CACHE_PATH = Path(".swoop-deals-cache.json")
 DEFAULT_INTERVAL_SECONDS = 60 * 60  # 1 hour
@@ -110,7 +109,7 @@ def fetch_once(args: argparse.Namespace) -> int:
         time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
         return 0
 
-    diff = watch_deals(result, cache_path=args.cache)
+    diff = swoop.watch_deals(result, cache_path=args.cache)
 
     if not diff.has_changes:
         print(f"[no change] {len(diff.unchanged)} deals unchanged")

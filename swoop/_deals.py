@@ -7,14 +7,12 @@ by first loading the deals page (for cookies).
 
 import json
 import logging
-import urllib.parse
 from datetime import date, timedelta
 from typing import Any, Optional
 
 from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get
-from .exceptions import SwoopParseError
 from .models import Deal, DealsResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
@@ -327,7 +325,7 @@ def fetch_deals(
     Establishes a session, builds the request, and parses the streaming
     response into a :class:`DealsResult`.
     """
-    client = _get_client(transport.proxy)
+    client = _get_client(transport.proxy, transport.impersonate)
 
     # Step 1: Establish session cookies
     _establish_session(client, transport=transport)
@@ -356,7 +354,7 @@ def fetch_deals(
     res = _post_with_retry(client, url, body, headers, transport=transport)
 
     # DealsResult.origin is a single string; collapse list to comma-joined
-    # for multi-origin calls. Phase 3c (per_origin) revisits this.
+    # for multi-origin calls.
     origin_label = origin if isinstance(origin, str) else ",".join(origin)
 
     # Step 3: Parse streaming response

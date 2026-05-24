@@ -880,6 +880,20 @@ def format_deals_csv(
 ) -> None:
     """Render deals as CSV to stdout."""
     deals = list(result.deals[:limit]) if limit else list(result.deals)
+
+    # CSV-injection guard: matches format_price_csv. See the long-form
+    # comment there for the rationale (formula execution on open in
+    # Excel/Sheets/LibreOffice when a cell starts with =, +, -, @, \t, \r).
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value) -> str:
+        if value is None or value == "":
+            return ""
+        s = str(value)
+        if s.startswith(_DANGEROUS_PREFIXES):
+            return "'" + s
+        return s
+
     writer = csv.writer(sys.stdout)
     writer.writerow([
         "origin", "destination", "destination_city", "destination_country",
@@ -890,11 +904,11 @@ def format_deals_csv(
     ])
     for d in deals:
         writer.writerow([
-            d.origin, d.destination, d.destination_city, d.destination_country,
+            _s(d.origin), _s(d.destination), _s(d.destination_city), _s(d.destination_country),
             d.destination_region.value if d.destination_region else "",
-            d.departure_date, d.return_date or "", d.price,
+            _s(d.departure_date), _s(d.return_date or ""), d.price,
             d.typical_price or "", d.discount_pct or "",
-            "|".join(d.airlines), "|".join(d.airline_names),
+            _s("|".join(d.airlines)), _s("|".join(d.airline_names)),
             d.duration_minutes or "", d.stops, d.trip_days or "", d.fingerprint,
         ])
 

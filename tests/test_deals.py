@@ -768,3 +768,39 @@ class TestDealsCLI:
         runner = CliRunner()
         result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "5-10-15"])
         assert result.exit_code == 2
+
+    def test_deals_csv_escapes_formula_prefix(self, fake_primp_deals, monkeypatch):
+        # CSV cells starting with =, +, -, @ are formulas when opened in
+        # Excel/Sheets. Verify the deals CSV path prefixes them with a quote.
+        from swoop.cli.commands import deals_cmd
+        from swoop import _deals as _deals_mod
+        fake_primp_deals()
+
+        def fake_fetch(origin, **kw):
+            from swoop.models import Deal, DealsResult
+            d = Deal(
+                origin=origin if isinstance(origin, str) else origin[0],
+                destination="LIS",
+                destination_city="=cmd|/c calc.exe",  # formula-injection payload
+                destination_country="Portugal",
+                departure_date="2026-05-15",
+                return_date="2026-05-22",
+                price=342,
+                typical_price=1069,
+                discount_pct=68,
+                airlines=["TP"],
+                airline_names=["+SUM(A1:A2)"],  # another injection vector
+                duration_minutes=420,
+                stops=0,
+                trip_days=7,
+                currency="USD",
+            )
+            return DealsResult(deals=[d], origin=origin if isinstance(origin, str) else ",".join(origin))
+
+        monkeypatch.setattr(_deals_mod, "fetch_deals", fake_fetch)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "csv", "-q"])
+        assert result.exit_code == 0
+        # The formula prefix is neutered with a leading single quote
+        assert "'=cmd|/c calc.exe" in result.output
+        assert "'+SUM(A1:A2)" in result.output

@@ -345,3 +345,21 @@ class TestDealsDiff:
     def test_has_changes_false_when_only_unchanged(self):
         d = DealsDiff(unchanged=[_deal()])
         assert not d.has_changes
+
+    def test_dealsdiff_is_constructable_without_args(self):
+        # Regression: when DealsDiff was frozen=True with mutable list
+        # defaults, dataclass-synthesized __hash__ would raise
+        # TypeError on hash(). DealsDiff is now a regular dataclass.
+        d = DealsDiff()
+        assert d.new == []
+        assert d.gone == []
+
+    def test_pricechange_constructable(self):
+        # Regression: PriceChange used to be frozen=True with Deal
+        # fields (Deal not hashable), making hash(PriceChange(...))
+        # crash. Verify basic construction and field access work.
+        a = _deal(destination="LIS", price=500)
+        b = _deal(destination="LIS", price=400)
+        pc = PriceChange(prior=a, current=b)
+        assert pc.delta == -100
+        assert pc.prior is a and pc.current is b

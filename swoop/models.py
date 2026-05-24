@@ -276,9 +276,16 @@ class DealsResult:
         return f"DealsResult({', '.join(parts)})"
 
 
-@dataclass(frozen=True)
+@dataclass
 class PriceChange:
-    """A price movement on a deal between two watcher runs."""
+    """A price movement on a deal between two watcher runs.
+
+    Not ``frozen``: the ``prior``/``current`` Deal fields are mutable
+    dataclasses (Deal is not frozen because its lists are mutable), so
+    ``frozen=True`` here would advertise hashability that doesn't
+    actually work — ``hash(PriceChange(...))`` would raise
+    ``TypeError: unhashable type: 'Deal'``.
+    """
 
     prior: Deal
     current: Deal
@@ -303,7 +310,7 @@ class PriceChange:
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class DealsDiff:
     """Diff between two DealsResult runs of the same query.
 
@@ -312,6 +319,10 @@ class DealsDiff:
     ``price_changes`` are deals with the same fingerprint but a different
     price. ``unchanged`` are deals with both the same fingerprint AND the
     same price.
+
+    Not ``frozen``: every field is a mutable list, so ``frozen=True``
+    would advertise hashability that doesn't work — ``hash(DealsDiff())``
+    would raise ``TypeError: unhashable type: 'list'``.
     """
 
     new: list[Deal] = field(default_factory=list)

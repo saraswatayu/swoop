@@ -172,13 +172,20 @@ class Deal:
 
     @property
     def fingerprint(self) -> str:
-        """Stable identity hash for caching and diff. Excludes price."""
+        """Stable identity hash for caching and diff. Excludes price.
+
+        Inputs are normalized (upper + strip on codes/dates, upper +
+        strip on airlines) so cosmetic upstream drift (casing,
+        whitespace) does not invent ``new``/``gone`` diff events for the
+        same trip across runs.
+        """
+        airlines = sorted(a.strip().upper() for a in self.airlines if a)
         parts = [
-            self.origin,
-            self.destination,
-            self.departure_date,
-            self.return_date or "",
-            ",".join(sorted(self.airlines)),
+            self.origin.strip().upper(),
+            self.destination.strip().upper(),
+            self.departure_date.strip(),
+            (self.return_date or "").strip(),
+            ",".join(airlines),
         ]
         joined = "|".join(parts)
         return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]

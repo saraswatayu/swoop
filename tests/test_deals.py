@@ -139,6 +139,31 @@ class TestParseDeal:
         raw[18] = None
         assert _parse_deal(raw) is None
 
+    def test_booking_path_must_start_with_slash(self):
+        # Google's response should always be a "/travel/..." path. A path
+        # that doesn't start with "/" is rejected (booking_url=None).
+        raw = _make_raw_deal()
+        raw[6] = [None, None, "travel/flights?tfs=abc"]  # no leading slash
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.booking_url is None
+
+    def test_booking_path_rejects_protocol_relative(self):
+        # "//evil.com/..." would concat to "https://www.google.com//evil.com/..."
+        # which most browsers resolve as protocol-relative to evil.com.
+        raw = _make_raw_deal()
+        raw[6] = [None, None, "//evil.example.com/exploit"]
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.booking_url is None
+
+    def test_booking_path_valid_slash_path_kept(self):
+        raw = _make_raw_deal()
+        raw[6] = [None, None, "/travel/flights?tfs=ok"]
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.booking_url == "https://www.google.com/travel/flights?tfs=ok"
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _parse_streaming_response
@@ -336,6 +361,18 @@ class TestDealFingerprint:
     def test_fingerprint_independent_of_airline_order(self):
         d1 = self._deal(airlines=["TP", "LH"])
         d2 = self._deal(airlines=["LH", "TP"])
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_normalizes_casing_and_whitespace(self):
+        # Upstream casing/whitespace drift on origin/destination/airlines
+        # must not invent new diff events. Same trip → same fingerprint.
+        d_canon = self._deal(origin="JFK", destination="LIS", airlines=["TP"])
+        d_drift = self._deal(origin=" jfk ", destination="lis", airlines=[" tp "])
+        assert d_canon.fingerprint == d_drift.fingerprint
+
+    def test_fingerprint_normalizes_date_whitespace(self):
+        d1 = self._deal(departure_date="2026-05-15", return_date="2026-05-22")
+        d2 = self._deal(departure_date=" 2026-05-15 ", return_date=" 2026-05-22 ")
         assert d1.fingerprint == d2.fingerprint
 
 

@@ -254,8 +254,16 @@ def _parse_deal(item: list[Any], currency: Optional[str] = None) -> Optional[Dea
         if price is None or destination is None:
             return None
 
+        # Only accept absolute paths rooted at "/"; reject "//foo" (would
+        # resolve as protocol-relative to www.google.com//foo, possibly
+        # redirected by browsers to foo), absolute URLs, "javascript:",
+        # and other shapes that should not appear in Google's response.
         booking_url = None
-        if isinstance(booking_path, str) and booking_path:
+        if (
+            isinstance(booking_path, str)
+            and booking_path.startswith("/")
+            and not booking_path.startswith("//")
+        ):
             booking_url = "https://www.google.com" + booking_path
 
         # Upstream surfaces one primary carrier per deal today; list shape

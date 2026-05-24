@@ -758,24 +758,32 @@ def _deals_stops_text(stops: int) -> Text:
 
 def _deals_date_range(deal) -> str:
     """Format departure-return date range compactly."""
+    from datetime import date as _date
+
+    def _fmt(value) -> str:
+        # Portable "Mon D" (no leading zero on day). Avoid strftime("%-d")
+        # which is POSIX-only and ValueErrors on Windows ucrt.
+        return f"{value.strftime('%b')} {value.day}"
+
     dep = deal.departure_date
     ret = deal.return_date
     if not dep:
         return "\u2014"
+    d: Optional[_date]
     try:
-        from datetime import date as _date
         d = _date.fromisoformat(dep)
-        dep_str = d.strftime("%b %-d")
+        dep_str = _fmt(d)
     except (ValueError, TypeError):
+        d = None
         dep_str = dep
     if not ret:
         return dep_str
     try:
         r = _date.fromisoformat(ret)
-        if d.month == r.month:
+        if d is not None and d.month == r.month:
             ret_str = str(r.day)
         else:
-            ret_str = r.strftime("%b %-d")
+            ret_str = _fmt(r)
     except (ValueError, TypeError):
         ret_str = ret
     return f"{dep_str}\u2013{ret_str}"

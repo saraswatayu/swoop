@@ -666,6 +666,43 @@ class TestFetchDeals:
 # ---------------------------------------------------------------------------
 
 
+class TestDealsDateRange:
+    """_deals_date_range portability and bad-input handling."""
+
+    def _deal(self, departure_date="2026-06-15", return_date="2026-06-22"):
+        from types import SimpleNamespace
+        return SimpleNamespace(departure_date=departure_date, return_date=return_date)
+
+    def test_valid_same_month(self):
+        from swoop.cli.formatters import _deals_date_range
+        out = _deals_date_range(self._deal("2026-06-15", "2026-06-22"))
+        assert out == "Jun 15–22"
+
+    def test_valid_different_months(self):
+        from swoop.cli.formatters import _deals_date_range
+        out = _deals_date_range(self._deal("2026-06-29", "2026-07-05"))
+        assert out == "Jun 29–Jul 5"
+
+    def test_bad_departure_valid_return_does_not_crash(self):
+        # Regression: previously raised UnboundLocalError because the
+        # except branch never bound `d`, and the second strftime block
+        # referenced `d.month`.
+        from swoop.cli.formatters import _deals_date_range
+        out = _deals_date_range(self._deal("unknown", "2026-06-22"))
+        # Should produce SOMETHING — either fall back to the raw strings
+        # or to the formatted return. Just don't crash.
+        assert isinstance(out, str)
+        assert out  # non-empty
+
+    def test_no_departure_returns_dash(self):
+        from swoop.cli.formatters import _deals_date_range
+        assert _deals_date_range(self._deal("", "2026-06-22")) == "—"
+
+    def test_no_return_returns_departure_only(self):
+        from swoop.cli.formatters import _deals_date_range
+        assert _deals_date_range(self._deal("2026-06-15", None)) == "Jun 15"
+
+
 class TestDealsCLI:
     def test_deals_help(self):
         from swoop.cli.commands import deals_cmd

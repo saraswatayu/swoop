@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: How swoop works (RPC walkthrough)
+    url: https://ayushsaraswat.com/writing/reverse-engineering-google-flights
+    about: Background on the Google Flights RPC endpoints swoop calls. Worth a skim before filing a bug about response decoding or RPC errors.
+  - name: swoop on PyPI
+    url: https://pypi.org/project/swoop-flights/
+    about: Current released version and install instructions.

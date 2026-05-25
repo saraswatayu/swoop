@@ -19,9 +19,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e ".[validation,cli]" && pip install pytest hypothesis pytest-benchmark
+        run: make install-dev
       - name: Run offline test suite
-        run: python -m pytest tests/ -v -m "not live"
+        run: make test
 
   build:
     runs-on: ubuntu-latest

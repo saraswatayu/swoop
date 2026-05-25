@@ -6,17 +6,24 @@ Python library for searching Google Flights programmatically via the same RPC en
 
 ```bash
 # Install (editable, with dev deps)
-pip install -e ".[validation,cli]"
-pip install pytest hypothesis pytest-benchmark
+make install-dev
 
 # Test
-python -m pytest tests/ -v                    # All tests
-python -m pytest tests/ -v -m 'not live'      # Skip live API tests
+make test                                     # Skip live API tests (what CI runs)
+make test-live                                # Live integration tests
+make test-all                                 # Both
 python -m pytest tests/test_decoder.py -v     # Single module
 
 # Type check
-pyright
+make typecheck
+
+# Pre-PR gate (typecheck + offline tests)
+make check
 ```
+
+Raw `pip install -e ".[validation,cli]" pytest hypothesis pytest-benchmark` and
+`python -m pytest tests/ -v -m 'not live'` still work; the Makefile is just the
+canonical entry point.
 
 ## Critical Rules
 
@@ -24,7 +31,7 @@ pyright
 `<type>: <description>` where type is `feat|fix|refactor|docs|chore|ci|test`.
 
 ### 2. Test What You Ship
-Every feature or bug fix that touches logic must include tests. Run `python -m pytest tests/ -v -m 'not live'` before declaring done.
+Every feature or bug fix that touches logic must include tests. Run `make check` (or `python -m pytest tests/ -v -m 'not live'`) before declaring done.
 
 ### 3. Never Commit Secrets
 Never commit `.env` files, API keys, or tokens.

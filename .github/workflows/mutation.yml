@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: pip install -e ".[validation,cli]" && pip install pytest hypothesis pytest-benchmark mutmut
+        run: make install-dev && pip install mutmut
       - name: Run targeted mutation testing
         continue-on-error: true
         run: mutmut run

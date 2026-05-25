@@ -1,0 +1,998 @@
+"""Tests for the deals feature."""
+
+from __future__ import annotations
+
+import json
+import sys
+import types
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from click.testing import CliRunner
+
+from swoop import Deal, DealsResult, deals
+from swoop._deals import (
+    _build_deals_payload,
+    _currency_header,
+    _format_date,
+    _parse_deal,
+    _parse_streaming_response,
+)
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "responses"
+
+
+def _load_fixture(name: str) -> str:
+    return (FIXTURES_DIR / name).read_text()
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _format_date
+# ---------------------------------------------------------------------------
+
+
+class TestFormatDate:
+    def test_valid_date(self):
+        assert _format_date([2026, 5, 15]) == "2026-05-15"
+
+    def test_single_digit(self):
+        assert _format_date([2026, 1, 3]) == "2026-01-03"
+
+    def test_none(self):
+        assert _format_date(None) is None
+
+    def test_empty_list(self):
+        assert _format_date([]) is None
+
+    def test_short_list(self):
+        assert _format_date([2026, 5]) is None
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _parse_deal
+# ---------------------------------------------------------------------------
+
+
+def _make_raw_deal(
+    dep_date=(2026, 5, 15),
+    ret_date=(2026, 5, 22),
+    price=342,
+    typical_price=1069,
+    discount_pct=68,
+    airline_code="TP",
+    airline_name="Tap Air Portugal",
+    duration=420,
+    stops=0,
+    origin="JFK",
+    destination="LIS",
+    city="Lisbon",
+    country="Portugal",
+    trip_days=7,
+):
+    """Build a raw deal item matching the Google Flights response format."""
+    item = [None] * 23
+    item[1] = list(dep_date)
+    item[2] = list(ret_date) if ret_date else None
+    item[3] = [[None, price]]
+    item[4] = [[None, typical_price]] if typical_price is not None else None
+    item[5] = discount_pct
+    item[6] = [None, None, "/travel/flights?tfs=abc"]
+    item[7] = duration
+    item[8] = stops
+    item[10] = airline_code
+    item[11] = airline_name
+    item[13] = [city, country, "https://img.example.com/x.jpg", ["landmark"]]
+    item[16] = trip_days
+    item[17] = origin
+    item[18] = destination
+    item[22] = ["/m/0test", 4]
+    return item
+
+
+class TestParseDeal:
+    def test_basic(self):
+        raw = _make_raw_deal()
+        deal = _parse_deal(raw, currency="USD")
+        assert deal is not None
+        assert deal.origin == "JFK"
+        assert deal.destination == "LIS"
+        assert deal.destination_city == "Lisbon"
+        assert deal.destination_country == "Portugal"
+        assert deal.departure_date == "2026-05-15"
+        assert deal.return_date == "2026-05-22"
+        assert deal.price == 342
+        assert deal.typical_price == 1069
+        assert deal.discount_pct == 68
+        assert deal.airlines == ["TP"]
+        assert deal.airline_names == ["Tap Air Portugal"]
+        assert deal.duration_minutes == 420
+        assert deal.stops == 0
+        assert deal.trip_days == 7
+        assert deal.currency == "USD"
+        assert deal.booking_url == "https://www.google.com/travel/flights?tfs=abc"
+
+    def test_missing_typical_price(self):
+        raw = _make_raw_deal(typical_price=None, discount_pct=None)
+        deal = _parse_deal(raw, currency="USD")
+        assert deal is not None
+        assert deal.typical_price is None
+        assert deal.discount_pct is None
+
+    def test_nonstop(self):
+        raw = _make_raw_deal(stops=0)
+        deal = _parse_deal(raw)
+        assert deal.stops == 0
+
+    def test_one_stop(self):
+        raw = _make_raw_deal(stops=1)
+        deal = _parse_deal(raw)
+        assert deal.stops == 1
+
+    def test_missing_price_returns_none(self):
+        raw = _make_raw_deal()
+        raw[3] = None
+        assert _parse_deal(raw) is None
+
+    def test_missing_destination_returns_none(self):
+        raw = _make_raw_deal()
+        raw[18] = None
+        assert _parse_deal(raw) is None
+
+    def test_booking_path_must_start_with_slash(self):
+        # Google's response should always be a "/travel/..." path. A path
+        # that doesn't start with "/" is rejected (booking_url=None).
+        raw = _make_raw_deal()
+        raw[6] = [None, None, "travel/flights?tfs=abc"]  # no leading slash
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.booking_url is None
+
+    def test_booking_path_rejects_protocol_relative(self):
+        # "//evil.com/..." would concat to "https://www.google.com//evil.com/..."
+        # which most browsers resolve as protocol-relative to evil.com.
+        raw = _make_raw_deal()
+        raw[6] = [None, None, "//evil.example.com/exploit"]
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.booking_url is None
+
+    def test_booking_path_valid_slash_path_kept(self):
+        raw = _make_raw_deal()
+        raw[6] = [None, None, "/travel/flights?tfs=ok"]
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.booking_url == "https://www.google.com/travel/flights?tfs=ok"
+
+    def test_stops_none_stays_none_not_zero(self):
+        # Regression: stops used to default to 0 when upstream sent None,
+        # silently mislabeling the deal as "Nonstop" in the CLI. The
+        # field is now Optional[int] and stays None for the "unknown"
+        # case so renderers can distinguish.
+        raw = _make_raw_deal()
+        raw[8] = None  # upstream didn't report stops
+        deal = _parse_deal(raw)
+        assert deal is not None
+        assert deal.stops is None
+
+    def test_stops_text_renders_none_distinctly(self):
+        # CLI must render unknown stops as "?", not "Nonstop".
+        from swoop.cli.formatters import _deals_stops_text
+        assert str(_deals_stops_text(None)) == "?"
+        assert str(_deals_stops_text(0)) == "Nonstop"
+        assert str(_deals_stops_text(1)) == "1 stop"
+        assert str(_deals_stops_text(2)) == "2 stops"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _parse_streaming_response
+# ---------------------------------------------------------------------------
+
+
+class TestParseStreamingResponse:
+    def test_parses_fixture(self):
+        text = _load_fixture("deals_streaming.txt")
+        items = _parse_streaming_response(text)
+        assert len(items) == 30
+        # Each item should be a list with destination info
+        for item in items:
+            assert isinstance(item, list)
+            assert len(item) > 18
+
+    def test_empty_response(self):
+        assert _parse_streaming_response("") == []
+
+    def test_no_deals_chunk(self):
+        # Just the security prefix and metadata
+        text = ")]}'\n\n27\n[[\"e\",6,null,null,100]]\n"
+        assert _parse_streaming_response(text) == []
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _build_deals_payload
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDealsPayload:
+    def test_returns_encoded_string(self):
+        result = _build_deals_payload("JFK")
+        assert isinstance(result, str)
+        assert len(result) > 50
+
+    def test_contains_origin(self):
+        import urllib.parse
+        result = _build_deals_payload("LAX")
+        decoded = urllib.parse.unquote(result)
+        outer = json.loads(decoded)
+        inner = json.loads(outer[1])
+        # Origin should be in the segments
+        assert "LAX" in json.dumps(inner)
+
+    def test_cabin_business(self):
+        from swoop.builders import CABIN_CLASS_MAP
+        result = _build_deals_payload("JFK", cabin="business")
+        # The encoded payload should contain cabin code 3
+        assert isinstance(result, str)
+
+    def test_exclude_basic_economy_by_default(self):
+        # The encoded payload's inner-array slot 28 should be 1 (exclude
+        # basic economy) when include_basic_economy is False (the default).
+        import urllib.parse
+        result = _build_deals_payload("JFK")
+        # _encode_f_req_payload wraps as [None, json_string]; unwrap.
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        inner = payload[1]
+        assert inner[28] == 1, "default should exclude basic economy (slot 28 = 1)"
+
+    def test_include_basic_economy_clears_slot(self):
+        import urllib.parse
+        result = _build_deals_payload("JFK", include_basic_economy=True)
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        inner = payload[1]
+        assert inner[28] is None, "include_basic_economy=True should clear slot 28"
+
+    def test_airlines_filter_in_both_segments(self):
+        # Airlines should land in slot 4 of both segments, sorted.
+        import urllib.parse
+        result = _build_deals_payload("JFK", airlines=["UA", "DL"])
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        segments = payload[1][13]
+        assert segments[0][4] == ["DL", "UA"]
+        assert segments[1][4] == ["DL", "UA"]
+
+    def test_no_airlines_filter_leaves_slot_none(self):
+        import urllib.parse
+        result = _build_deals_payload("JFK")
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        segments = payload[1][13]
+        assert segments[0][4] is None
+        assert segments[1][4] is None
+
+    def test_multi_origin_list_in_slot_zero(self):
+        # Internal helper accepts list[str] for origins. The airport_set
+        # nests all codes at the same level inside slot 0.
+        import urllib.parse
+        result = _build_deals_payload(["JFK", "LGA", "EWR"])
+        wrapped = json.loads(urllib.parse.unquote(result))
+        payload = json.loads(wrapped[1])
+        outbound = payload[1][13][0]
+        # slot 0 = [[[JFK,0],[LGA,0],[EWR,0]]]
+        assert outbound[0] == [[["JFK", 0], ["LGA", 0], ["EWR", 0]]]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _currency_header
+# ---------------------------------------------------------------------------
+
+
+class TestCurrencyHeader:
+    def test_us(self):
+        h = _currency_header("US")
+        parsed = json.loads(h)
+        assert parsed[1] == "US"
+        assert parsed[2] == "USD"
+
+    def test_gb(self):
+        h = _currency_header("GB")
+        parsed = json.loads(h)
+        assert parsed[2] == "GBP"
+
+    def test_none_defaults_to_us(self):
+        h = _currency_header(None)
+        parsed = json.loads(h)
+        assert parsed[2] == "USD"
+
+    def test_unknown_country_defaults_to_usd(self):
+        h = _currency_header("XX")
+        parsed = json.loads(h)
+        assert parsed[2] == "USD"
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: DealsResult / Deal models
+# ---------------------------------------------------------------------------
+
+
+class TestDealsResultModel:
+    def test_currency_property_empty(self):
+        r = DealsResult()
+        assert r.currency is None
+
+    def test_currency_property_from_first_deal(self):
+        deal = Deal(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=342, typical_price=1069,
+            discount_pct=68, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="EUR",
+        )
+        r = DealsResult(deals=[deal], origin="JFK")
+        assert r.currency == "EUR"
+
+    def test_repr(self):
+        r = DealsResult(deals=[], origin="JFK")
+        assert "JFK" in repr(r)
+
+
+class TestDealFingerprint:
+    def _deal(self, **overrides):
+        defaults = dict(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=342, typical_price=1069,
+            discount_pct=68, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="EUR",
+        )
+        defaults.update(overrides)
+        return Deal(**defaults)
+
+    def test_fingerprint_is_stable(self):
+        d1 = self._deal()
+        d2 = self._deal()
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_excludes_price(self):
+        # Same trip at a different price hashes the same — this is the
+        # signal the watcher uses to detect price drops.
+        d1 = self._deal(price=342)
+        d2 = self._deal(price=300)
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_differs_by_destination(self):
+        d1 = self._deal(destination="LIS")
+        d2 = self._deal(destination="MAD")
+        assert d1.fingerprint != d2.fingerprint
+
+    def test_fingerprint_differs_by_dates(self):
+        d1 = self._deal(departure_date="2026-05-15")
+        d2 = self._deal(departure_date="2026-05-16")
+        assert d1.fingerprint != d2.fingerprint
+
+    def test_fingerprint_differs_by_airlines(self):
+        d1 = self._deal(airlines=["TP"])
+        d2 = self._deal(airlines=["LH"])
+        assert d1.fingerprint != d2.fingerprint
+
+    def test_fingerprint_independent_of_airline_order(self):
+        d1 = self._deal(airlines=["TP", "LH"])
+        d2 = self._deal(airlines=["LH", "TP"])
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_normalizes_casing_and_whitespace(self):
+        # Upstream casing/whitespace drift on origin/destination/airlines
+        # must not invent new diff events. Same trip → same fingerprint.
+        d_canon = self._deal(origin="JFK", destination="LIS", airlines=["TP"])
+        d_drift = self._deal(origin=" jfk ", destination="lis", airlines=[" tp "])
+        assert d_canon.fingerprint == d_drift.fingerprint
+
+    def test_fingerprint_normalizes_date_whitespace(self):
+        d1 = self._deal(departure_date="2026-05-15", return_date="2026-05-22")
+        d2 = self._deal(departure_date=" 2026-05-15 ", return_date=" 2026-05-22 ")
+        assert d1.fingerprint == d2.fingerprint
+
+    def test_fingerprint_distinguishes_cabin(self):
+        # Regression: fingerprint used to exclude query_cabin/adults/basic,
+        # so business vs economy on the same trip collided to one identity.
+        d_business = self._deal(query_cabin="business")
+        d_economy = self._deal(query_cabin="economy")
+        assert d_business.fingerprint != d_economy.fingerprint
+
+    def test_fingerprint_distinguishes_passenger_count(self):
+        d_1pax = self._deal(query_adults=1)
+        d_2pax = self._deal(query_adults=2)
+        assert d_1pax.fingerprint != d_2pax.fingerprint
+
+    def test_fingerprint_distinguishes_basic_economy(self):
+        d_no_basic = self._deal(query_include_basic_economy=False)
+        d_with_basic = self._deal(query_include_basic_economy=True)
+        assert d_no_basic.fingerprint != d_with_basic.fingerprint
+
+    def test_fingerprint_cabin_case_insensitive(self):
+        # Cabin is normalized to lowercase for stability.
+        d1 = self._deal(query_cabin="Business")
+        d2 = self._deal(query_cabin="business")
+        assert d1.fingerprint == d2.fingerprint
+
+
+class TestPerOriginMode:
+    """Tests for per_origin=True parallel multi-origin fetch and merge."""
+
+    def _deal(self, **overrides):
+        defaults = dict(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=400, typical_price=900,
+            discount_pct=55, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="USD",
+        )
+        defaults.update(overrides)
+        return Deal(**defaults)
+
+    def test_per_origin_false_single_call(self, monkeypatch):
+        # Default behavior: single RPC call with the airport set in slot 0.
+        import swoop
+        captured = {"calls": []}
+
+        def fake_fetch(origin, **kwargs):
+            captured["calls"].append(origin)
+            return DealsResult(deals=[self._deal()], origin=origin if isinstance(origin, str) else ",".join(origin))
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "LGA", "EWR"], per_origin=False)
+        # One call, list-shaped origin passed through.
+        assert len(captured["calls"]) == 1
+        assert captured["calls"][0] == ["JFK", "LGA", "EWR"]
+        assert len(result.deals) == 1
+
+    def test_per_origin_true_parallel_calls(self, monkeypatch):
+        import swoop
+        calls: list[str] = []
+
+        def fake_fetch(origin, **kwargs):
+            assert isinstance(origin, str), "per_origin should call fetch with str origins"
+            calls.append(origin)
+            return DealsResult(
+                deals=[self._deal(origin=origin, destination=f"DST{origin}")],
+                origin=origin,
+            )
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "LGA", "EWR"], per_origin=True)
+        assert sorted(calls) == ["EWR", "JFK", "LGA"]
+        # Three distinct destinations → three deals.
+        assert len(result.deals) == 3
+
+    def test_per_origin_merge_keeps_cheaper(self, monkeypatch):
+        # Two origins produce a same-fingerprint duplicate at different prices.
+        # The merge keeps the cheaper one.
+        import swoop
+
+        def fake_fetch(origin, **kwargs):
+            # Same destination, dates, airline → identical fingerprint regardless of origin.
+            # Wait: fingerprint includes origin, so JFK→LIS and LGA→LIS are
+            # different fingerprints. To force a collision we share origin.
+            # The realistic merge case: same origin in two calls (unusual but
+            # possible). Use this test to verify the dedupe logic.
+            return DealsResult(
+                deals=[self._deal(origin="JFK", price=500 if origin == "JFK" else 400)],
+                origin=origin,
+            )
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        # Two origins, both return a JFK-origin deal (one cheap, one expensive)
+        result = swoop.deals(["JFK", "LGA"], per_origin=True)
+        # Same fingerprint → cheaper wins.
+        assert len(result.deals) == 1
+        assert result.deals[0].price == 400
+
+    def test_per_origin_false_for_single_string_origin(self, monkeypatch):
+        import swoop
+        captured = {"calls": []}
+
+        def fake_fetch(origin, **kwargs):
+            captured["calls"].append(origin)
+            return DealsResult(deals=[], origin=origin)
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        swoop.deals("JFK", per_origin=True)
+        # Single string + per_origin=True is harmless: still one call.
+        assert captured["calls"] == ["JFK"]
+
+    def test_per_origin_zero_deals_is_not_a_failure(self, monkeypatch):
+        # Regression: per_origin used to count `not r.deals` as a failure,
+        # which made an obscure origin with no deals permanently flip
+        # partial=True. Loud upstream failures raise SwoopParseError
+        # (caught above). A genuinely empty origin should NOT mark the
+        # result partial.
+        import swoop
+
+        def fake_fetch(origin, **kwargs):
+            return DealsResult(deals=[], origin=origin)
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "SCE"], per_origin=True)
+        assert result.partial is False, "0-deal upstream must not mark result partial"
+
+    def test_per_origin_exception_marks_partial(self, monkeypatch):
+        # Real failure (raised exception, e.g. from rate-limit retry
+        # exhaustion) must still set partial=True.
+        import swoop
+
+        call_count = {"n": 0}
+
+        def fake_fetch(origin, **kwargs):
+            call_count["n"] += 1
+            if origin == "LGA":
+                raise RuntimeError("simulated transient")
+            return DealsResult(deals=[self._deal(origin=origin)], origin=origin)
+
+        monkeypatch.setattr("swoop._deals.fetch_deals", fake_fetch)
+        result = swoop.deals(["JFK", "LGA"], per_origin=True)
+        assert result.partial is True
+
+    def test_partial_flag_survives_client_filter(self, monkeypatch):
+        # Regression: deals() rebuilds DealsResult after filtering without
+        # forwarding `partial`, dropping the per-origin-failure signal
+        # whenever any client-side filter is set. Watch_deals then thinks
+        # the result is clean and overwrites the cache with partial data.
+        import swoop
+        from swoop.models import DealsResult as DR
+        from swoop._regions import Region
+
+        def fake_per_origin(*args, **kwargs):
+            # Simulate the per-origin path having already detected a failure.
+            return DR(
+                deals=[self._deal(destination="LIS", destination_region=Region.EUROPE)],
+                origin="JFK,LGA",
+                partial=True,
+            )
+
+        monkeypatch.setattr("swoop._fetch_deals_per_origin", fake_per_origin)
+        # Trigger the filter path with a region filter.
+        result = swoop.deals(["JFK", "LGA"], per_origin=True, region=Region.EUROPE)
+        assert result.partial is True, "partial must survive the filter rebuild"
+
+
+class TestDealBridges:
+    """Tests for Deal.to_search_kwargs(), swoop.search_deal, swoop.price_deal."""
+
+    def _deal(self, **overrides):
+        defaults = dict(
+            origin="JFK", destination="LIS", destination_city="Lisbon",
+            destination_country="Portugal", departure_date="2026-05-15",
+            return_date="2026-05-22", price=342, typical_price=1069,
+            discount_pct=68, airlines=["TP"], airline_names=["TAP"],
+            duration_minutes=420, stops=0, trip_days=7, currency="EUR",
+        )
+        defaults.update(overrides)
+        return Deal(**defaults)
+
+    def test_to_search_kwargs_roundtrip(self):
+        d = self._deal()
+        kwargs = d.to_search_kwargs()
+        assert kwargs == {
+            "origin": "JFK",
+            "destination": "LIS",
+            "date": "2026-05-15",
+            "return_date": "2026-05-22",
+            "airlines": ["TP"],
+        }
+
+    def test_to_search_kwargs_oneway(self):
+        d = self._deal(return_date=None)
+        kwargs = d.to_search_kwargs()
+        assert "return_date" not in kwargs
+
+    def test_to_search_kwargs_drops_multi_airline_sentinel(self):
+        d = self._deal(airlines=["*"])
+        kwargs = d.to_search_kwargs()
+        assert "airlines" not in kwargs
+
+    def test_to_search_kwargs_no_airlines(self):
+        d = self._deal(airlines=[])
+        kwargs = d.to_search_kwargs()
+        assert "airlines" not in kwargs
+
+    def test_to_search_kwargs_forwards_query_context(self):
+        from swoop import Passengers
+        d = self._deal(query_cabin="business", query_adults=2, query_include_basic_economy=True)
+        kwargs = d.to_search_kwargs()
+        assert kwargs.get("cabin") == "business"
+        assert kwargs.get("passengers") == Passengers(adults=2)
+        assert kwargs.get("include_basic_economy") is True
+
+    def test_to_search_kwargs_defaults_skip_query_context(self):
+        d = self._deal()  # defaults: cabin=None, adults=1, basic_economy=False
+        kwargs = d.to_search_kwargs()
+        assert "cabin" not in kwargs
+        assert "passengers" not in kwargs
+        assert "include_basic_economy" not in kwargs
+
+    def test_search_deal_delegates_to_search(self, monkeypatch):
+        import swoop
+        captured = {}
+
+        def fake_search(**kwargs):
+            captured.update(kwargs)
+            return swoop.SearchResult(results=[], is_complete=True)
+
+        monkeypatch.setattr(swoop, "search", fake_search)
+        d = self._deal()
+        result = swoop.search_deal(d)
+        assert captured["origin"] == "JFK"
+        assert captured["destination"] == "LIS"
+        assert captured["date"] == "2026-05-15"
+        assert captured["airlines"] == ["TP"]
+        assert "transport" in captured
+        assert result.results == []
+
+    def test_price_deal_returns_none_when_no_results(self, monkeypatch):
+        import swoop
+
+        def fake_search(**kwargs):
+            return swoop.SearchResult(results=[], is_complete=True)
+
+        monkeypatch.setattr(swoop, "search", fake_search)
+        d = self._deal()
+        assert swoop.price_deal(d) is None
+
+    def test_price_deal_prices_cheapest(self, monkeypatch):
+        import swoop
+
+        cheap = swoop.TripOption(
+            selector="cheap-sel", price=300, currency="EUR", legs=[],
+        )
+        expensive = swoop.TripOption(
+            selector="expensive-sel", price=500, currency="EUR", legs=[],
+        )
+
+        def fake_search(**kwargs):
+            return swoop.SearchResult(results=[expensive, cheap], is_complete=True)
+
+        captured = {}
+
+        def fake_price_selector(selector, *, transport):
+            captured["selector"] = selector
+            return swoop.PriceResult(price=290, currency="EUR")
+
+        monkeypatch.setattr(swoop, "search", fake_search)
+        monkeypatch.setattr(swoop, "price_selector", fake_price_selector)
+        d = self._deal()
+        result = swoop.price_deal(d)
+        assert captured["selector"] == "cheap-sel"
+        assert result is not None and result.price == 290
+
+
+class TestDealRegion:
+    def test_region_populated_from_iata(self):
+        # JFK is in the US → NORTH_AMERICA. Requires airportsdata.
+        try:
+            import airportsdata  # noqa
+        except ImportError:
+            pytest.skip("airportsdata not installed")
+        raw = _make_raw_deal(destination="JFK")
+        deal = _parse_deal(raw, currency="USD")
+        from swoop._regions import Region
+        assert deal is not None
+        assert deal.destination_region == Region.NORTH_AMERICA
+
+    def test_region_none_for_unknown_iata(self):
+        try:
+            import airportsdata  # noqa
+        except ImportError:
+            pytest.skip("airportsdata not installed")
+        raw = _make_raw_deal(destination="ZZZ")
+        deal = _parse_deal(raw, currency="USD")
+        assert deal is not None
+        assert deal.destination_region is None
+
+
+# ---------------------------------------------------------------------------
+# Integration test: fetch_deals with mocked HTTP
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_primp_deals(monkeypatch):
+    """Patch primp.Client for deals tests (supports both GET and POST)."""
+    import swoop.rpc as _rpc
+
+    def _install(post_text="", post_status=200):
+        response = MagicMock()
+        response.status_code = post_status
+        response.text = post_text
+
+        class FakeClient:
+            def __init__(self, **_kw):
+                pass
+            def get(self, *_a, **_kw):
+                # Session establishment — just needs to not crash
+                return MagicMock(status_code=200, text="<html></html>")
+            def post(self, *_a, **_kw):
+                return response
+
+        _rpc._clients.clear()
+        monkeypatch.setitem(sys.modules, "primp", types.SimpleNamespace(Client=FakeClient))
+        return response
+    return _install
+
+
+class TestFetchDeals:
+    def test_basic(self, fake_primp_deals):
+        text = _load_fixture("deals_streaming.txt")
+        fake_primp_deals(post_text=text)
+        result = deals("JFK")
+        assert isinstance(result, DealsResult)
+        assert len(result.deals) == 30
+        assert result.origin == "JFK"
+        assert all(isinstance(d, Deal) for d in result.deals)
+        assert all(d.price > 0 for d in result.deals)
+
+    def test_empty_response(self, fake_primp_deals):
+        fake_primp_deals(post_text=")]}'\n\n27\n[[\"e\",6,null,null,0]]\n")
+        result = deals("JFK")
+        assert len(result.deals) == 0
+
+    def test_invalid_origin_raises(self):
+        with pytest.raises(ValueError, match="origin"):
+            deals("xx")
+
+    def test_invalid_cabin_raises(self, fake_primp_deals):
+        fake_primp_deals()
+        with pytest.raises(ValueError, match="cabin"):
+            deals("JFK", cabin="ultra")
+
+    def test_empty_origin_list_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            deals([])
+
+    def test_html_response_raises_parse_error(self, fake_primp_deals):
+        from swoop.exceptions import SwoopParseError
+        fake_primp_deals(post_text="<!DOCTYPE html><html><body>Consent</body></html>")
+        with pytest.raises(SwoopParseError, match="HTML"):
+            deals("JFK")
+
+
+# ---------------------------------------------------------------------------
+# CLI tests
+# ---------------------------------------------------------------------------
+
+
+class TestDealsDateRange:
+    """_deals_date_range portability and bad-input handling."""
+
+    def _deal(self, departure_date="2026-06-15", return_date="2026-06-22"):
+        from types import SimpleNamespace
+        return SimpleNamespace(departure_date=departure_date, return_date=return_date)
+
+    def test_valid_same_month(self):
+        from swoop.cli.formatters import _deals_date_range
+        out = _deals_date_range(self._deal("2026-06-15", "2026-06-22"))
+        assert out == "Jun 15–22"
+
+    def test_valid_different_months(self):
+        from swoop.cli.formatters import _deals_date_range
+        out = _deals_date_range(self._deal("2026-06-29", "2026-07-05"))
+        assert out == "Jun 29–Jul 5"
+
+    def test_bad_departure_valid_return_does_not_crash(self):
+        # Regression: previously raised UnboundLocalError because the
+        # except branch never bound `d`, and the second strftime block
+        # referenced `d.month`.
+        from swoop.cli.formatters import _deals_date_range
+        out = _deals_date_range(self._deal("unknown", "2026-06-22"))
+        # Should produce SOMETHING — either fall back to the raw strings
+        # or to the formatted return. Just don't crash.
+        assert isinstance(out, str)
+        assert out  # non-empty
+
+    def test_no_departure_returns_dash(self):
+        from swoop.cli.formatters import _deals_date_range
+        assert _deals_date_range(self._deal("", "2026-06-22")) == "—"
+
+    def test_no_return_returns_departure_only(self):
+        from swoop.cli.formatters import _deals_date_range
+        assert _deals_date_range(self._deal("2026-06-15", None)) == "Jun 15"
+
+
+class TestDealsCLI:
+    def test_deals_help(self):
+        from swoop.cli.commands import deals_cmd
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["--help"])
+        assert result.exit_code == 0
+        assert "deals" in result.output.lower() or "ORIGIN" in result.output
+
+    def test_deals_table(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        text = _load_fixture("deals_streaming.txt")
+        fake_primp_deals(post_text=text)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-q"])
+        assert result.exit_code == 0
+
+    def test_deals_json(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        text = _load_fixture("deals_streaming.txt")
+        fake_primp_deals(post_text=text)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "json", "-q"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "deals" in data
+        assert len(data["deals"]) == 30
+
+    def test_deals_csv(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        text = _load_fixture("deals_streaming.txt")
+        fake_primp_deals(post_text=text)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "csv", "-q"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 31  # header + 30 deals
+
+    def test_deals_brief(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        text = _load_fixture("deals_streaming.txt")
+        fake_primp_deals(post_text=text)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "brief", "-q"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 30
+
+    def test_deals_limit(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        text = _load_fixture("deals_streaming.txt")
+        fake_primp_deals(post_text=text)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "brief", "-q", "-l", "5"])
+        assert result.exit_code == 0
+        lines = result.output.strip().split("\n")
+        assert len(lines) == 5
+
+    def test_region_without_airportsdata_exits(self, fake_primp_deals, monkeypatch):
+        # When airportsdata can't be imported, --region must fail fast at
+        # the CLI rather than silently returning 0 deals.
+        from swoop.cli import commands as commands_module
+        from swoop import _regions
+        fake_primp_deals()
+        monkeypatch.setattr(_regions, "_airportsdata_available", lambda: False)
+        runner = CliRunner()
+        result = runner.invoke(commands_module.deals_cmd, ["JFK", "--region", "europe"])
+        assert result.exit_code == 2
+        assert "airportsdata" in result.output
+
+    def test_depart_window_malformed_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--depart-window", "not-a-date,2026-06-01"])
+        assert result.exit_code == 2
+
+    def test_depart_window_swapped_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--depart-window", "2026-08-01,2026-06-01"])
+        assert result.exit_code == 2
+
+    def test_depart_window_single_part_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--depart-window", "2026-06-01"])
+        assert result.exit_code == 2
+
+    def test_trip_length_non_numeric_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "abc-def"])
+        assert result.exit_code == 2
+
+    def test_trip_length_swapped_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "10-5"])
+        assert result.exit_code == 2
+
+    def test_trip_length_out_of_range_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "5-999"])
+        assert result.exit_code == 2
+
+    def test_trip_length_three_parts_exits(self, fake_primp_deals):
+        from swoop.cli.commands import deals_cmd
+        fake_primp_deals()
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "--trip-length", "5-10-15"])
+        assert result.exit_code == 2
+
+    def test_deals_json_includes_partial_and_query_context(self, fake_primp_deals, monkeypatch):
+        # Regression: format_deals_json used to omit DealsResult.partial
+        # and the 3 new Deal query-context fields. CLI-orchestrated cron
+        # pipelines couldn't detect partial responses or reproduce
+        # search_deal(d) faithfully.
+        from swoop.cli.commands import deals_cmd
+        from swoop import _deals as _deals_mod
+        fake_primp_deals()
+
+        def fake_fetch(origin, **kw):
+            from swoop.models import Deal, DealsResult
+            d = Deal(
+                origin=origin if isinstance(origin, str) else origin[0],
+                destination="LIS",
+                destination_city="Lisbon",
+                destination_country="Portugal",
+                departure_date="2026-05-15",
+                return_date="2026-05-22",
+                price=342,
+                typical_price=1069,
+                discount_pct=68,
+                airlines=["TP"],
+                airline_names=["TAP"],
+                duration_minutes=420,
+                stops=0,
+                trip_days=7,
+                currency="USD",
+                query_cabin="business",
+                query_adults=2,
+                query_include_basic_economy=True,
+            )
+            return DealsResult(deals=[d], origin="JFK", partial=True)
+
+        monkeypatch.setattr(_deals_mod, "fetch_deals", fake_fetch)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "json", "-q"])
+        assert result.exit_code == 0
+        import json as _json
+        payload = _json.loads(result.output)
+        assert payload["partial"] is True
+        assert payload["deals"][0]["query_cabin"] == "business"
+        assert payload["deals"][0]["query_adults"] == 2
+        assert payload["deals"][0]["query_include_basic_economy"] is True
+
+    def test_deals_csv_escapes_formula_prefix(self, fake_primp_deals, monkeypatch):
+        # CSV cells starting with =, +, -, @ are formulas when opened in
+        # Excel/Sheets. Verify the deals CSV path prefixes them with a quote.
+        from swoop.cli.commands import deals_cmd
+        from swoop import _deals as _deals_mod
+        fake_primp_deals()
+
+        def fake_fetch(origin, **kw):
+            from swoop.models import Deal, DealsResult
+            d = Deal(
+                origin=origin if isinstance(origin, str) else origin[0],
+                destination="LIS",
+                destination_city="=cmd|/c calc.exe",  # formula-injection payload
+                destination_country="Portugal",
+                departure_date="2026-05-15",
+                return_date="2026-05-22",
+                price=342,
+                typical_price=1069,
+                discount_pct=68,
+                airlines=["TP"],
+                airline_names=["+SUM(A1:A2)"],  # another injection vector
+                duration_minutes=420,
+                stops=0,
+                trip_days=7,
+                currency="USD",
+            )
+            return DealsResult(deals=[d], origin=origin if isinstance(origin, str) else ",".join(origin))
+
+        monkeypatch.setattr(_deals_mod, "fetch_deals", fake_fetch)
+        runner = CliRunner()
+        result = runner.invoke(deals_cmd, ["JFK", "-o", "csv", "-q"])
+        assert result.exit_code == 0
+        # The formula prefix is neutered with a leading single quote
+        assert "'=cmd|/c calc.exe" in result.output
+        assert "'+SUM(A1:A2)" in result.output

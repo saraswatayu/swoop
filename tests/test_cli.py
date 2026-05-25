@@ -1488,9 +1488,9 @@ class TestEnrichedOutput:
 class TestMainModule:
     def test_python_m_swoop_help(self):
         """python -m swoop --help should work."""
-        import subprocess
+        import subprocess, sys
         result = subprocess.run(
-            ["python", "-m", "swoop", "--help"],
+            [sys.executable, "-m", "swoop", "--help"],
             capture_output=True, text=True,
         )
         assert result.returncode == 0

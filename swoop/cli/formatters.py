@@ -741,3 +741,222 @@ def format_price_csv(
             _b(result.is_basic_economy),
             "", "", "", "", "", "", "", "", "", "",
         ])
+
+
+# ---------------------------------------------------------------------------
+# Deals formatters
+# ---------------------------------------------------------------------------
+
+
+def _deals_stops_text(stops: Optional[int]) -> Text:
+    """Colored stop count for deals.
+
+    ``None`` means upstream didn't report stops — render "?" in dim
+    rather than collapsing to "Nonstop" (which would mislead the user
+    into booking a multi-stop itinerary).
+    """
+    if stops is None:
+        return Text("?", style="dim")
+    if stops == 0:
+        return Text("Nonstop", style="green")
+    label = f"{stops} stop{'s' if stops != 1 else ''}"
+    return Text(label, style="yellow" if stops == 1 else "red")
+
+
+def _deals_date_range(deal) -> str:
+    """Format departure-return date range compactly."""
+    from datetime import date as _date
+
+    def _fmt(value) -> str:
+        # Portable "Mon D" (no leading zero on day). Avoid strftime("%-d")
+        # which is POSIX-only and ValueErrors on Windows ucrt.
+        return f"{value.strftime('%b')} {value.day}"
+
+    dep = deal.departure_date
+    ret = deal.return_date
+    if not dep:
+        return "\u2014"
+    d: Optional[_date]
+    try:
+        d = _date.fromisoformat(dep)
+        dep_str = _fmt(d)
+    except (ValueError, TypeError):
+        d = None
+        dep_str = dep
+    if not ret:
+        return dep_str
+    try:
+        r = _date.fromisoformat(ret)
+        if d is not None and d.month == r.month:
+            ret_str = str(r.day)
+        else:
+            ret_str = _fmt(r)
+    except (ValueError, TypeError):
+        ret_str = ret
+    return f"{dep_str}\u2013{ret_str}"
+
+
+def format_deals_table(
+    result,
+    *,
+    cabin: str = "economy",
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals as a Rich table to stdout."""
+    console = _stdout_console(no_color=no_color)
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    currency = result.currency
+
+    table = Table(title=f"Deals from {result.origin} ({cabin})", show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Destination", min_width=20)
+    table.add_column("Dates", min_width=12)
+    table.add_column("Price", justify="right")
+    table.add_column("Typical", justify="right", style="dim")
+    table.add_column("Savings", justify="right")
+    table.add_column("Airline")
+    table.add_column("Stops")
+    table.add_column("Duration", justify="right")
+
+    for i, deal in enumerate(deals, 1):
+        city = deal.destination_city
+        if deal.destination_country:
+            city += f", {deal.destination_country}"
+        dest_text = f"{city} ({deal.destination})"
+
+        savings = Text("")
+        if deal.discount_pct is not None:
+            savings = Text(f"{deal.discount_pct}% off", style="bold green")
+
+        dur = format_duration(deal.duration_minutes) if deal.duration_minutes else "\u2014"
+
+        # Prefer human names; fall back to codes; "*" sentinel means multi-airline.
+        airline_label = ", ".join(deal.airline_names) or ", ".join(deal.airlines)
+
+        table.add_row(
+            str(i),
+            dest_text,
+            _deals_date_range(deal),
+            _format_price(deal.price, currency),
+            _format_price(deal.typical_price, currency),
+            savings,
+            airline_label,
+            _deals_stops_text(deal.stops),
+            dur,
+        )
+
+    console.print(table)
+
+
+def format_deals_json(
+    result,
+    *,
+    cabin: str = "economy",
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals as JSON to stdout."""
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    output = {
+        "query": {"origin": result.origin, "cabin": cabin},
+        "currency": result.currency,
+        "total_deals": len(result.deals),
+        # `partial` surfaces the per-origin-failure signal so CLI-orchestrated
+        # cron pipelines (jq-style diffing) can detect partial responses and
+        # refuse to overwrite their own baselines. Without this key, a script
+        # comparing today's vs yesterday's JSON would treat a failed-origin's
+        # deals as legitimately gone.
+        "partial": result.partial,
+        "deals": [
+            {
+                "index": i,
+                "origin": d.origin,
+                "destination": d.destination,
+                "destination_city": d.destination_city,
+                "destination_country": d.destination_country,
+                "departure_date": d.departure_date,
+                "return_date": d.return_date,
+                "price": d.price,
+                "typical_price": d.typical_price,
+                "discount_pct": d.discount_pct,
+                "airlines": d.airlines,
+                "airline_names": d.airline_names,
+                "duration_minutes": d.duration_minutes,
+                "stops": d.stops,
+                "trip_days": d.trip_days,
+                "destination_region": d.destination_region.value if d.destination_region else None,
+                "fingerprint": d.fingerprint,
+                "booking_url": d.booking_url,
+                # Query context: downstream consumers need these to
+                # reproduce search_deal(d) faithfully (same cabin /
+                # passenger count / basic-economy inclusion).
+                "query_cabin": d.query_cabin,
+                "query_adults": d.query_adults,
+                "query_include_basic_economy": d.query_include_basic_economy,
+            }
+            for i, d in enumerate(deals, 1)
+        ],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_deals_csv(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals as CSV to stdout."""
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+
+    # CSV-injection guard: matches format_price_csv. See the long-form
+    # comment there for the rationale (formula execution on open in
+    # Excel/Sheets/LibreOffice when a cell starts with =, +, -, @, \t, \r).
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value) -> str:
+        if value is None or value == "":
+            return ""
+        s = str(value)
+        if s.startswith(_DANGEROUS_PREFIXES):
+            return "'" + s
+        return s
+
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "origin", "destination", "destination_city", "destination_country",
+        "destination_region",
+        "departure_date", "return_date", "price", "typical_price",
+        "discount_pct", "airlines", "airline_names",
+        "duration_minutes", "stops", "trip_days", "fingerprint",
+    ])
+    for d in deals:
+        writer.writerow([
+            _s(d.origin), _s(d.destination), _s(d.destination_city), _s(d.destination_country),
+            d.destination_region.value if d.destination_region else "",
+            _s(d.departure_date), _s(d.return_date or ""), d.price,
+            d.typical_price or "", d.discount_pct or "",
+            _s("|".join(d.airlines)), _s("|".join(d.airline_names)),
+            d.duration_minutes or "", d.stops, d.trip_days or "", d.fingerprint,
+        ])
+
+
+def format_deals_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render deals in compact one-line-per-deal format to stdout."""
+    deals = list(result.deals[:limit]) if limit else list(result.deals)
+    currency = result.currency
+    for i, d in enumerate(deals, 1):
+        price_str = _format_price(d.price, currency)
+        savings = f"  {d.discount_pct}% off" if d.discount_pct else ""
+        if d.stops is None:
+            stops = "?"
+        elif d.stops == 0:
+            stops = "Nonstop"
+        else:
+            stops = f"{d.stops} stop{'s' if d.stops != 1 else ''}"
+        dates = _deals_date_range(d)
+        airline_label = ", ".join(d.airline_names) or ", ".join(d.airlines)
+        print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {airline_label}")

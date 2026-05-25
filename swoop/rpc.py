@@ -9,6 +9,7 @@ Based on reverse-engineering from punitarani/fli.
 from copy import deepcopy
 import json
 import logging
+import threading
 import urllib.parse
 from typing import Any, Optional
 
@@ -280,6 +281,13 @@ def _build_booking_f_req(
 
 _MAX_CLIENTS = 32
 _clients: dict[str, Any] = {}
+# Guards _clients mutation. _fetch_deals_per_origin (concurrent.futures
+# ThreadPoolExecutor) calls _get_client from up to 4 threads simultaneously;
+# without this lock the read-then-write on a cold key would race, two
+# threads would each construct a Client, and the eviction
+# `_clients.pop(next(iter(_clients)))` racing with another thread iterating
+# can raise RuntimeError.
+_clients_lock = threading.Lock()
 _default_country: Optional[str] = None
 _default_proxy: Optional[str] = None
 
@@ -344,22 +352,27 @@ def _get_client(proxy: Optional[str] = None, impersonate: Optional[str] = None) 
 
     Maintains separate Client instances per (proxy, impersonate) so that different
     proxy routes and fingerprint profiles don't interfere with each other.
+
+    Thread-safe: protected by `_clients_lock` so concurrent first-misses
+    from `_fetch_deals_per_origin`'s ThreadPoolExecutor don't race on
+    construction or eviction.
     """
     from primp import Client
 
     effective_proxy = proxy if proxy is not None else _default_proxy
     effective_impersonate = impersonate or "chrome"
     key = f"{effective_proxy or ''}|{effective_impersonate}"
-    if key not in _clients:
-        # Evict oldest entry if cache is full to prevent unbounded growth
-        # when callers rotate through many proxy URLs or impersonate profiles.
-        if len(_clients) >= _MAX_CLIENTS:
-            _clients.pop(next(iter(_clients)))
-        kwargs: dict[str, Any] = {"impersonate": effective_impersonate}
-        if effective_proxy:
-            kwargs["proxy"] = effective_proxy
-        _clients[key] = Client(**kwargs)
-    return _clients[key]
+    with _clients_lock:
+        if key not in _clients:
+            # Evict oldest entry if cache is full to prevent unbounded growth
+            # when callers rotate through many proxy URLs or impersonate profiles.
+            if len(_clients) >= _MAX_CLIENTS:
+                _clients.pop(next(iter(_clients)))
+            kwargs: dict[str, Any] = {"impersonate": effective_impersonate}
+            if effective_proxy:
+                kwargs["proxy"] = effective_proxy
+            _clients[key] = Client(**kwargs)
+        return _clients[key]
 
 
 def _apply_country(url: str, country: Optional[str]) -> str:
@@ -369,6 +382,46 @@ def _apply_country(url: str, country: Optional[str]) -> str:
         sep = "&" if "?" in url else "?"
         return f"{url}{sep}gl={effective.upper()}"
     return url
+
+
+def _post_with_retry(
+    client: Any,
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> Any:
+    """POST with exponential-backoff retry on HTTP 429.
+
+    Lower-level helper used by both :func:`_http_post` (which manages its
+    own client) and the deals fetch path (which manages its own client +
+    session). Lets both share one retry implementation.
+
+    Raises:
+        SwoopRateLimitError: If 429 persists after all retries.
+        SwoopHTTPError: If a non-200/non-429 response is received.
+    """
+    import random
+    import time
+
+    short_url = url.split("/")[-1]
+    for attempt in range(1 + transport.retries):
+        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+        if res.status_code == 200:
+            logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))
+            return res
+        if res.status_code == 429 and attempt < transport.retries:
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            logger.info(
+                "HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)",
+                short_url, delay, attempt + 1, transport.retries,
+            )
+            time.sleep(delay)
+            continue
+        if res.status_code == 429:
+            raise SwoopRateLimitError()
+        raise SwoopHTTPError(res.status_code)
 
 
 def _http_post(
@@ -391,26 +444,10 @@ def _http_post(
         SwoopRateLimitError: If 429 persists after all retries.
         SwoopHTTPError: If a non-200/non-429 response is received.
     """
-    import random
-    import time
-
     url = _apply_country(url, transport.country)
     client = _get_client(transport.proxy, transport.impersonate)
     headers = {"content-type": "application/x-www-form-urlencoded;charset=UTF-8"}
-
-    for attempt in range(1 + transport.retries):
-        res = client.post(url, content=content, headers=headers, timeout=transport.timeout)
-        if res.status_code == 200:
-            logger.debug("HTTP 200 from %s (%d bytes)", url.split("/")[-1], len(res.text))
-            return res
-        if res.status_code == 429 and attempt < transport.retries:
-            delay = (2 ** attempt) + random.uniform(0, 1)
-            logger.info("HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)", url.split("/")[-1], delay, attempt + 1, transport.retries)
-            time.sleep(delay)
-            continue
-        if res.status_code == 429:
-            raise SwoopRateLimitError()
-        raise SwoopHTTPError(res.status_code)
+    return _post_with_retry(client, url, content, headers, transport=transport)
 
 
 def search_raw(

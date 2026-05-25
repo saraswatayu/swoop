@@ -10,7 +10,7 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Passengers, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -41,6 +41,11 @@ class TestFrozenExports:
         "check_price",
         "price_selector",
         "price_legs",
+        "deals",
+        "search_deal",
+        "price_deal",
+        "watch_deals",
+        "diff_deals",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -49,6 +54,11 @@ class TestFrozenExports:
         "itinerary_matches_flight",
         # Types
         "CabinClass",
+        "Deal",
+        "DealsDiff",
+        "DealsResult",
+        "PriceChange",
+        "Region",
         "Passengers",
         "TransportConfig",
         "PriceResult",
@@ -283,6 +293,25 @@ class TestFrozenDataclassFields:
         expected = {"selector", "price", "currency", "legs"}
         assert self._field_names(TripOption) == expected
 
+    def test_deal_fields(self):
+        expected = {
+            "origin", "destination", "destination_city", "destination_country",
+            "departure_date", "return_date", "price", "typical_price",
+            "discount_pct", "airlines", "airline_names",
+            "duration_minutes", "stops", "trip_days", "destination_region",
+            "currency", "booking_url",
+            "query_cabin", "query_adults", "query_include_basic_economy",
+        }
+        assert self._field_names(Deal) == expected
+
+    def test_deals_result_fields(self):
+        expected = {"deals", "origin", "partial"}
+        assert self._field_names(DealsResult) == expected
+
+    def test_deals_result_currency_property(self):
+        dr = DealsResult()
+        assert dr.currency is None
+
 
 class TestSearchSignature:
     """Verify search() accepts the expected parameters."""
@@ -355,6 +384,22 @@ class TestSearchSignature:
         sig = inspect.signature(swoop.price_selector)
         param_names = list(sig.parameters.keys())
         expected = ["selector", "transport"]
+        assert param_names == expected
+
+    def test_deals_params(self):
+        sig = inspect.signature(swoop.deals)
+        param_names = list(sig.parameters.keys())
+        expected = [
+            "origin",
+            # Native RPC filters
+            "cabin", "max_stops", "airlines", "passengers", "include_basic_economy",
+            "per_origin",
+            # Client-side filters
+            "depart_window", "trip_length", "destinations", "exclude_destinations",
+            "region", "max_price", "min_discount_pct",
+            # Transport
+            "transport",
+        ]
         assert param_names == expected
 
 

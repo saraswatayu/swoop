@@ -37,9 +37,10 @@ from .decoder import (
     RawSearchResult,
     itinerary_matches_flight,
 )
+from ._regions import Region
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
-from .models import Passengers, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -61,7 +62,8 @@ from .rpc import (
 # ---------------------------------------------------------------------------
 
 import logging
-from typing import Optional
+import os
+from typing import Iterable, Optional
 
 from ._selection import (
     build_request_legs_from_selected,
@@ -584,6 +586,323 @@ def check_price(
     )
 
 
+# ---------------------------------------------------------------------------
+# Internal: parallel multi-origin fetch
+# ---------------------------------------------------------------------------
+
+
+def _fetch_deals_per_origin(
+    origins: list[str],
+    *,
+    cabin: CabinClass,
+    max_stops: Optional[int],
+    airlines: Optional[list[str]],
+    passengers: Passengers,
+    include_basic_economy: bool,
+    transport: TransportConfig,
+) -> DealsResult:
+    """Fetch deals for each origin in parallel, merge and dedupe by fingerprint."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from primp import Client
+    from ._deals import fetch_deals
+
+    by_fingerprint: dict[str, "Deal"] = {}
+
+    def _one(origin_code: str) -> DealsResult:
+        # Construct a fresh primp.Client per worker so each thread has
+        # its own cookie jar. Without this, all workers share one Client
+        # via _get_client and the concurrent _establish_session GETs
+        # interleave-overwrite Google's session cookies mid-flight,
+        # leading to mismatched-session POSTs and transient empty deals.
+        kwargs: dict = {"impersonate": transport.impersonate or "chrome"}
+        if transport.proxy:
+            kwargs["proxy"] = transport.proxy
+        worker_client = Client(**kwargs)
+        return fetch_deals(
+            origin_code,
+            cabin=cabin,
+            max_stops=max_stops,
+            airlines=airlines,
+            passengers=passengers,
+            include_basic_economy=include_basic_economy,
+            transport=transport,
+            _client=worker_client,
+        )
+
+    # Modest concurrency to avoid triggering upstream rate-limits when the
+    # user passes many origins.
+    max_workers = min(len(origins), 4)
+    failed_origins = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_one, o) for o in origins]
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception as exc:
+                failed_origins += 1
+                logger.warning("per-origin deals fetch failed for one origin: %s", exc)
+                continue
+            # A 0-deal response is NOT counted as a failure: an obscure or
+            # off-season origin can legitimately return zero deals every run.
+            # Loud failures (anti-bot/HTML) now raise SwoopParseError from
+            # the parser (commit dabbfd7), which is caught above. Treating
+            # 0-deal as a transient blip would make small-airport queries
+            # permanently partial=True and break the watcher.
+            for deal in r.deals:
+                fp = deal.fingerprint
+                existing = by_fingerprint.get(fp)
+                # Keep cheaper when same fingerprint — same trip, different
+                # PoS or carrier-class rounding can produce nominal duplicates.
+                if existing is None or deal.price < existing.price:
+                    by_fingerprint[fp] = deal
+
+    # Sort by discount_pct desc (best deals first), then price asc as tiebreak.
+    merged = sorted(
+        by_fingerprint.values(),
+        key=lambda d: (-(d.discount_pct or 0), d.price),
+    )
+    return DealsResult(
+        deals=merged,
+        origin=",".join(origins),
+        partial=failed_origins > 0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Deal bridges — connect deals discovery into search/price flows.
+# ---------------------------------------------------------------------------
+
+
+def watch_deals(
+    current_result: DealsResult,
+    *,
+    cache_path: str | os.PathLike,
+    allow_empty: bool = False,
+) -> DealsDiff:
+    """One iteration of the deals watcher: load prior snapshot, diff, save current.
+
+    See :mod:`swoop._deals_watch` for details. Re-exported here for
+    discoverability — most callers will use this directly.
+    """
+    from ._deals_watch import watch_deals as _watch
+    return _watch(current_result, cache_path=cache_path, allow_empty=allow_empty)
+
+
+def diff_deals(
+    prior: Iterable[Deal], current: Iterable[Deal]
+) -> DealsDiff:
+    """Compute the diff between two iterables of :class:`Deal`."""
+    from ._deals_watch import diff_deals as _diff
+    return _diff(prior, current)
+
+
+def search_deal(
+    deal: "Deal",
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> SearchResult:
+    """Resolve a :class:`Deal` to the actual itineraries that match.
+
+    The deals endpoint surfaces the price and dates but not the specific
+    flight options. ``search_deal`` runs a :func:`search` constrained to
+    the deal's route, dates, and carriers and returns the matching
+    :class:`SearchResult`.
+
+    Args:
+        deal: A :class:`Deal` from :func:`deals`.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`SearchResult` with itineraries that match the deal.
+    """
+    return search(transport=transport, **deal.to_search_kwargs())
+
+
+def price_deal(
+    deal: "Deal",
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> Optional[PriceResult]:
+    """Get the current bookable price for a :class:`Deal`.
+
+    Runs :func:`search_deal` and prices the cheapest matching itinerary
+    via :func:`price_selector`. Returns ``None`` if no itineraries match
+    (the deal may have expired or its carriers may no longer operate
+    the route on those dates).
+
+    Args:
+        deal: A :class:`Deal` from :func:`deals`.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`PriceResult`, or ``None`` if the deal can't be priced.
+    """
+    result = search_deal(deal, transport=transport)
+    if not result.results:
+        return None
+    # Cheapest itinerary first (the deal listed the cheapest known price).
+    cheapest = min(
+        result.results,
+        key=lambda opt: opt.price if opt.price is not None else float("inf"),
+    )
+    return price_selector(cheapest.selector, transport=transport)
+
+
+# ---------------------------------------------------------------------------
+# deals() — discover the best flight deals from an origin airport.
+# ---------------------------------------------------------------------------
+
+
+def deals(
+    origin: str | list[str],
+    *,
+    # Native RPC filters (passed to upstream)
+    cabin: CabinClass = "economy",
+    max_stops: Optional[int] = None,
+    airlines: Optional[list[str]] = None,
+    passengers: Passengers = Passengers(),
+    include_basic_economy: bool = False,
+    per_origin: bool = False,
+    # Client-side filters (applied to the 30 deals returned by the RPC)
+    depart_window: Optional[tuple[str, str]] = None,
+    trip_length: Optional[tuple[int, int]] = None,
+    destinations: Optional[list[str]] = None,
+    exclude_destinations: Optional[list[str]] = None,
+    region: Optional["Region"] = None,
+    max_price: Optional[int] = None,
+    min_discount_pct: Optional[int] = None,
+    # Transport
+    transport: TransportConfig = TransportConfig(),
+) -> DealsResult:
+    """Discover the best flight deals from an origin airport.
+
+    Returns up to 30 deals that Google Flights considers the best
+    value from the given origin. Each deal includes destination, dates,
+    price, and discount percentage.
+
+    Deals discovery is roundtrip-only — this is an upstream Google Flights
+    product constraint, not a swoop limitation. For one-way exploration,
+    use :func:`search` with an explicit destination.
+
+    Filters split into two groups by cost:
+
+    * **Native filters** go to the RPC and affect which 30 deals come back:
+      ``cabin``, ``max_stops``, ``airlines``, ``passengers``,
+      ``include_basic_economy``.
+    * **Client-side filters** apply in memory after the fetch and only
+      narrow the result: ``depart_window``, ``trip_length``, ``destinations``,
+      ``exclude_destinations``, ``region``, ``max_price``, ``min_discount_pct``.
+
+    Args:
+        origin: Origin airport IATA code (e.g. ``"JFK"``) or a list of codes
+            for multi-origin discovery (e.g. ``["JFK", "LGA", "EWR"]`` for NYC).
+        cabin: Cabin class (default ``"economy"``).
+        max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
+        airlines: Filter to specific airline IATA codes (e.g. ``["DL", "UA"]``).
+        passengers: Passenger counts (default ``Passengers()``).
+        include_basic_economy: When ``False`` (default), basic-economy fares
+            are excluded — matching :func:`search`'s default.
+        per_origin: Multi-origin behavior toggle. ``False`` (default) issues
+            one RPC call with all origins in the airport set — returns up to
+            30 deals split across origins (Google's "best deals from NYC"
+            view). ``True`` issues one parallel call per origin, returning up
+            to ``30 × N`` deals, deduped by Deal.fingerprint (cheaper wins).
+            Only meaningful when ``origin`` is a list.
+        depart_window: Inclusive (start, end) date range (``YYYY-MM-DD``) for the
+            outbound departure. Client-side; the upstream picks its own window.
+        trip_length: Inclusive (min_nights, max_nights) trip length filter.
+        destinations: Whitelist of destination IATA codes. Only deals to one
+            of these airports are returned.
+        exclude_destinations: Blacklist of destination IATA codes.
+        region: Limit to deals whose destination is in this :class:`Region`.
+            Requires ``airportsdata`` to be installed (optional dependency).
+        max_price: Maximum price per passenger in the response currency.
+        min_discount_pct: Minimum discount percentage. Deals without a known
+            discount are dropped.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`DealsResult` containing up to 30 :class:`Deal` objects
+        that passed every active filter.
+
+    Example::
+
+        from swoop import deals, Region
+
+        # All carriers
+        result = deals("JFK", cabin="business", max_stops=0)
+
+        # Delta-only deals to Europe under $700 with 5-10 day trips
+        result = deals(
+            "JFK", airlines=["DL"], region=Region.EUROPE,
+            max_price=700, trip_length=(5, 10),
+        )
+
+        # Only this summer
+        result = deals("JFK", depart_window=("2026-06-01", "2026-08-31"))
+    """
+    # Normalize + validate origins
+    if isinstance(origin, str):
+        origin_list = [origin]
+    else:
+        origin_list = list(origin)
+    if not origin_list:
+        raise ValueError("origin must be a non-empty string or list")
+    for idx, code in enumerate(origin_list):
+        validate_iata_code(code, f"origin[{idx}]" if len(origin_list) > 1 else "origin")
+    validate_cabin(cabin)
+    validate_adults(passengers.adults)
+    # Airlines codes are 2-letter (e.g. "DL"); no validation here — matches
+    # the search() pass-through approach. Bad codes simply return no deals.
+
+    from ._deals import fetch_deals
+    from ._deals_filter import filter_deals
+
+    if per_origin and len(origin_list) > 1:
+        result = _fetch_deals_per_origin(
+            origin_list,
+            cabin=cabin,
+            max_stops=max_stops,
+            airlines=airlines,
+            passengers=passengers,
+            include_basic_economy=include_basic_economy,
+            transport=transport,
+        )
+    else:
+        # Single string OR list as one RPC call (slot-0 native multi-origin).
+        result = fetch_deals(
+            origin_list[0] if len(origin_list) == 1 else origin_list,
+            cabin=cabin,
+            max_stops=max_stops,
+            airlines=airlines,
+            passengers=passengers,
+            include_basic_economy=include_basic_economy,
+            transport=transport,
+        )
+
+    # Apply client-side filters if any are set.
+    any_filter = any(v is not None for v in (
+        depart_window, trip_length, destinations, exclude_destinations,
+        region, max_price, min_discount_pct,
+    ))
+    if any_filter:
+        filtered = filter_deals(
+            result.deals,
+            depart_window=depart_window,
+            trip_length=trip_length,
+            destinations=destinations,
+            exclude_destinations=exclude_destinations,
+            region=region,
+            max_price=max_price,
+            min_discount_pct=min_discount_pct,
+        )
+        result = DealsResult(
+            deals=filtered, origin=result.origin, partial=result.partial,
+        )
+    return result
+
+
 __all__ = [
     # Functions
     "search",
@@ -591,6 +910,11 @@ __all__ = [
     "check_price",
     "price_selector",
     "price_legs",
+    "deals",
+    "search_deal",
+    "price_deal",
+    "watch_deals",
+    "diff_deals",
     "get_booking_results",
     "search_raw",
     "set_country",
@@ -599,6 +923,11 @@ __all__ = [
     "itinerary_matches_flight",
     # Types
     "CabinClass",
+    "Deal",
+    "DealsDiff",
+    "DealsResult",
+    "PriceChange",
+    "Region",
     "Passengers",
     "TransportConfig",
     "PriceResult",

@@ -800,3 +800,34 @@ def test_parse_rpc_response_null_and_decode(monkeypatch) -> None:
     monkeypatch.setattr(rpc, "decode_result", lambda value: {"decoded": value})
     good = ")]}'" + json.dumps([["wrb.fr", None, json.dumps({"k": "v"})]])
     assert rpc._parse_rpc_response(good) == {"decoded": {"k": "v"}}
+
+
+def test_get_client_thread_safe(monkeypatch) -> None:
+    """_get_client is called from ThreadPoolExecutor workers in
+    _fetch_deals_per_origin. Without the lock, concurrent first-misses
+    race the dict mutation and either drop a key or raise
+    RuntimeError: dictionary changed size during iteration. The lock
+    serializes the cache miss + eviction so callers always get the same
+    Client per key and the dict stays consistent."""
+    from concurrent.futures import ThreadPoolExecutor
+    # Clear the cache so all calls hit the construction path concurrently.
+    rpc._clients.clear()
+
+    instantiations: list[object] = []
+
+    class _FakeClient:
+        def __init__(self, **_kwargs):
+            instantiations.append(self)
+
+    monkeypatch.setattr("primp.Client", _FakeClient)
+
+    def _call():
+        return rpc._get_client(proxy=None, impersonate="chrome")
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(lambda _i: _call(), range(64)))
+
+    # All callers got the SAME instance (the lock-protected lookup
+    # ensures only one Client was actually constructed for the shared key).
+    assert len({id(r) for r in results}) == 1
+    assert len(instantiations) == 1

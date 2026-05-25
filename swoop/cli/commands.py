@@ -702,3 +702,183 @@ def price_cmd(
         format_price_brief(result, query_legs=query_legs)
     else:
         format_price_table(result, query_legs=query_legs, no_color=no_color)
+
+
+@click.command("deals")
+@click.argument("origin", type=str)
+@click.option("-c", "--cabin", type=click.Choice(CABIN_CHOICES, case_sensitive=False),
+              default="economy", show_default=True, help="Cabin class.")
+@click.option("-n", "--nonstop", is_flag=True, default=False, help="Nonstop flights only.")
+@click.option("--max-stops", type=click.IntRange(0, 2), default=None, help="Max stops (0, 1, or 2).")
+@click.option("-a", "--airline", "airlines", multiple=True,
+              help="Filter to specific airline IATA codes (e.g. -a DL -a UA). Repeatable.")
+@click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults.")
+@click.option("--per-origin", is_flag=True, default=False,
+              help="When origin is a comma-separated list, fetch each origin "
+                   "in parallel and merge (vs one RPC call with the airport set).")
+@click.option("--include-basic", is_flag=True, default=False,
+              help="Include basic-economy fares (default: excluded, matching `swoop search`).")
+@click.option("--depart-window", type=str, default=None,
+              help="Outbound depart window YYYY-MM-DD,YYYY-MM-DD (inclusive). Client-side filter.")
+@click.option("--trip-length", type=str, default=None,
+              help="Trip length range MIN-MAX nights (e.g. 5-10). Client-side filter.")
+@click.option("--destination", "dest_whitelist", multiple=True,
+              help="Whitelist destination IATA. Repeatable. Client-side filter.")
+@click.option("--exclude-destination", "dest_blacklist", multiple=True,
+              help="Exclude destination IATA. Repeatable. Client-side filter.")
+@click.option("--region", "region_name", type=click.Choice(
+    ["north-america", "caribbean", "latin-america", "europe", "africa", "middle-east", "asia-pacific"],
+    case_sensitive=False), default=None,
+    help="Limit to a region. Requires airportsdata. Client-side filter.")
+@click.option("--max-price", type=int, default=None,
+              help="Max price per passenger. Client-side filter.")
+@click.option("--min-discount", type=int, default=None,
+              help="Min discount percentage. Client-side filter.")
+@click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
+@click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
+@click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
+@click.option("-l", "--limit", type=int, default=None, help="Max deals to display.")
+@_output_options(["table", "json", "csv", "brief"])
+@click.pass_context
+def deals_cmd(
+    ctx, origin, cabin, nonstop, max_stops, airlines, passengers, per_origin,
+    include_basic,
+    depart_window, trip_length, dest_whitelist, dest_blacklist, region_name,
+    max_price, min_discount,
+    country, proxy, timeout, retries,
+    limit, output_format, no_color, quiet, verbose,
+):
+    """Discover the best flight deals from an airport.
+
+    \b
+    Examples:
+      swoop deals JFK
+      swoop deals JFK --nonstop --cabin business
+      swoop deals JFK -o json -q | jq '.deals[0]'
+    """
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+
+    from .formatters import (
+        format_deals_brief,
+        format_deals_csv,
+        format_deals_json,
+        format_deals_table,
+    )
+
+    import swoop
+
+    configure_verbose_logging(ctx, verbose)
+    quiet = resolve_quiet(quiet)
+    err = _err_console(no_color)
+
+    stops = max_stops
+    if nonstop:
+        stops = 0
+
+    pax = swoop.Passengers(adults=passengers)
+    transport = swoop.TransportConfig(
+        timeout=timeout, retries=retries, country=country, proxy=proxy,
+    )
+
+    # Multi-origin: comma-separated string → list of IATAs.
+    origin_arg: str | list[str]
+    if "," in origin:
+        origin_arg = [code.strip().upper() for code in origin.split(",") if code.strip()]
+    else:
+        origin_arg = origin.upper()
+
+    # Parse client-side filter inputs from their CLI shapes.
+    parsed_depart_window: Optional[tuple[str, str]] = None
+    if depart_window:
+        from datetime import date as _date
+        bits = [b.strip() for b in depart_window.split(",")]
+        if len(bits) != 2:
+            err.print("[red]Error: --depart-window must be START,END (YYYY-MM-DD,YYYY-MM-DD)[/red]")
+            ctx.exit(2)
+            return
+        try:
+            start = _date.fromisoformat(bits[0])
+            end = _date.fromisoformat(bits[1])
+        except ValueError as exc:
+            err.print(f"[red]Error: --depart-window dates must be ISO YYYY-MM-DD ({exc})[/red]")
+            ctx.exit(2)
+            return
+        if start > end:
+            err.print(f"[red]Error: --depart-window start ({bits[0]}) is after end ({bits[1]})[/red]")
+            ctx.exit(2)
+            return
+        parsed_depart_window = (bits[0], bits[1])
+    parsed_trip_length: Optional[tuple[int, int]] = None
+    if trip_length:
+        bits = trip_length.split("-")
+        try:
+            if len(bits) != 2:
+                raise ValueError("must have exactly two parts")
+            lo, hi = int(bits[0]), int(bits[1])
+        except (IndexError, ValueError):
+            err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
+            ctx.exit(2)
+            return
+        if not (0 <= lo <= hi <= 365):
+            err.print(f"[red]Error: --trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})[/red]")
+            ctx.exit(2)
+            return
+        parsed_trip_length = (lo, hi)
+    parsed_region: Optional[swoop.Region] = None
+    if region_name:
+        from swoop._regions import _airportsdata_available
+        if not _airportsdata_available():
+            err.print(
+                "[red]Error: --region requires the optional `airportsdata` "
+                "dependency.[/red] Install with: "
+                "[yellow]pip install airportsdata[/yellow] (or "
+                "[yellow]pip install swoop[validation][/yellow])."
+            )
+            ctx.exit(2)
+            return
+        parsed_region = swoop.Region(region_name.lower())
+
+    spinner = err.status("[bold]Searching deals...[/bold]") if (not quiet and output_format == "table") else nullcontext()
+    with spinner:
+        try:
+            result = swoop.deals(
+                origin_arg, cabin=cabin, max_stops=stops,
+                airlines=list(airlines) if airlines else None,
+                passengers=pax,
+                include_basic_economy=include_basic,
+                per_origin=per_origin,
+                depart_window=parsed_depart_window,
+                trip_length=parsed_trip_length,
+                destinations=list(dest_whitelist) if dest_whitelist else None,
+                exclude_destinations=list(dest_blacklist) if dest_blacklist else None,
+                region=parsed_region,
+                max_price=max_price,
+                min_discount_pct=min_discount,
+                transport=transport,
+            )
+        except ValueError as e:
+            err.print(f"[red]Error: {e}[/red]")
+            ctx.exit(2)
+        except SwoopRateLimitError:
+            err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+            ctx.exit(3)
+        except SwoopHTTPError as e:
+            err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
+            ctx.exit(3)
+        except SwoopParseError:
+            err.print("[red]Could not parse Google Flights response[/red]")
+            ctx.exit(4)
+
+    if not result.deals:
+        err.print(f"[yellow]No deals found from {origin}.[/yellow]")
+        ctx.exit(1)
+
+    if output_format == "table":
+        format_deals_table(result, cabin=cabin, no_color=no_color, limit=limit)
+    elif output_format == "json":
+        format_deals_json(result, cabin=cabin, limit=limit)
+    elif output_format == "csv":
+        format_deals_csv(result, limit=limit)
+    elif output_format == "brief":
+        format_deals_brief(result, limit=limit)

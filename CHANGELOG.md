@@ -9,9 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deals discovery API.** New `swoop.deals(origin, …)` and `swoop deals <ORIGIN>` CLI for finding the best flight deals from an airport (or set of airports). Returns up to 30 `Deal` objects with destination, dates, price, typical price, discount %, carriers, stops, duration, trip length, and a `destination_region`.
+- **Deal bridges.** `swoop.search_deal(deal)` resolves a deal to specific itineraries; `swoop.price_deal(deal)` prices the cheapest matching itinerary. `Deal.to_search_kwargs()` for direct integration. Closes the dead-end-Deal gap — a discovered deal can now flow into swoop's existing search/price pipeline.
+- **Filter surface (RPC-native).** `airlines`, `max_stops`, `cabin`, `passengers`, `include_basic_economy` (defaults to `False` to match `search()` — prevents the basic-economy footgun at $200-to-Lisbon prices).
+- **Filter surface (client-side).** `depart_window`, `trip_length`, `destinations`, `exclude_destinations`, `region`, `max_price`, `min_discount_pct`. Applied to the 30 deals the RPC returns; combinable with the native filters.
+- **Multi-origin support.** `origin` accepts `str` or `list[str]`. Default single-call mode uses the RPC's slot-0 airport set; `per_origin=True` issues parallel calls (capped at 4 workers), merges by `Deal.fingerprint`, keeps the cheaper variant on collision. CLI: `swoop deals JFK,LGA,EWR [--per-origin]`.
+- **Region scoping.** `swoop.Region` enum (`NORTH_AMERICA`, `CARIBBEAN`, `LATIN_AMERICA`, `EUROPE`, `AFRICA`, `MIDDLE_EAST`, `ASIA_PACIFIC`) backed by `airportsdata` for IATA→country→region. `Deal.destination_region` populated automatically when `airportsdata` is installed.
+- **Deals watcher.** `swoop.watch_deals(result, cache_path=…)` loads the prior snapshot, diffs, and persists current. `swoop.diff_deals(prior, current)` is the pure-function diff. New `DealsDiff` and `PriceChange` dataclasses surface `new`, `gone`, `price_changes`, and `unchanged`. `Deal.fingerprint` provides stable identity across runs (excludes price so drops surface as `price_changes`). `examples/deals_watcher.py` is the runnable analogue of `examples/price_drop_watcher.py`.
 - Seller fields on `BookingOption` parsed from `GetBookingResults`: `seller_name` (e.g. `"Mytrip"`, `"Qatar Airways"`), `seller_code` (e.g. `"ETRAVELI_Mytrip"`, `"QR"`), `booking_url` (the `google.com/travel/clk/f?u=…` redirect that opens the seller's page), `logo_url` (gstatic partner logo when Google provides `logo_code`), and `is_airline_direct` (`True` when the booking is direct with the operating carrier rather than an OTA).
 - `swoop price --json` now exposes the full `BookingOption` field set, including `fare_family`, `rebookability_signal`, and all five new seller fields.
 - Contract corpus tests now assert `seller_code`, `is_airline_direct`, and non-empty `booking_url` for every captured response, so a future Google reshape fails loudly.
+
+### Changed (deals — pre-release, no prior public release of these fields)
+
+- `Deal.airline_code: str` / `Deal.airline_name: str` replaced with `Deal.airlines: list[str]` / `Deal.airline_names: list[str]`. The upstream surfaces one primary carrier per deal today; the list shape is forward-compatible. The `*` sentinel for multi-airline deals is preserved as a single-element list — callers can detect and route on it.
+- `DealsResult.origin` accepts comma-joined values internally when `swoop.deals()` is called with a list of origins.
+
+### Notes (deals upstream behavior, verified by live probe)
+
+- Deals discovery is roundtrip-only — `trip_type=2` (oneway) is ignored by the upstream RPC; the server returns roundtrip-shaped deals regardless. swoop does not expose a `trip_type` parameter on `deals()`. For one-way exploration, use `search()` with an explicit destination.
+- The RPC ignores the dates passed in the payload and returns its own forward window (~4 months). `depart_window` is enforced client-side.
+- The RPC ignores time-of-day restrictions. Time-window filters are not exposed on `deals()`.
 
 ### Changed
 

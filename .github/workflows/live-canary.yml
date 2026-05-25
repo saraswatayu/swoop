@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install dependencies
-        run: pip install -e ".[validation,cli]" && pip install pytest hypothesis pytest-benchmark
+        run: make install-dev
       - name: Prepare artifact directory
         run: mkdir -p "$RUNNER_TEMP/swoop-live-artifacts"
       - name: Run live canary

@@ -20,8 +20,9 @@ offline suite. -->
 
 ## Public API impact
 
-<!-- If you touched a frozen dataclass (see CLAUDE.md's Frozen API Surface),
-check both boxes. Otherwise delete this section. -->
+_Only fill this in if you touched a frozen dataclass (see CLAUDE.md's
+Frozen API Surface). If this PR doesn't touch public API, **delete this
+whole section** so the checkboxes don't show as unchecked work._
 
 - [ ] Updated `tests/test_api_surface.py`
 - [ ] Added an entry under `## [Unreleased]` in `CHANGELOG.md`

@@ -1,9 +1,5 @@
 # Contributing to swoop
 
-Thanks for considering a contribution. swoop is a small library with a
-deliberately tight surface — most contributions land cleanly if they
-match the existing voice (terse, typed, zero unnecessary dependencies).
-
 ## Dev setup
 
 ```bash
@@ -15,11 +11,8 @@ make install-dev   # editable install with [validation,cli] + pytest, hypothesis
 If you don't have `make`, the equivalent is:
 
 ```bash
-pip install -e ".[validation,cli]"
-pip install pytest hypothesis pytest-benchmark
+pip install -e ".[validation,cli]" pytest hypothesis pytest-benchmark
 ```
-
-Run `make` (no target) to see every recipe.
 
 ## Running tests
 

@@ -20,9 +20,8 @@ assignees: ''
 
 ## Why this belongs in swoop
 
-<!-- Is it a Google Flights capability swoop doesn't expose yet? A missing
-field on a returned dataclass? Something most callers would need? If you can
-already do it today with a small wrapper, say so — it helps weigh inclusion. -->
+<!-- If you can already do this today with a small wrapper around swoop,
+say so — it helps weigh whether this belongs in the library or in caller code. -->
 
 ## Alternatives considered
 

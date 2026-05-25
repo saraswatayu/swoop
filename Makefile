@@ -8,8 +8,8 @@ help: ## Show this help
 install: ## Install swoop with extras (validation + cli)
 	pip install -e ".[validation,cli]"
 
-install-dev: install ## Install + test deps (pytest, hypothesis, pytest-benchmark)
-	pip install pytest hypothesis pytest-benchmark
+install-dev: ## Install swoop with extras + test deps (one pip resolve)
+	pip install -e ".[validation,cli]" pytest hypothesis pytest-benchmark
 
 test: ## Run offline test suite (skip live Google Flights tests)
 	python -m pytest tests/ -v -m "not live"
@@ -29,6 +29,5 @@ build: ## Build wheel and sdist
 	python -m build
 
 clean: ## Remove build artifacts and caches
-	rm -rf dist/ build/ *.egg-info/
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .pytest_cache -exec rm -rf {} +
+	rm -rf dist/ build/ .pytest_cache/ *.egg-info/
+	find swoop tests examples scripts -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

@@ -18,22 +18,13 @@ refactor).
 For live/RPC changes, note whether you ran `make test-live` or only the
 offline suite. -->
 
-```bash
-make check
-```
-
 ## Public API impact
 
-<!-- Did you add, rename, or remove anything on a public dataclass listed
-in CLAUDE.md's "Frozen API Surface" section (SearchResult, RawSearchResult,
-TripOption, TripLeg, PriceResult, BookingOption, Itinerary, Segment,
-Layover, Codeshare, CarbonEmissions)?
+<!-- If you touched a frozen dataclass (see CLAUDE.md's Frozen API Surface),
+check both boxes. Otherwise delete this section. -->
 
-If yes:
-- [ ] Updated `tests/test_api_surface.py` to reflect the new field set
-- [ ] Noted the change under `## [Unreleased]` in CHANGELOG.md
-
-If no, delete this section. -->
+- [ ] Updated `tests/test_api_surface.py`
+- [ ] Added an entry under `## [Unreleased]` in `CHANGELOG.md`
 
 ## Checklist
 

@@ -7,36 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-24
+
 ### Added
 
-- **Deals discovery API.** New `swoop.deals(origin, …)` and `swoop deals <ORIGIN>` CLI for finding the best flight deals from an airport (or set of airports). Returns up to 30 `Deal` objects with destination, dates, price, typical price, discount %, carriers, stops, duration, trip length, and a `destination_region`.
-- **Deal bridges.** `swoop.search_deal(deal)` resolves a deal to specific itineraries; `swoop.price_deal(deal)` prices the cheapest matching itinerary. `Deal.to_search_kwargs()` for direct integration. Closes the dead-end-Deal gap — a discovered deal can now flow into swoop's existing search/price pipeline.
-- **Filter surface (RPC-native).** `airlines`, `max_stops`, `cabin`, `passengers`, `include_basic_economy` (defaults to `False` to match `search()` — prevents the basic-economy footgun at $200-to-Lisbon prices).
-- **Filter surface (client-side).** `depart_window`, `trip_length`, `destinations`, `exclude_destinations`, `region`, `max_price`, `min_discount_pct`. Applied to the 30 deals the RPC returns; combinable with the native filters.
-- **Multi-origin support.** `origin` accepts `str` or `list[str]`. Default single-call mode uses the RPC's slot-0 airport set; `per_origin=True` issues parallel calls (capped at 4 workers), merges by `Deal.fingerprint`, keeps the cheaper variant on collision. CLI: `swoop deals JFK,LGA,EWR [--per-origin]`.
-- **Region scoping.** `swoop.Region` enum (`NORTH_AMERICA`, `CARIBBEAN`, `LATIN_AMERICA`, `EUROPE`, `AFRICA`, `MIDDLE_EAST`, `ASIA_PACIFIC`) backed by `airportsdata` for IATA→country→region. `Deal.destination_region` populated automatically when `airportsdata` is installed.
-- **Deals watcher.** `swoop.watch_deals(result, cache_path=…)` loads the prior snapshot, diffs, and persists current. `swoop.diff_deals(prior, current)` is the pure-function diff. New `DealsDiff` and `PriceChange` dataclasses surface `new`, `gone`, `price_changes`, and `unchanged`. `Deal.fingerprint` provides stable identity across runs (excludes price so drops surface as `price_changes`). `examples/deals_watcher.py` is the runnable analogue of `examples/price_drop_watcher.py`.
-- Seller fields on `BookingOption` parsed from `GetBookingResults`: `seller_name` (e.g. `"Mytrip"`, `"Qatar Airways"`), `seller_code` (e.g. `"ETRAVELI_Mytrip"`, `"QR"`), `booking_url` (the `google.com/travel/clk/f?u=…` redirect that opens the seller's page), `logo_url` (gstatic partner logo when Google provides `logo_code`), and `is_airline_direct` (`True` when the booking is direct with the operating carrier rather than an OTA).
-- `swoop price --json` now exposes the full `BookingOption` field set, including `fare_family`, `rebookability_signal`, and all five new seller fields.
-- Contract corpus tests now assert `seller_code`, `is_airline_direct`, and non-empty `booking_url` for every captured response, so a future Google reshape fails loudly.
+- **Deals discovery API** — `swoop.deals(origin, …)` and `swoop deals <ORIGIN>` CLI for finding the best flight deals from an airport (or set of airports). Returns up to 30 `Deal` objects with destination, dates, price, typical price, discount %, carriers, stops, duration, trip length, and `destination_region`.
+- **Deal bridges** — `swoop.search_deal(deal)` resolves a deal to specific itineraries; `swoop.price_deal(deal)` prices the cheapest matching itinerary. `Deal.to_search_kwargs()` for direct integration. A discovered deal now flows into swoop's existing search/price pipeline. `Deal` stores its query context (cabin, passengers) so the bridges forward those correctly.
+- **Filter surface (RPC-native)** — `airlines`, `max_stops`, `cabin`, `passengers`, `include_basic_economy` (defaults to `False` to match `search()` — prevents the basic-economy footgun at $200-to-Lisbon prices).
+- **Filter surface (client-side)** — `depart_window`, `trip_length`, `destinations`, `exclude_destinations`, `region`, `max_price`, `min_discount_pct`. Applied to the 30 deals the RPC returns; combinable with the native filters.
+- **Multi-origin support** — `origin` accepts `str` or `list[str]`. Default single-call mode uses the RPC's slot-0 airport set; `per_origin=True` issues parallel calls (capped at 4 workers, thread-safe `_get_client` with a per-worker `primp.Client`), merges by `Deal.fingerprint`, keeps the cheaper variant on collision. CLI: `swoop deals JFK,LGA,EWR [--per-origin]`. `DealsResult.origin` is comma-joined when multiple origins are passed. `DealsResult.partial=True` is set when at least one parallel call fails so callers can avoid persisting incomplete snapshots.
+- **Region scoping** — `swoop.Region` enum (`NORTH_AMERICA`, `CARIBBEAN`, `LATIN_AMERICA`, `EUROPE`, `AFRICA`, `MIDDLE_EAST`, `ASIA_PACIFIC`) backed by `airportsdata` for IATA→country→region. `Deal.destination_region` populated automatically when `airportsdata` is installed. CLI `--region` warns once if `airportsdata` is missing.
+- **Deals watcher** — `swoop.watch_deals(result, cache_path=…)` loads the prior snapshot, diffs, and persists current. `swoop.diff_deals(prior, current)` is the pure-function diff. New `DealsDiff` and `PriceChange` dataclasses surface `new`, `gone`, `price_changes`, and `unchanged`. `Deal.fingerprint` provides stable identity across runs (includes query context, excludes price so drops surface as `price_changes`). Snapshot cache is schema v2. `examples/deals_watcher.py` is the runnable analogue of `examples/price_drop_watcher.py`. The watcher refuses to overwrite the cache when results are partial or empty, and still surfaces the diff for the successful origins.
+- `Deal.airlines: list[str]` / `Deal.airline_names: list[str]` even for single-carrier deals. The `*` sentinel for multi-airline deals is preserved as a single-element list — callers can detect and route on it.
+- **BookingOption seller fields** — `seller_name` (e.g. `"Mytrip"`, `"Qatar Airways"`), `seller_code` (e.g. `"ETRAVELI_Mytrip"`, `"QR"`), `booking_url` (the `google.com/travel/clk/f?u=…` redirect that opens the seller's page), `logo_url` (gstatic partner logo when Google provides `logo_code`), and `is_airline_direct` (`True` when the booking is direct with the operating carrier rather than an OTA). Parsed from `GetBookingResults`.
+- `swoop price --json` exposes the full `BookingOption` field set, including `fare_family`, `rebookability_signal`, and all five new seller fields.
+- `swoop price --csv` — CSV output for price lookups, including `logo_url` and lowercase boolean fields.
+- `--verbose` / `-v` CLI flag surfaces RPC debug logging (scoped to the Click invocation, never persists globally).
+- Auto-detects non-TTY stdout and runs quietly so output pipes cleanly into other tools.
+- CSV formula-injection escape — values starting with `=`, `+`, `-`, `@`, `\t`, `\r` are prefixed with `'` to neutralize Excel/Sheets formula execution. Applies to `swoop search --csv`, `swoop price --csv`, and `swoop deals --csv`.
+- CLI validates `--depart-window` and `--trip-length` ranges with a clear error on the offending value.
+- `swoop --version` now reports `swoop.__version__` (was stale).
+- Shell completion documented in the README.
+- Contract corpus tests assert `seller_code`, `is_airline_direct`, and non-empty `booking_url` for every captured response, so a future Google reshape fails loudly.
+- New runnable scripts in `examples/`: `deals_watcher.py` (paired with the existing `price_drop_watcher.py` and `multi_city_finder.py`).
+- `MIGRATION.md` covering 0.3 → 0.4 and 0.4 → 0.5.
+- `SECURITY.md` documenting the threat model and disclosure policy.
+- `PyPI` homepage points to the landing page; additional project URLs added.
 
-### Changed (deals — pre-release, no prior public release of these fields)
+### Changed
 
-- `Deal.airline_code: str` / `Deal.airline_name: str` replaced with `Deal.airlines: list[str]` / `Deal.airline_names: list[str]`. The upstream surfaces one primary carrier per deal today; the list shape is forward-compatible. The `*` sentinel for multi-airline deals is preserved as a single-element list — callers can detect and route on it.
-- `DealsResult.origin` accepts comma-joined values internally when `swoop.deals()` is called with a list of origins.
+- **One-way pricing now fetches `GetBookingResults`** and returns the cheapest eligible booking option price (with `booking_options` populated and `rpc_calls` incremented by 1), instead of short-circuiting to the search-result price. Affects `check_price`, `price_selector`, and `price_legs` for single-leg trips: `PriceResult.price` may differ from `Itinerary.price` and `PriceResult.booking_options` is no longer empty for one-ways. If the booking RPC fails or returns no eligible options, the search-result price is still used as a fallback. See MIGRATION.md for details.
+- `BookingOption.__repr__` surfaces both `seller_name` and `brand_label` together when both are present, and uses `repr()` on each so apostrophes and quotes no longer corrupt log output.
+- `_extract_seller` extracts the click URL (`opt[5]`) independently of the seller block (`opt[1]`); a missing seller no longer drops the booking URL.
+- `logo_url` is empty when Google omits `logo_code`. The previous behaviour silently constructed a logo URL from `seller_code` which 404s for OTA codes; callers that want the airline-direct fallback can construct it themselves via `{gstatic_base}/{seller_code}.png`.
+- Internal symbols are hidden from the public surface via PEP 562 `__dir__` instead of `globals().pop`; tab completion and `dir(swoop)` now show only the documented API.
+
+### Fixed
+
+- `region_for_iata` no longer spends ~37 ms/call — `airportsdata.load()` is now cached. Material speedup for batch deal annotation.
+- `_deals_date_range` no longer crashes on malformed input or on Windows.
+- `_dict_to_deal` hardened against null fields and string-bool coercion from older cache snapshots.
+- `filter_deals` raises `ValueError` on a malformed `depart_window` rather than silently returning empty.
+- `Deal.stops` is `Optional[int]`; the CLI renders unknown as `?` instead of crashing.
+- `DealsDiff` and `PriceChange` are no longer `frozen=True` — the prior config produced a broken hash.
+- Detect HTML/CAPTCHA responses in the deals streaming parser and raise a typed error instead of a confusing decode crash.
+- Validate `booking_path` prefix before constructing booking URLs.
+- One-way booking-RPC failures are caught at `SwoopError` (broadened from a narrower class) so the search-price fallback always engages.
+- `format_deals_json` exposes the `partial` flag and per-`Deal` query context in the JSON output.
+- `examples/deals_watcher.py --once` skips the rate-limit sleep and guards against missing `airportsdata`.
+- `examples/price_drop_watcher.py --once` exits non-zero on fetch failure and is hardened against partial args and torn writes.
+- CLI verbose-logging lifetime is scoped to the Click context (no global handler leakage in long-running hosts).
 
 ### Notes (deals upstream behavior, verified by live probe)
 
 - Deals discovery is roundtrip-only — `trip_type=2` (oneway) is ignored by the upstream RPC; the server returns roundtrip-shaped deals regardless. swoop does not expose a `trip_type` parameter on `deals()`. For one-way exploration, use `search()` with an explicit destination.
 - The RPC ignores the dates passed in the payload and returns its own forward window (~4 months). `depart_window` is enforced client-side.
 - The RPC ignores time-of-day restrictions. Time-window filters are not exposed on `deals()`.
-
-### Changed
-
-- One-way pricing now fetches `GetBookingResults` and returns the cheapest eligible booking option price (with `booking_options` populated and `rpc_calls` incremented by 1), instead of short-circuiting to the search-result price. Affects `check_price`, `price_selector`, and `price_legs` for single-leg trips: `PriceResult.price` may differ from `Itinerary.price` and `PriceResult.booking_options` is no longer empty for one-ways. If the booking RPC fails or returns no eligible options, the search-result price is still used as a fallback.
-- `BookingOption.__repr__` now surfaces both `seller_name` and `brand_label` together when both are present, and uses `repr()` on each so apostrophes and quotes no longer corrupt log output.
-- `_extract_seller` extracts the click URL (`opt[5]`) independently of the seller block (`opt[1]`); a missing seller no longer drops the booking URL.
-- `logo_url` is empty when Google omits `logo_code`. The previous behaviour silently constructed a logo URL from `seller_code` which 404s for OTA codes; callers that want the airline-direct fallback can construct it themselves via `{gstatic_base}/{seller_code}.png`.
 
 ## [0.4.1] - 2026-04-01
 

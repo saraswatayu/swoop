@@ -2,7 +2,7 @@
 
 Upgrade notes for swoop. Each section shows the old call shape, the new one, and what (if anything) you have to change.
 
-## 0.4 → 0.5 (Unreleased)
+## 0.4 → 0.5
 
 ### What changed
 

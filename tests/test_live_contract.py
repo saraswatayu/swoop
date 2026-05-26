@@ -235,15 +235,18 @@ def _record_booking_artifacts(case_id: str, rpc_captures: list[dict[str, str]], 
             )
 
 
-def _find_bookable_itinerary(search_result: Any) -> Itinerary:
+def _bookable_candidates(search_result: Any, *, limit: int = 5) -> list[Itinerary]:
+    candidates: list[Itinerary] = []
     for option in search_result.results:
         for leg in option.legs:
             itinerary = leg.itinerary
             if itinerary is None:
                 continue
             if itinerary.booking_token and rpc._build_selected_legs(itinerary):
-                return itinerary
-    raise AssertionError("Expected at least one itinerary with booking token and selected legs")
+                candidates.append(itinerary)
+                if len(candidates) >= limit:
+                    return candidates
+    return candidates
 
 
 class TestShoppingContract:
@@ -317,16 +320,27 @@ class TestBookingContract:
         )
         assert search_result.results, "Expected at least one itinerary before live booking lookup"
 
-        itinerary = _find_bookable_itinerary(search_result)
+        candidates = _bookable_candidates(search_result)
+        assert candidates, "Expected at least one itinerary with booking token and selected legs"
+
         rpc_captures = _capture_rpc_texts(monkeypatch)
-        options = rpc.get_booking_results(
-            itinerary,
-            registry_version=date.today().isoformat(),
-            transport=TransportConfig(timeout=30, retries=1),
-        )
+        options: list[Any] = []
+        itinerary: Itinerary | None = None
+        for candidate in candidates:
+            options = rpc.get_booking_results(
+                candidate,
+                registry_version=date.today().isoformat(),
+                transport=TransportConfig(timeout=30, retries=1),
+            )
+            if options:
+                itinerary = candidate
+                break
 
         assert rpc_captures, "Expected a live booking RPC capture"
-        assert options, "Expected at least one booking option from live booking lookup"
+        assert options and itinerary is not None, (
+            f"Expected at least one booking option after trying {len(candidates)} "
+            "itineraries (upstream returned empty for every candidate)"
+        )
 
         for option in options[:5]:
             assert option.price > 0

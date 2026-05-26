@@ -621,11 +621,18 @@ def get_booking_results(
         transport=transport,
     )
 
-    return _parse_booking_rpc_response(
+    options = _parse_booking_rpc_response(
         res.text,
         registry_version=registry_version,
         required_keys=required_keys,
     )
+    if not options:
+        logger.warning(
+            "get_booking_results %s->%s on %s returned 0 options "
+            "(upstream RPC succeeded; token may be stale or itinerary unbookable)",
+            origin, destination, date,
+        )
+    return options
 
 
 def get_trip_booking_results(

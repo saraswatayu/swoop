@@ -14,8 +14,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -26,8 +26,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install build tools
@@ -55,8 +55,8 @@ jobs:
       id-token: write
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Install build tools
@@ -71,10 +71,12 @@ jobs:
         id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#swoop-v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           # Extract the section between this version's header and the next version header
           awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > release-notes.md
           cat release-notes.md
       - name: Create GitHub Release
-        run: gh release create "${{ github.ref_name }}" --notes-file release-notes.md
+        run: gh release create "${{ github.ref_name }}" --title "v${VERSION}" --notes-file release-notes.md
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.changelog.outputs.version }}

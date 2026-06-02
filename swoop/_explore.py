@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import urllib.parse
 from typing import Any, Optional
 
@@ -221,6 +222,49 @@ def _browser_params(page_html: str) -> dict[str, str]:
     return params
 
 
+# bl / f.sid are stable build/session identifiers, so cache them per
+# (proxy, impersonate, country) to avoid a full page GET on every explore()
+# call. Invalidated on a parse failure (a likely sign they went stale).
+_browser_params_cache: dict[str, dict[str, str]] = {}
+_browser_params_lock = threading.Lock()
+
+
+def _get_browser_params(
+    client: Any, page_url: str, *, key: str, transport: TransportConfig, force_refresh: bool = False
+) -> dict[str, str]:
+    """Return cached RPC session params, fetching the page on a miss/refresh."""
+    if not force_refresh:
+        with _browser_params_lock:
+            cached = _browser_params_cache.get(key)
+        if cached is not None:
+            return cached
+    page = client.get(
+        page_url,
+        headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
+        timeout=transport.timeout,
+    )
+    params = _browser_params(page.text)
+    with _browser_params_lock:
+        _browser_params_cache[key] = params
+    return params
+
+
+def _explore_rpc_url(rpc_url: str, params: dict[str, str]) -> str:
+    """Append the bl/f.sid session query to the RPC URL."""
+    if not params:
+        return rpc_url
+    query = urllib.parse.urlencode({
+        **params,
+        "hl": "en-US",
+        "soc-app": "162",
+        "soc-platform": "1",
+        "soc-device": "1",
+        "rt": "c",
+    })
+    separator = "&" if "?" in rpc_url else "?"
+    return f"{rpc_url}{separator}{query}"
+
+
 def fetch_explore(
     origin: str,
     *,
@@ -233,25 +277,8 @@ def fetch_explore(
     """Fetch Explore destination suggestions from Google Flights."""
     client = _get_client(transport.proxy, transport.impersonate)
     page_url = _apply_country(EXPLORE_PAGE_URL, transport.country)
-    rpc_url = _apply_country(EXPLORE_RPC_URL, transport.country)
-
-    page = client.get(
-        page_url,
-        headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
-        timeout=transport.timeout,
-    )
-    params = _browser_params(page.text)
-    if params:
-        query = urllib.parse.urlencode({
-            **params,
-            "hl": "en-US",
-            "soc-app": "162",
-            "soc-platform": "1",
-            "soc-device": "1",
-            "rt": "c",
-        })
-        separator = "&" if "?" in rpc_url else "?"
-        rpc_url = f"{rpc_url}{separator}{query}"
+    rpc_base = _apply_country(EXPLORE_RPC_URL, transport.country)
+    cache_key = f"{transport.proxy or ''}|{transport.impersonate or ''}|{transport.country or ''}"
 
     body = _encode_explore_f_req(
         _build_explore_payload(
@@ -263,8 +290,24 @@ def fetch_explore(
         "x-same-domain": "1",
         "referer": page_url,
     }
-    res = _post_with_retry(client, rpc_url, body, headers, transport=transport)
-    inner = _extract_inner(res.text)
-    return parse_explore_payload(
-        inner, origin=origin, cabin=cabin, adults=passengers.adults, one_way=one_way
-    )
+
+    # Cached bl/f.sid can go stale; on a parse failure, drop the cache and
+    # refetch the page once before giving up.
+    for attempt in range(2):
+        params = _get_browser_params(
+            client, page_url, key=cache_key, transport=transport, force_refresh=(attempt == 1)
+        )
+        rpc_url = _explore_rpc_url(rpc_base, params)
+        res = _post_with_retry(client, rpc_url, body, headers, transport=transport)
+        try:
+            inner = _extract_inner(res.text)
+        except SwoopParseError:
+            with _browser_params_lock:
+                _browser_params_cache.pop(cache_key, None)
+            if attempt == 0:
+                continue
+            raise
+        return parse_explore_payload(
+            inner, origin=origin, cabin=cabin, adults=passengers.adults, one_way=one_way
+        )
+    raise SwoopParseError("Explore response could not be parsed after a session refresh")

@@ -156,6 +156,7 @@ class TestParse:
 class TestFetchExplore:
     def test_end_to_end_mocked(self, monkeypatch):
         from swoop import _explore
+        _explore._browser_params_cache.clear()
 
         page_html = 'x"cfb2h":"BL123"y"FdrFJe":"SID123"z'
         body_text = (FIX / "jfk_response.txt").read_text()
@@ -181,6 +182,59 @@ class TestFetchExplore:
         assert len(result.destinations) > 0
         assert b"f.req=" in captured["body"]
         assert "bl=BL123" in captured["url"]
+
+    def test_browser_params_cached_across_calls(self, monkeypatch):
+        from swoop import _explore
+        _explore._browser_params_cache.clear()
+
+        page_html = 'x"cfb2h":"BL123"y"FdrFJe":"SID123"z'
+        body_text = (FIX / "jfk_response.txt").read_text()
+        gets = {"n": 0}
+
+        class FakeRes:
+            def __init__(self, text, status=200):
+                self.text, self.status_code = text, status
+
+        class FakeClient:
+            def get(self, url, **kw):
+                gets["n"] += 1
+                return FakeRes(page_html)
+
+            def post(self, url, content=None, **kw):
+                return FakeRes(body_text)
+
+        monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: FakeClient())
+        _explore.fetch_explore("JFK")
+        _explore.fetch_explore("LAX")
+        # bl/f.sid page fetched once, then reused on the second call.
+        assert gets["n"] == 1
+
+    def test_parse_failure_refetches_params_once(self, monkeypatch):
+        from swoop import _explore
+        _explore._browser_params_cache.clear()
+
+        page_html = 'x"cfb2h":"BL123"y"FdrFJe":"SID123"z'
+        good = (FIX / "jfk_response.txt").read_text()
+        state = {"gets": 0, "posts": 0}
+
+        class FakeRes:
+            def __init__(self, text, status=200):
+                self.text, self.status_code = text, status
+
+        class FakeClient:
+            def get(self, url, **kw):
+                state["gets"] += 1
+                return FakeRes(page_html)
+
+            def post(self, url, content=None, **kw):
+                state["posts"] += 1
+                # First POST is unparseable (stale session); second is valid.
+                return FakeRes("garbage-not-json" if state["posts"] == 1 else good)
+
+        monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: FakeClient())
+        result = _explore.fetch_explore("JFK")
+        assert len(result.destinations) > 0
+        assert state["gets"] == 2 and state["posts"] == 2
 
 
 class TestPublicExplore:

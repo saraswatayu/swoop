@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Destination discovery API** — `swoop.explore(origin, …)` and `swoop explore <ORIGIN>` CLI: swoop's fourth primitive, "where could I go from here?", via the `GetExploreDestinations` RPC. Returns `ExploreDestination` objects (name, country, coordinates, images, Google's suggested dates, flight duration), one-way or roundtrip.
+- **Explore bridge** — `swoop.price_explore(destination)` prices a chosen destination's cheapest itinerary via the existing search/price pipeline; `ExploreDestination.to_search_kwargs()` for direct integration. The Explore RPC returns no price (it is discovery, not pricing), so prices come from composition — mirroring `deals()` → `price_deal()`.
+- New `ExploreDestination` and `ExploreResult` dataclasses with frozen API-surface coverage. CLI supports table/JSON/CSV/brief output (CSV neutralizes spreadsheet formula prefixes) and the deals-style client-side filters `--destination`, `--exclude-destination`, `--region`, `--trip-length`, plus `--one-way`.
+
 ## [0.5.0] - 2026-05-24
 
 ### Added

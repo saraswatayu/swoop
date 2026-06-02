@@ -329,6 +329,36 @@ shows up as a `PriceChange` rather than a new+gone pair.
 > [!TIP]
 > Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
 
+### Destination discovery (explore)
+
+`explore()` is the fourth primitive. Where `search()` answers "what flights from
+A to B?", `check_price()` answers "how much for this exact flight?", and
+`deals()` answers "where's cheap right now?", `explore()` answers
+**"where could I go from here?"** — destination inspiration with images,
+coordinates, and Google's suggested dates, one-way or roundtrip.
+
+```python
+from swoop import explore, price_explore
+
+# Destinations you could fly to from JFK (roundtrip; one_way=True for one-way)
+result = explore("JFK")
+for d in result.destinations[:5]:
+    print(f"{d.destination_name:20} {d.destination}  {d.departure_date}")
+
+# explore() is metadata-only (no price). Price a chosen destination on demand:
+priced = price_explore(result.destinations[0])
+if priced:
+    print(f"${priced.price}")
+```
+
+> [!NOTE]
+> The Explore RPC returns **no price** — it is a discovery/inspiration tool, not
+> a pricing one. Use `price_explore()` to price a chosen destination, or
+> `deals()` for priced bargains. It supports one-way and roundtrip; the result
+> set is geographic-scope-driven rather than a fixed count.
+
+CLI: `swoop explore JFK` (add `--one-way`, `--region europe`, `-o json -q | jq`).
+
 ### Runnable examples
 
 Real-world patterns are in [`examples/`](examples/):

@@ -937,7 +937,7 @@ def format_explore_table(
 ) -> None:
     """Render explore destinations as a Rich table to stdout."""
     console = _stdout_console(no_color=no_color)
-    dests = list(result.destinations[:limit])
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
 
     table = Table(title=f"Explore from {result.origin} ({cabin})", show_lines=False)
     table.add_column("#", style="dim", width=3)
@@ -950,7 +950,7 @@ def format_explore_table(
         name = d.destination_name
         if d.destination_country:
             name += f", {d.destination_country}"
-        drive = format_duration(d.drive_minutes) if d.drive_minutes else "—"
+        drive = format_duration(d.drive_minutes) if d.drive_minutes is not None else "—"
         table.add_row(str(i), name, d.destination or "—", _explore_date_range(d), drive)
 
     console.print(table)
@@ -963,7 +963,7 @@ def format_explore_json(
     limit: Optional[int] = None,
 ) -> None:
     """Render explore destinations as JSON to stdout."""
-    dests = list(result.destinations[:limit])
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
     output = {
         "query": {"origin": result.origin, "cabin": cabin},
         "origin": {
@@ -1001,7 +1001,7 @@ def format_explore_csv(
     limit: Optional[int] = None,
 ) -> None:
     """Render explore destinations as CSV to stdout."""
-    dests = list(result.destinations[:limit])
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
     _s = _csv_safe
     writer = csv.writer(sys.stdout)
     writer.writerow([
@@ -1026,9 +1026,9 @@ def format_explore_brief(
     limit: Optional[int] = None,
 ) -> None:
     """Render explore destinations in compact one-line-per-destination format."""
-    dests = list(result.destinations[:limit])
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
     for i, d in enumerate(dests, 1):
-        dur = format_duration(d.drive_minutes) if d.drive_minutes else ""
+        dur = format_duration(d.drive_minutes) if d.drive_minutes is not None else ""
         dates = _explore_date_range(d)
         code = d.destination or "???"
         print(f"{i:3d}  {code:4s}  {d.destination_name:<25s}  {dates:>16s}  {dur}")

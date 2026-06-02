@@ -631,3 +631,38 @@ class TestExploreCLI:
         out = self._run(["explore", "JFK", "-o", "brief", "-q", "-l", "3"])
         assert out.exit_code == 0
         assert len([ln for ln in out.output.splitlines() if ln.strip()]) == 3
+
+    def test_limit_zero_shows_all(self, monkeypatch):
+        # `-l 0` must show everything (matching `swoop deals -l 0`), not nothing.
+        import swoop
+        from swoop.models import ExploreResult, ExploreDestination
+
+        dests = [
+            ExploreDestination(
+                origin="JFK", destination=f"D{i:02d}", destination_name=f"City {i}",
+                destination_country="US", place_id=f"/m/{i}", departure_date="2026-07-02",
+            )
+            for i in range(5)
+        ]
+        monkeypatch.setattr(swoop, "explore", lambda *a, **k: ExploreResult(origin="JFK", destinations=dests))
+        out = self._run(["explore", "JFK", "-o", "brief", "-q", "-l", "0"])
+        assert out.exit_code == 0
+        assert len([ln for ln in out.output.splitlines() if ln.strip()]) == 5
+
+    def test_drive_minutes_zero_rendered(self):
+        # drive_minutes == 0 is a real value ("you're basically there"), not
+        # missing data — it must render as 0m, not be swallowed by a falsy check.
+        import contextlib
+        import io
+        from swoop.cli.formatters import format_explore_brief
+        from swoop.models import ExploreResult, ExploreDestination
+
+        res = ExploreResult(origin="JFK", destinations=[ExploreDestination(
+            origin="JFK", destination="BOS", destination_name="Boston",
+            destination_country="US", place_id="/m/x", departure_date="2026-07-02",
+            drive_minutes=0,
+        )])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            format_explore_brief(res)
+        assert "0m" in buf.getvalue()

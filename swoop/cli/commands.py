@@ -47,7 +47,7 @@ def _err_console(no_color: bool = False) -> Console:
     return Console(stderr=True, no_color=no_color)
 
 
-def _parse_trip_length(trip_length, *, err, ctx) -> Optional[tuple[int, int]]:
+def _parse_trip_length(trip_length, *, err, ctx: click.Context) -> Optional[tuple[int, int]]:
     """Parse a ``MIN-MAX`` nights range; ``ctx.exit(2)`` on malformed input.
 
     Shared by the deals and explore commands, which validate the
@@ -64,11 +64,9 @@ def _parse_trip_length(trip_length, *, err, ctx) -> Optional[tuple[int, int]]:
     except (IndexError, ValueError):
         err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
         ctx.exit(2)
-        return None
     if not (0 <= lo <= hi <= 365):
         err.print(f"[red]Error: --trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})[/red]")
         ctx.exit(2)
-        return None
     return (lo, hi)
 
 
@@ -963,7 +961,6 @@ def explore_cmd(
                 "dependency.[/red] Install with [yellow]pip install airportsdata[/yellow]."
             )
             ctx.exit(2)
-            return
         region_value = swoop.Region(region_name.lower())
 
     spinner = err.status("[bold]Exploring destinations...[/bold]") if (not quiet and output_format == "table") else nullcontext()
@@ -983,24 +980,19 @@ def explore_cmd(
         except ValueError as e:
             err.print(f"[red]Error: {e}[/red]")
             ctx.exit(2)
-            return
         except SwoopRateLimitError:
             err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
             ctx.exit(3)
-            return
         except SwoopHTTPError as e:
             err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
             ctx.exit(3)
-            return
         except SwoopParseError:
             err.print("[red]Could not parse Google Flights response[/red]")
             ctx.exit(4)
-            return
 
     if not result.destinations:
         err.print(f"[yellow]No destinations found from {origin}.[/yellow]")
         ctx.exit(1)
-        return
 
     if output_format == "table":
         format_explore_table(result, cabin=cabin, no_color=no_color, limit=limit)

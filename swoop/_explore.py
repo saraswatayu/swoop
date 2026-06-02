@@ -53,11 +53,6 @@ class _ExploreBlockedError(SwoopParseError):
     """
 
 
-def _origin_block(origin: str, flag: int = 0) -> list:
-    """Build the nested origin structure ``[[[code, flag]]]``."""
-    return [[[origin, flag]]]
-
-
 def _build_explore_payload(
     origin: str,
     *,
@@ -65,12 +60,13 @@ def _build_explore_payload(
     one_way: bool = False,
     max_stops: Optional[int] = None,
     passengers: Passengers = Passengers(),
-    origin_flag: int = 0,
 ) -> list[Any]:
     """Build the ``GetExploreDestinations`` ``f.req`` payload."""
     cabin_code = CABIN_CLASS_MAP.get(cabin, 1)
     stops_val = 0 if max_stops is None else max_stops + 1
-    ob = _origin_block(origin, origin_flag)
+    # Origin block: ``[[[code, flag]]]``. Flag is always 0 (IATA-origin form);
+    # the place_id + flag-4 worldwide form is a documented future enhancement.
+    ob = [[[origin, 0]]]
     trip_type = 2 if one_way else 1
     if one_way:
         segments = [[ob, [], None, stops_val]]

@@ -417,11 +417,13 @@ class ExploreDestination:
 
         Explore surfaces dates but not the actual itineraries; this rebuilds
         the search that produced this destination. Raises ``ValueError`` when
-        ``destination`` is missing (Google occasionally omits the airport
-        code), since a search needs a concrete destination.
+        ``destination`` or ``departure_date`` is missing (Google occasionally
+        omits either), since a search needs a concrete destination and date.
         """
         if not self.destination:
             raise ValueError("ExploreDestination has no destination airport to search")
+        if not self.departure_date:
+            raise ValueError("ExploreDestination has no departure date to search")
         kwargs: dict = {
             "origin": self.origin,
             "destination": self.destination,

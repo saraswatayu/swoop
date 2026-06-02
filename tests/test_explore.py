@@ -47,6 +47,12 @@ class TestToSearchKwargs:
         with pytest.raises(ValueError):
             _dest(destination=None).to_search_kwargs()
 
+    def test_missing_departure_date_raises(self):
+        # A dateless destination must fail loudly here, not crash deep in
+        # search()'s date validation.
+        with pytest.raises(ValueError, match="departure date"):
+            _dest(departure_date=None).to_search_kwargs()
+
 
 class TestBuildPayload:
     def test_roundtrip_has_two_segments(self):

@@ -812,7 +812,8 @@ def price_explore(
     Runs :func:`search` for the destination's route and Google-suggested dates,
     then prices the cheapest matching itinerary via :func:`price_selector`.
     Returns ``None`` if no itineraries match. Raises ``ValueError`` if the
-    destination has no airport code (Google occasionally omits it).
+    destination has no airport code or no departure date (Google occasionally
+    omits either).
 
     This bridges discovery to pricing, mirroring :func:`price_deal`. Note it
     prices the *suggested* dates; for the cheapest dates, use :func:`search`

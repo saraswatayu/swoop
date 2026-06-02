@@ -131,7 +131,7 @@ def _opt_int(value: Any) -> Optional[int]:
 
 
 def _parse_destination(
-    row: list[Any], *, origin: str, cabin: str, adults: int
+    row: list[Any], *, origin: str, cabin: str, adults: int, one_way: bool = False
 ) -> Optional[ExploreDestination]:
     place_id = _safe_get(row, [0])
     name = _safe_get(row, [2])
@@ -148,7 +148,10 @@ def _parse_destination(
         latitude=lat,
         longitude=lon,
         departure_date=_opt_str(_safe_get(row, [11])),
-        return_date=_opt_str(_safe_get(row, [12])),
+        # Enforce the one-way contract here rather than trusting the server to
+        # omit [12]: a one-way ExploreDestination must never carry a return
+        # date, or price_explore would silently price a roundtrip.
+        return_date=None if one_way else _opt_str(_safe_get(row, [12])),
         image_url=_opt_str(_safe_get(row, [3])),
         secondary_image_url=_opt_str(_safe_get(row, [7])),
         duration_minutes=_opt_int(_safe_get(row, [17])),
@@ -158,7 +161,8 @@ def _parse_destination(
 
 
 def parse_explore_payload(
-    inner: list[Any], *, origin: str, cabin: str = "economy", adults: int = 1
+    inner: list[Any], *, origin: str, cabin: str = "economy", adults: int = 1,
+    one_way: bool = False,
 ) -> ExploreResult:
     """Parse an Explore inner payload into public models."""
     raw = _safe_get(inner, [3, 0])
@@ -166,7 +170,9 @@ def parse_explore_payload(
     if isinstance(raw, list):
         for row in raw:
             if isinstance(row, list):
-                dest = _parse_destination(row, origin=origin, cabin=cabin, adults=adults)
+                dest = _parse_destination(
+                    row, origin=origin, cabin=cabin, adults=adults, one_way=one_way
+                )
                 if dest is not None:
                     destinations.append(dest)
     orow = _safe_get(inner, [6, 0])
@@ -239,4 +245,6 @@ def fetch_explore(
     }
     res = _post_with_retry(client, rpc_url, body, headers, transport=transport)
     inner = _extract_inner(res.text)
-    return parse_explore_payload(inner, origin=origin, cabin=cabin, adults=passengers.adults)
+    return parse_explore_payload(
+        inner, origin=origin, cabin=cabin, adults=passengers.adults, one_way=one_way
+    )

@@ -109,6 +109,17 @@ class TestParse:
         with pytest.raises(SwoopParseError):
             _extract_inner((FIX / "error_response.txt").read_text())
 
+    def test_oneway_drops_return_date_even_when_present(self):
+        from swoop._explore import _parse_destination
+        row: list = [None] * 18
+        row[0], row[2] = "/m/x", "Test City"
+        row[11], row[12], row[15] = "2026-07-02", "2026-07-10", "SFO"
+        # Roundtrip keeps [12]; one-way must null it regardless of the server.
+        rt = _parse_destination(row, origin="JFK", cabin="economy", adults=1, one_way=False)
+        ow = _parse_destination(row, origin="JFK", cabin="economy", adults=1, one_way=True)
+        assert rt is not None and rt.return_date == "2026-07-10"
+        assert ow is not None and ow.return_date is None
+
 
 class TestFetchExplore:
     def test_end_to_end_mocked(self, monkeypatch):

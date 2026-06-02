@@ -323,7 +323,8 @@ class TestFrozenDataclassFields:
             "place_id", "latitude", "longitude",
             "departure_date", "return_date",
             "image_url", "secondary_image_url", "drive_minutes",
-            "query_cabin", "query_adults",
+            "query_cabin", "query_adults", "query_children",
+            "query_infants_in_seat", "query_infants_on_lap", "query_max_stops",
         }
         assert self._field_names(ExploreDestination) == expected
 

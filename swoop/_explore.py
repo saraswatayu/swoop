@@ -162,19 +162,20 @@ def _opt_int(value: Any) -> Optional[int]:
 
 
 def _parse_destination(
-    row: list[Any], *, origin: str, cabin: str, adults: int, one_way: bool = False
+    row: list[Any], *, origin: str, cabin: str, adults: int,
+    children: int = 0, infants_in_seat: int = 0, infants_on_lap: int = 0,
+    max_stops: Optional[int] = None, one_way: bool = False,
 ) -> Optional[ExploreDestination]:
     place_id = _safe_get(row, [0])
     name = _safe_get(row, [2])
     if not isinstance(place_id, str) or not isinstance(name, str):
         return None
     lat, lon = _float_pair(_safe_get(row, [1]))
-    country = _safe_get(row, [4])
     return ExploreDestination(
         origin=origin,
         destination=_opt_str(_safe_get(row, [15])),
         destination_name=name,
-        destination_country=country if isinstance(country, str) else "",
+        destination_country=_opt_str(_safe_get(row, [4])) or "",
         place_id=place_id,
         latitude=lat,
         longitude=lon,
@@ -186,13 +187,20 @@ def _parse_destination(
         image_url=_opt_str(_safe_get(row, [3])),
         secondary_image_url=_opt_str(_safe_get(row, [7])),
         drive_minutes=_opt_int(_safe_get(row, [17])),
+        # Carry the discovery query context so price_explore re-prices the same
+        # product (cabin, full party, stop limit), not a default search.
         query_cabin=cabin,
         query_adults=adults,
+        query_children=children,
+        query_infants_in_seat=infants_in_seat,
+        query_infants_on_lap=infants_on_lap,
+        query_max_stops=max_stops,
     )
 
 
 def parse_explore_payload(
-    inner: list[Any], *, origin: str, cabin: str = "economy", adults: int = 1,
+    inner: list[Any], *, origin: str, cabin: str = "economy",
+    passengers: Passengers = Passengers(), max_stops: Optional[int] = None,
     one_way: bool = False,
 ) -> ExploreResult:
     """Parse an Explore inner payload into public models."""
@@ -202,7 +210,11 @@ def parse_explore_payload(
         for row in raw:
             if isinstance(row, list):
                 dest = _parse_destination(
-                    row, origin=origin, cabin=cabin, adults=adults, one_way=one_way
+                    row, origin=origin, cabin=cabin,
+                    adults=passengers.adults, children=passengers.children,
+                    infants_in_seat=passengers.infants_in_seat,
+                    infants_on_lap=passengers.infants_on_lap,
+                    max_stops=max_stops, one_way=one_way,
                 )
                 if dest is not None:
                     destinations.append(dest)
@@ -354,7 +366,8 @@ def fetch_explore(
         res = _post_with_retry(client, rpc_url, body, headers, transport=transport)
         inner = _extract_inner(res.text)
         return parse_explore_payload(
-            inner, origin=origin, cabin=cabin, adults=passengers.adults, one_way=one_way
+            inner, origin=origin, cabin=cabin, passengers=passengers,
+            max_stops=max_stops, one_way=one_way,
         )
 
     # Cached bl/f.sid can go stale. A stale-session rejection (a generic parse

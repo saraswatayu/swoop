@@ -412,14 +412,24 @@ class ExploreDestination:
     # suggestions; None for destinations Explore expects you to fly to. This is
     # NOT a flight duration — the Explore RPC does not return one.
     drive_minutes: Optional[int] = None
+    # Discovery query context, denormalized so price_explore/to_search_kwargs
+    # re-price the SAME product the user explored — not a default economy / 1
+    # adult / any-stops search. Mirrors Deal's query_* fields.
     query_cabin: Optional[str] = None
     query_adults: int = 1
+    query_children: int = 0
+    query_infants_in_seat: int = 0
+    query_infants_on_lap: int = 0
+    query_max_stops: Optional[int] = None
 
     def to_search_kwargs(self) -> dict:
         """Convert this destination into keyword args for :func:`swoop.search`.
 
         Explore surfaces dates but not the actual itineraries; this rebuilds
-        the search that produced this destination. Raises ``ValueError`` when
+        the search that produced this destination, carrying the discovery query
+        context (cabin, full passenger party, max_stops) forward so pricing
+        reflects the same product — e.g. a ``max_stops=0`` exploration prices a
+        nonstop, not a cheaper connection. Raises ``ValueError`` when
         ``destination`` or ``departure_date`` is missing (Google occasionally
         omits either), since a search needs a concrete destination and date.
         """
@@ -436,8 +446,16 @@ class ExploreDestination:
             kwargs["return_date"] = self.return_date
         if self.query_cabin:
             kwargs["cabin"] = self.query_cabin
-        if self.query_adults != 1:
-            kwargs["passengers"] = Passengers(adults=self.query_adults)
+        if self.query_max_stops is not None:
+            kwargs["max_stops"] = self.query_max_stops
+        pax = Passengers(
+            adults=self.query_adults,
+            children=self.query_children,
+            infants_in_seat=self.query_infants_in_seat,
+            infants_on_lap=self.query_infants_on_lap,
+        )
+        if pax != Passengers():
+            kwargs["passengers"] = pax
         return kwargs
 
     def __repr__(self) -> str:

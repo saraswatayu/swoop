@@ -44,6 +44,17 @@ class TestToSearchKwargs:
         assert kw["cabin"] == "business"
         assert kw["passengers"] == Passengers(adults=2)
 
+    def test_carries_max_stops_including_zero(self):
+        # max_stops=0 (nonstop) must survive — a falsy-but-meaningful value, so
+        # pricing a nonstop exploration can't fall back to a cheaper connection.
+        assert _dest(query_max_stops=0).to_search_kwargs()["max_stops"] == 0
+        # Unset stays absent (any-stops default).
+        assert "max_stops" not in _dest().to_search_kwargs()
+
+    def test_carries_full_passenger_party(self):
+        kw = _dest(query_adults=2, query_children=1, query_infants_on_lap=1).to_search_kwargs()
+        assert kw["passengers"] == Passengers(adults=2, children=1, infants_on_lap=1)
+
     def test_missing_destination_raises(self):
         with pytest.raises(ValueError):
             _dest(destination=None).to_search_kwargs()
@@ -151,6 +162,22 @@ class TestParse:
         ow = _parse_destination(row, origin="JFK", cabin="economy", adults=1, one_way=True)
         assert rt is not None and rt.return_date == "2026-07-10"
         assert ow is not None and ow.return_date is None
+
+    def test_parse_carries_query_context(self):
+        # The discovery cabin / party / stop limit must be denormalized onto each
+        # destination so price_explore re-prices the same product.
+        from swoop._explore import parse_explore_payload
+        row: list = [None] * 18
+        row[0], row[2], row[11], row[12], row[15] = "/m/x", "Test", "2026-07-02", "2026-07-10", "SFO"
+        inner = [None, None, None, [[row]]]
+        res = parse_explore_payload(
+            inner, origin="JFK", cabin="business",
+            passengers=Passengers(adults=2, children=1), max_stops=0,
+        )
+        d = res.destinations[0]
+        assert d.query_cabin == "business"
+        assert d.query_adults == 2 and d.query_children == 1
+        assert d.query_max_stops == 0
 
 
 class TestFetchExplore:

@@ -944,14 +944,14 @@ def format_explore_table(
     table.add_column("Destination", min_width=20)
     table.add_column("Airport", width=7)
     table.add_column("Dates", min_width=12)
-    table.add_column("Duration", justify="right")
+    table.add_column("Drive", justify="right")
 
     for i, d in enumerate(dests, 1):
         name = d.destination_name
         if d.destination_country:
             name += f", {d.destination_country}"
-        dur = format_duration(d.duration_minutes) if d.duration_minutes else "—"
-        table.add_row(str(i), name, d.destination or "—", _explore_date_range(d), dur)
+        drive = format_duration(d.drive_minutes) if d.drive_minutes else "—"
+        table.add_row(str(i), name, d.destination or "—", _explore_date_range(d), drive)
 
     console.print(table)
 
@@ -985,7 +985,7 @@ def format_explore_json(
                 "longitude": d.longitude,
                 "departure_date": d.departure_date,
                 "return_date": d.return_date,
-                "duration_minutes": d.duration_minutes,
+                "drive_minutes": d.drive_minutes,
                 "image_url": d.image_url,
                 "secondary_image_url": d.secondary_image_url,
             }
@@ -1007,7 +1007,7 @@ def format_explore_csv(
     writer.writerow([
         "origin", "destination", "destination_name", "destination_country",
         "place_id", "latitude", "longitude",
-        "departure_date", "return_date", "duration_minutes",
+        "departure_date", "return_date", "drive_minutes",
     ])
     for d in dests:
         writer.writerow([
@@ -1016,7 +1016,7 @@ def format_explore_csv(
             d.latitude if d.latitude is not None else "",
             d.longitude if d.longitude is not None else "",
             _s(d.departure_date or ""), _s(d.return_date or ""),
-            d.duration_minutes if d.duration_minutes is not None else "",
+            d.drive_minutes if d.drive_minutes is not None else "",
         ])
 
 
@@ -1028,7 +1028,7 @@ def format_explore_brief(
     """Render explore destinations in compact one-line-per-destination format."""
     dests = list(result.destinations[:limit])
     for i, d in enumerate(dests, 1):
-        dur = format_duration(d.duration_minutes) if d.duration_minutes else ""
+        dur = format_duration(d.drive_minutes) if d.drive_minutes else ""
         dates = _explore_date_range(d)
         code = d.destination or "???"
         print(f"{i:3d}  {code:4s}  {d.destination_name:<25s}  {dates:>16s}  {dur}")

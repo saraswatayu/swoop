@@ -321,7 +321,7 @@ class TestFrozenDataclassFields:
             "origin", "destination", "destination_name", "destination_country",
             "place_id", "latitude", "longitude",
             "departure_date", "return_date",
-            "image_url", "secondary_image_url", "duration_minutes",
+            "image_url", "secondary_image_url", "drive_minutes",
             "query_cabin", "query_adults",
         }
         assert self._field_names(ExploreDestination) == expected

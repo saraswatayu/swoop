@@ -11,7 +11,8 @@ Response row index map (verified live):
     [0]  place_id              [1]  [lat, lon]        [2]  display name
     [3]  image_url             [4]  country           [7]  secondary_image_url
     [11] departure_date        [12] return_date       [15] destination IATA
-    [17] duration_minutes
+    [17] drive_minutes (ground/drive time for nearby drivable destinations;
+         null for fly-to destinations — NOT a flight duration)
     origin metadata: ``inner[6][0]`` = [name, [lat, lon], place_id, IATA, ...]
 
 The origin block is ``[[[code, flag]]]``. The IATA + flag ``0`` form returns a
@@ -173,7 +174,7 @@ def _parse_destination(
         return_date=None if one_way else _opt_str(_safe_get(row, [12])),
         image_url=_opt_str(_safe_get(row, [3])),
         secondary_image_url=_opt_str(_safe_get(row, [7])),
-        duration_minutes=_opt_int(_safe_get(row, [17])),
+        drive_minutes=_opt_int(_safe_get(row, [17])),
         query_cabin=cabin,
         query_adults=adults,
     )

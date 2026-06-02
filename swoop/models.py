@@ -408,7 +408,10 @@ class ExploreDestination:
     return_date: Optional[str] = None
     image_url: Optional[str] = None
     secondary_image_url: Optional[str] = None
-    duration_minutes: Optional[int] = None
+    # Ground/drive time (minutes) from the origin metro for nearby drivable
+    # suggestions; None for destinations Explore expects you to fly to. This is
+    # NOT a flight duration — the Explore RPC does not return one.
+    drive_minutes: Optional[int] = None
     query_cabin: Optional[str] = None
     query_adults: int = 1
 

@@ -171,3 +171,55 @@ class TestPriceExplore:
 
         monkeypatch.setattr(swoop, "search", lambda **kw: SearchResult(results=[]))
         assert swoop.price_explore(_dest()) is None
+
+
+class TestExploreCLI:
+    def _run(self, args):
+        from click.testing import CliRunner
+        from swoop.cli import main
+        return CliRunner().invoke(main, args)
+
+    def test_help(self):
+        out = self._run(["explore", "--help"])
+        assert out.exit_code == 0
+        assert "explore" in out.output.lower()
+        assert "--one-way" in out.output
+
+    def test_bad_iata_rich_error(self):
+        out = self._run(["explore", "xx"])
+        assert out.exit_code == 2
+        # The rich IATA error (via the Click IATA type), not deals' weak one.
+        assert "3 uppercase letters" in out.output
+
+    def test_json_output(self, monkeypatch):
+        import swoop
+        from swoop.models import ExploreResult, ExploreDestination
+
+        monkeypatch.setattr(swoop, "explore", lambda *a, **k: ExploreResult(
+            origin="JFK",
+            destinations=[ExploreDestination(
+                origin="JFK", destination="SFO", destination_name="San Francisco",
+                destination_country="United States", place_id="/m/0d6lp",
+                departure_date="2026-07-02", return_date="2026-07-10",
+            )],
+        ))
+        out = self._run(["explore", "JFK", "-o", "json", "-q"])
+        assert out.exit_code == 0
+        assert '"destination": "SFO"' in out.output
+        assert '"total_destinations": 1' in out.output
+
+    def test_brief_limit(self, monkeypatch):
+        import swoop
+        from swoop.models import ExploreResult, ExploreDestination
+
+        dests = [
+            ExploreDestination(
+                origin="JFK", destination=f"D{i:02d}", destination_name=f"City {i}",
+                destination_country="US", place_id=f"/m/{i}", departure_date="2026-07-02",
+            )
+            for i in range(8)
+        ]
+        monkeypatch.setattr(swoop, "explore", lambda *a, **k: ExploreResult(origin="JFK", destinations=dests))
+        out = self._run(["explore", "JFK", "-o", "brief", "-q", "-l", "3"])
+        assert out.exit_code == 0
+        assert len([ln for ln in out.output.splitlines() if ln.strip()]) == 3

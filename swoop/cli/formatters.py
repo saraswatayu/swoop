@@ -917,3 +917,135 @@ def format_deals_brief(
         dates = _deals_date_range(d)
         airline_label = ", ".join(d.airline_names) or ", ".join(d.airlines)
         print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {airline_label}")
+
+
+# ---------------------------------------------------------------------------
+# Explore formatters
+# ---------------------------------------------------------------------------
+
+
+def _explore_date_range(d) -> str:
+    """Compact suggested-date range; just the departure for one-way."""
+    if not d.departure_date:
+        return "—"
+    dep = format_date_display(d.departure_date)
+    if d.return_date:
+        return f"{dep} – {format_date_display(d.return_date)}"
+    return dep
+
+
+def format_explore_table(
+    result,
+    *,
+    cabin: str = "economy",
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations as a Rich table to stdout."""
+    console = _stdout_console(no_color=no_color)
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+
+    table = Table(title=f"Explore from {result.origin} ({cabin})", show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Destination", min_width=20)
+    table.add_column("Airport", width=7)
+    table.add_column("Dates", min_width=12)
+    table.add_column("Duration", justify="right")
+
+    for i, d in enumerate(dests, 1):
+        name = d.destination_name
+        if d.destination_country:
+            name += f", {d.destination_country}"
+        dur = format_duration(d.duration_minutes) if d.duration_minutes else "—"
+        table.add_row(str(i), name, d.destination or "—", _explore_date_range(d), dur)
+
+    console.print(table)
+
+
+def format_explore_json(
+    result,
+    *,
+    cabin: str = "economy",
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations as JSON to stdout."""
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    output = {
+        "query": {"origin": result.origin, "cabin": cabin},
+        "origin": {
+            "code": result.origin,
+            "name": result.origin_name,
+            "place_id": result.origin_place_id,
+            "latitude": result.origin_latitude,
+            "longitude": result.origin_longitude,
+        },
+        "total_destinations": len(result.destinations),
+        "destinations": [
+            {
+                "index": i,
+                "destination": d.destination,
+                "destination_name": d.destination_name,
+                "destination_country": d.destination_country,
+                "place_id": d.place_id,
+                "latitude": d.latitude,
+                "longitude": d.longitude,
+                "departure_date": d.departure_date,
+                "return_date": d.return_date,
+                "duration_minutes": d.duration_minutes,
+                "image_url": d.image_url,
+                "secondary_image_url": d.secondary_image_url,
+            }
+            for i, d in enumerate(dests, 1)
+        ],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_explore_csv(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations as CSV to stdout."""
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+
+    # CSV-injection guard: matches format_deals_csv / format_price_csv.
+    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+    def _s(value) -> str:
+        if value is None or value == "":
+            return ""
+        s = str(value)
+        if s.startswith(_DANGEROUS_PREFIXES):
+            return "'" + s
+        return s
+
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "origin", "destination", "destination_name", "destination_country",
+        "place_id", "latitude", "longitude",
+        "departure_date", "return_date", "duration_minutes",
+    ])
+    for d in dests:
+        writer.writerow([
+            _s(d.origin), _s(d.destination or ""), _s(d.destination_name),
+            _s(d.destination_country), _s(d.place_id),
+            d.latitude if d.latitude is not None else "",
+            d.longitude if d.longitude is not None else "",
+            _s(d.departure_date or ""), _s(d.return_date or ""),
+            d.duration_minutes if d.duration_minutes is not None else "",
+        ])
+
+
+def format_explore_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations in compact one-line-per-destination format."""
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    for i, d in enumerate(dests, 1):
+        dur = format_duration(d.duration_minutes) if d.duration_minutes else ""
+        dates = _explore_date_range(d)
+        code = d.destination or "???"
+        print(f"{i:3d}  {code:4s}  {d.destination_name:<25s}  {dates:>16s}  {dur}")

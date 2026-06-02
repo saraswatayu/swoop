@@ -127,6 +127,19 @@ class TestParse:
         with pytest.raises(SwoopParseError):
             _extract_inner((FIX / "error_response.txt").read_text())
 
+    def test_extract_inner_handles_flat_array_framing(self):
+        from swoop._explore import _extract_inner, parse_explore_payload
+        # batchexecute has two framings; besides the length-prefixed lines the
+        # other fixtures use, Google can return a single flat JSON array of
+        # wrb.fr entries (the "primp" framing _deals documents). _extract_inner's
+        # per-line frame scan must parse that too, not silently return empty.
+        row: list = [None] * 16
+        row[0], row[2], row[15] = "/m/x", "Test", "SFO"
+        inner = json.dumps([None, None, None, [[row]]])
+        flat = json.dumps([["wrb.fr", None, inner], ["di", 42], ["af.httprm", 42]])
+        result = parse_explore_payload(_extract_inner(")]}'\n\n" + flat), origin="JFK")
+        assert [d.destination for d in result.destinations] == ["SFO"]
+
     def test_extract_inner_prefers_destination_chunk(self):
         from swoop._explore import _extract_inner, parse_explore_payload
         # First data line is garbled, second is a wrb.fr with an empty

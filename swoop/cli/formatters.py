@@ -41,6 +41,28 @@ def _stdout_console(**kwargs) -> Console:
     return Console(**kwargs)
 
 
+# CSV-injection guard: when Excel/Sheets/LibreOffice open a CSV and see a cell
+# beginning with `=`, `+`, `-`, `@`, tab, or CR, they treat it as a formula.
+# Google's RPC returns seller/brand/place strings that swoop passes through
+# opaquely; if any ever start with one of those characters, opening the CSV
+# could execute attacker-controlled content. Prefix with a single quote to
+# neuter the cell while keeping it human-readable after manual unquoting.
+_DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value) -> str:
+    """Neuter CSV formula-injection on a cell value; "" for None/empty.
+
+    Shared by the price/deals/explore CSV formatters.
+    """
+    if value is None or value == "":
+        return ""
+    s = str(value)
+    if s.startswith(_DANGEROUS_PREFIXES):
+        return "'" + s
+    return s
+
+
 # ---------------------------------------------------------------------------
 # Search formatters
 # ---------------------------------------------------------------------------
@@ -645,22 +667,7 @@ def format_price_csv(
     def _b(v: bool) -> str:
         return "true" if v else "false"
 
-    # CSV-injection guard: when Excel/Sheets/LibreOffice open a CSV and
-    # see a cell beginning with `=`, `+`, `-`, `@`, tab, or CR, they
-    # treat it as a formula. Google's RPC returns seller/brand strings
-    # that swoop passes through opaquely; if any of those ever start
-    # with one of those characters, opening the CSV could execute
-    # attacker-controlled content. Prefix with a single quote to neuter
-    # the cell while keeping it human-readable after manual unquoting.
-    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-    def _s(value: Optional[str]) -> str:
-        if not value:
-            return ""
-        if value.startswith(_DANGEROUS_PREFIXES):
-            return "'" + value
-        return value
-
+    _s = _csv_safe
     currency = result.currency or ""
     writer = csv.writer(sys.stdout)
     writer.writerow([
@@ -864,20 +871,7 @@ def format_deals_csv(
 ) -> None:
     """Render deals as CSV to stdout."""
     deals = list(result.deals[:limit]) if limit else list(result.deals)
-
-    # CSV-injection guard: matches format_price_csv. See the long-form
-    # comment there for the rationale (formula execution on open in
-    # Excel/Sheets/LibreOffice when a cell starts with =, +, -, @, \t, \r).
-    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-    def _s(value) -> str:
-        if value is None or value == "":
-            return ""
-        s = str(value)
-        if s.startswith(_DANGEROUS_PREFIXES):
-            return "'" + s
-        return s
-
+    _s = _csv_safe
     writer = csv.writer(sys.stdout)
     writer.writerow([
         "origin", "destination", "destination_city", "destination_country",
@@ -1008,18 +1002,7 @@ def format_explore_csv(
 ) -> None:
     """Render explore destinations as CSV to stdout."""
     dests = list(result.destinations[:limit]) if limit else list(result.destinations)
-
-    # CSV-injection guard: matches format_deals_csv / format_price_csv.
-    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-    def _s(value) -> str:
-        if value is None or value == "":
-            return ""
-        s = str(value)
-        if s.startswith(_DANGEROUS_PREFIXES):
-            return "'" + s
-        return s
-
+    _s = _csv_safe
     writer = csv.writer(sys.stdout)
     writer.writerow([
         "origin", "destination", "destination_name", "destination_country",

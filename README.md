@@ -485,6 +485,10 @@ All exceptions inherit from `SwoopError`. Catch `SwoopRateLimitError` for HTTP 4
 
 </details>
 
+## Roadmap
+
+swoop is flights-forward. Adjacent Google Travel surfaces (e.g. hotels) ship when there's demand and a maintainer — **[vote on what's next →](https://github.com/saraswatayu/swoop/issues?q=is%3Aissue+is%3Aopen+label%3Aroadmap+sort%3Areactions-%2B1-desc)**.
+
 ## Contributing
 
 Issues and pull requests welcome at [github.com/saraswatayu/swoop](https://github.com/saraswatayu/swoop/issues).

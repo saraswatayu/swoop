@@ -859,6 +859,47 @@ def price_explore(
     return _price_cheapest(result, transport)
 
 
+def price_explore_all(
+    destinations: list[ExploreDestination],
+    *,
+    max_workers: int = 8,
+    transport: TransportConfig = TransportConfig(),
+) -> list[Optional[PriceResult]]:
+    """Price many explore destinations concurrently.
+
+    Like calling :func:`price_explore` once per destination, but issues the
+    searches in parallel (each destination is independent) — turning a whole
+    explore page's worth of sequential round trips into one concurrent batch,
+    mirroring the threading :func:`deals` uses for multi-origin fetches.
+
+    Args:
+        destinations: Destinations from :func:`explore` to price.
+        max_workers: Maximum concurrent pricing requests (default ``8``).
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A list of ``Optional[PriceResult]`` the same length and order as
+        ``destinations``: a :class:`PriceResult` per destination, or ``None``
+        where it can't be priced (no matching itinerary, or the destination
+        lacks an airport code / departure date). Unlike :func:`price_explore`,
+        a dateless/airport-less destination yields ``None`` rather than raising,
+        so one bad entry never aborts the batch.
+    """
+    if not destinations:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _price(dest: ExploreDestination) -> Optional[PriceResult]:
+        try:
+            return price_explore(dest, transport=transport)
+        except ValueError:
+            return None
+
+    workers = max(1, min(max_workers, len(destinations)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(_price, destinations))
+
+
 # ---------------------------------------------------------------------------
 # deals() — discover the best flight deals from an origin airport.
 # ---------------------------------------------------------------------------
@@ -1027,6 +1068,7 @@ __all__ = [
     "diff_deals",
     "explore",
     "price_explore",
+    "price_explore_all",
     "get_booking_results",
     "search_raw",
     "set_country",

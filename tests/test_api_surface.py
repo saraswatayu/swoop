@@ -48,6 +48,7 @@ class TestFrozenExports:
         "diff_deals",
         "explore",
         "price_explore",
+        "price_explore_all",
         "get_booking_results",
         "search_raw",
         "set_country",

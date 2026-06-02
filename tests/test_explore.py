@@ -322,6 +322,30 @@ class TestPriceExplore:
         assert swoop.price_explore(_dest()) is None
 
 
+class TestPriceExploreAll:
+    def test_empty_returns_empty(self):
+        import swoop
+        assert swoop.price_explore_all([]) == []
+
+    def test_preserves_order_and_skips_unpriceable(self, monkeypatch):
+        import swoop
+
+        # Price by destination code to assert ordering; the dateless ORD entry
+        # raises ValueError in to_search_kwargs and must become None.
+        def fake_price_explore(dest, **kw):
+            if dest.departure_date is None:
+                dest.to_search_kwargs()  # raises ValueError
+            return f"price-{dest.destination}"
+
+        monkeypatch.setattr(swoop, "price_explore", fake_price_explore)
+        dests = [
+            _dest(destination="SFO"),
+            _dest(destination="ORD", departure_date=None),
+            _dest(destination="LAX"),
+        ]
+        assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
+
+
 class TestExploreCLI:
     def _run(self, args):
         from click.testing import CliRunner

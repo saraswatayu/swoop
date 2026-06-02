@@ -937,7 +937,7 @@ def format_explore_table(
 ) -> None:
     """Render explore destinations as a Rich table to stdout."""
     console = _stdout_console(no_color=no_color)
-    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    dests = list(result.destinations[:limit])
 
     table = Table(title=f"Explore from {result.origin} ({cabin})", show_lines=False)
     table.add_column("#", style="dim", width=3)
@@ -963,7 +963,7 @@ def format_explore_json(
     limit: Optional[int] = None,
 ) -> None:
     """Render explore destinations as JSON to stdout."""
-    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    dests = list(result.destinations[:limit])
     output = {
         "query": {"origin": result.origin, "cabin": cabin},
         "origin": {
@@ -1001,7 +1001,7 @@ def format_explore_csv(
     limit: Optional[int] = None,
 ) -> None:
     """Render explore destinations as CSV to stdout."""
-    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    dests = list(result.destinations[:limit])
     _s = _csv_safe
     writer = csv.writer(sys.stdout)
     writer.writerow([
@@ -1026,7 +1026,7 @@ def format_explore_brief(
     limit: Optional[int] = None,
 ) -> None:
     """Render explore destinations in compact one-line-per-destination format."""
-    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    dests = list(result.destinations[:limit])
     for i, d in enumerate(dests, 1):
         dur = format_duration(d.duration_minutes) if d.duration_minutes else ""
         dates = _explore_date_range(d)

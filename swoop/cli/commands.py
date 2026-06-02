@@ -933,8 +933,6 @@ def explore_cmd(
       swoop explore JFK --one-way --region europe
       swoop explore JFK -o json -q | jq '.destinations[0]'
     """
-    from datetime import date as _date
-
     from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 
     from .formatters import (
@@ -955,13 +953,6 @@ def explore_cmd(
     transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
 
     parsed_trip_length = _parse_trip_length(trip_length, err=err, ctx=ctx)
-    if one_way and parsed_trip_length is not None:
-        # Trip length is measured between departure and return, so it can't
-        # apply to one-way trips. Fail loudly instead of silently filtering
-        # every (return-date-less) destination away.
-        err.print("[red]Error: --trip-length is roundtrip-only; drop --one-way to use it.[/red]")
-        ctx.exit(2)
-        return
 
     region_value: Optional[swoop.Region] = None
     if region_name:
@@ -978,9 +969,16 @@ def explore_cmd(
     spinner = err.status("[bold]Exploring destinations...[/bold]") if (not quiet and output_format == "table") else nullcontext()
     with spinner:
         try:
+            # explore() applies the client-side discovery filters (and rejects
+            # --trip-length + --one-way) — the same logic library callers get.
             result = swoop.explore(
                 origin, cabin=cabin, one_way=one_way, max_stops=stops,
-                passengers=pax, transport=transport,
+                passengers=pax,
+                destinations=list(dest_whitelist) or None,
+                exclude_destinations=list(dest_blacklist) or None,
+                region=region_value,
+                trip_length=parsed_trip_length,
+                transport=transport,
             )
         except ValueError as e:
             err.print(f"[red]Error: {e}[/red]")
@@ -998,31 +996,6 @@ def explore_cmd(
             err.print("[red]Could not parse Google Flights response[/red]")
             ctx.exit(4)
             return
-
-    # Client-side discovery filters (explore() returns the full set).
-    dests = result.destinations
-    if dest_whitelist:
-        wl = {c.upper() for c in dest_whitelist}
-        dests = [d for d in dests if d.destination and d.destination.upper() in wl]
-    if dest_blacklist:
-        bl = {c.upper() for c in dest_blacklist}
-        dests = [d for d in dests if not (d.destination and d.destination.upper() in bl)]
-    if region_value is not None:
-        from swoop._regions import region_for_iata
-        dests = [d for d in dests if d.destination and region_for_iata(d.destination) == region_value]
-    if parsed_trip_length is not None:
-        lo, hi = parsed_trip_length
-
-        def _nights(d) -> Optional[int]:
-            if not (d.departure_date and d.return_date):
-                return None
-            try:
-                return (_date.fromisoformat(d.return_date) - _date.fromisoformat(d.departure_date)).days
-            except ValueError:
-                return None
-
-        dests = [d for d in dests if (n := _nights(d)) is not None and lo <= n <= hi]
-    result.destinations = dests
 
     if not result.destinations:
         err.print(f"[yellow]No destinations found from {origin}.[/yellow]")

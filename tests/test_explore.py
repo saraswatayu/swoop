@@ -199,6 +199,48 @@ class TestPublicExplore:
         with pytest.raises(ValueError):
             swoop.explore("JFK", max_stops=9)
 
+    def test_one_way_with_trip_length_raises(self):
+        import swoop
+        with pytest.raises(ValueError, match="roundtrip-only"):
+            swoop.explore("JFK", one_way=True, trip_length=(5, 10))
+
+    def test_filters_applied_to_result(self, monkeypatch):
+        import swoop
+        from swoop import _explore
+        from swoop.models import ExploreResult
+
+        full = ExploreResult(origin="JFK", destinations=[
+            _dest(destination="SFO"), _dest(destination="LAX"),
+        ])
+        monkeypatch.setattr(_explore, "fetch_explore", lambda *a, **k: full)
+        result = swoop.explore("JFK", destinations=["sfo"])
+        assert [d.destination for d in result.destinations] == ["SFO"]
+
+
+class TestExploreFilter:
+    def _dests(self):
+        return [
+            _dest(destination="SFO", departure_date="2026-07-02", return_date="2026-07-10"),  # 8 nights
+            _dest(destination="LAX", departure_date="2026-07-02", return_date="2026-07-05"),  # 3 nights
+            _dest(destination="ORD", departure_date="2026-07-02", return_date=None),          # no return
+        ]
+
+    def test_whitelist_case_insensitive(self):
+        from swoop._explore_filter import filter_explore
+        out = filter_explore(self._dests(), destinations=["sfo", "lax"])
+        assert {d.destination for d in out} == {"SFO", "LAX"}
+
+    def test_blacklist(self):
+        from swoop._explore_filter import filter_explore
+        out = filter_explore(self._dests(), exclude_destinations=["SFO"])
+        assert "SFO" not in {d.destination for d in out}
+
+    def test_trip_length_keeps_in_range_and_drops_dateless(self):
+        from swoop._explore_filter import filter_explore
+        out = filter_explore(self._dests(), trip_length=(5, 10))
+        # SFO (8 nights) kept; LAX (3 nights) and ORD (no return date) dropped.
+        assert {d.destination for d in out} == {"SFO"}
+
 
 class TestPriceExplore:
     def _fake_option(self, price, selector):

@@ -427,7 +427,9 @@ class TestSearchSignature:
         sig = inspect.signature(swoop.explore)
         param_names = list(sig.parameters.keys())
         expected = [
-            "origin", "cabin", "one_way", "max_stops", "passengers", "transport",
+            "origin", "cabin", "one_way", "max_stops", "passengers",
+            "destinations", "exclude_destinations", "region", "trip_length",
+            "transport",
         ]
         assert param_names == expected
 

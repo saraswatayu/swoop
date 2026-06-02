@@ -759,6 +759,11 @@ def explore(
     one_way: bool = False,
     max_stops: Optional[int] = None,
     passengers: Passengers = Passengers(),
+    # Client-side discovery filters (applied to the full set the RPC returns)
+    destinations: Optional[list[str]] = None,
+    exclude_destinations: Optional[list[str]] = None,
+    region: Optional["Region"] = None,
+    trip_length: Optional[tuple[int, int]] = None,
     transport: TransportConfig = TransportConfig(),
 ) -> ExploreResult:
     """Discover destinations you could fly to from an origin ("where could I go?").
@@ -773,6 +778,11 @@ def explore(
     while :func:`deals` is *bargain* discovery (cheap roundtrips, with prices);
     they answer the same question with different selection criteria.
 
+    The Explore RPC returns the full destination set; ``destinations``,
+    ``exclude_destinations``, ``region``, and ``trip_length`` narrow it
+    client-side, mirroring :func:`deals`'s filters so library callers get the
+    same filtering the CLI exposes.
+
     Args:
         origin: Origin airport IATA code (e.g. ``"JFK"``).
         cabin: Cabin class (default ``"economy"``).
@@ -780,19 +790,28 @@ def explore(
             one-way query, each destination's ``return_date`` is ``None``.
         max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
         passengers: Passenger counts (default ``Passengers()``).
+        destinations: Whitelist of destination IATA codes; only these are kept.
+        exclude_destinations: Blacklist of destination IATA codes.
+        region: Limit to destinations in this :class:`Region`. Requires the
+            optional ``airportsdata`` dependency (silently matches nothing
+            without it).
+        trip_length: Inclusive ``(min_nights, max_nights)`` filter. Roundtrip
+            only — combining it with ``one_way`` raises ``ValueError``.
         transport: HTTP transport configuration (default ``TransportConfig()``).
 
     Returns:
-        An :class:`ExploreResult` with the suggested destinations.
+        An :class:`ExploreResult` with the destinations that passed every filter.
     """
     validate_iata_code(origin, "origin")
     validate_cabin(cabin)
     validate_adults(passengers.adults)
     if max_stops is not None and not (0 <= max_stops <= 2):
         raise ValueError(f"max_stops must be 0, 1, or 2, got {max_stops!r}")
+    if one_way and trip_length is not None:
+        raise ValueError("trip_length is roundtrip-only; it cannot be combined with one_way")
     from ._explore import fetch_explore
 
-    return fetch_explore(
+    result = fetch_explore(
         origin,
         cabin=cabin,
         one_way=one_way,
@@ -800,6 +819,16 @@ def explore(
         passengers=passengers,
         transport=transport,
     )
+    if destinations or exclude_destinations or region is not None or trip_length is not None:
+        from ._explore_filter import filter_explore
+        result.destinations = filter_explore(
+            result.destinations,
+            destinations=destinations,
+            exclude_destinations=exclude_destinations,
+            region=region,
+            trip_length=trip_length,
+        )
+    return result
 
 
 def price_explore(

@@ -337,7 +337,7 @@ def search_cmd(
         ctx.exit(2)
 
     if has_leg:
-        for leg_origin, leg_destination, leg_date in leg:
+        for _leg_origin, _leg_destination, leg_date in leg:
             warning = check_past_date(leg_date)
             if warning:
                 err.print(f"[yellow]{warning}[/yellow]")

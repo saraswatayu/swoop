@@ -3,7 +3,7 @@
 import logging
 import re
 import sys
-from datetime import date as _date, datetime
+from datetime import date as _date
 from typing import Optional
 
 import click

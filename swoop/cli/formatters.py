@@ -36,11 +36,6 @@ def _format_price(price: Optional[int], currency: Optional[str] = None) -> str:
     return f"{_currency_symbol(currency)}{price:,}"
 
 
-def _stderr_console(**kwargs) -> Console:
-    """Console that writes to stderr (for non-data output)."""
-    return Console(stderr=True, **kwargs)
-
-
 def _stdout_console(**kwargs) -> Console:
     """Console that writes to stdout."""
     return Console(**kwargs)
@@ -129,44 +124,6 @@ def _trip_header(
     if date:
         trip += f" · {format_date_display(date)}"
     return trip
-
-
-def _trip_leg_line(leg) -> str:
-    itinerary = leg.itinerary
-    if itinerary is None:
-        return f"{leg.origin}->{leg.destination} ({leg.date})"
-    dep = _format_clock(itinerary.departure_time)
-    if dep is None and itinerary.segments:
-        dep = _format_clock(itinerary.segments[0].departure_time)
-    arr = _format_clock(itinerary.arrival_time)
-    if arr is None and itinerary.segments:
-        arr = _format_clock(itinerary.segments[-1].arrival_time)
-    has_overnight = any(getattr(seg, "overnight", False) for seg in itinerary.segments)
-    arr_suffix = "+1" if has_overnight else ""
-    duration = format_duration(itinerary.travel_time)
-    stops = itinerary.stop_count if itinerary.stop_count is not None else len(itinerary.layovers)
-    has_overnight_layover = any(getattr(lay, "is_overnight", False) for lay in itinerary.layovers)
-    stop_str = "Nonstop" if stops == 0 else f"{stops} stop{'s' if stops > 1 else ''}"
-    if has_overnight_layover:
-        stop_str += " (overnight)"
-    # Show legroom for nonstop flights with a single segment
-    legroom_str = ""
-    if stops == 0 and itinerary.segments and len(itinerary.segments) == 1:
-        lr = itinerary.segments[0].legroom
-        if lr:
-            legroom_str = f"  {lr}"
-    route = "->".join(
-        [segment.departure_airport_code for segment in itinerary.segments] +
-        ([itinerary.segments[-1].arrival_airport_code] if itinerary.segments else [])
-    )
-    return (
-        f"{_flight_summary(itinerary)}  {route or f'{leg.origin}->{leg.destination}'}  "
-        f"{dep or '?'}-{arr or '?'}{arr_suffix}  {duration}  {stop_str}{legroom_str}"
-    )
-
-
-def _trip_lines(option) -> list[str]:
-    return [f"Leg {index + 1}: {_trip_leg_line(leg)}" for index, leg in enumerate(option.legs)]
 
 
 def _trip_summary(option) -> str:

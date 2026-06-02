@@ -86,19 +86,6 @@ from .rpc import _normalize_rpc_leg
 logger = logging.getLogger(__name__)
 
 
-def _filter_by_flight_number(
-    result: Optional[RawSearchResult], carrier: Optional[str], number: str
-) -> Optional[RawSearchResult]:
-    """Filter a raw search result to only itineraries matching a flight number."""
-    if result is None:
-        return None
-    best = [it for it in result.best if itinerary_matches_flight(it, carrier, number)]
-    other = [it for it in result.other if itinerary_matches_flight(it, carrier, number)]
-    if not best and not other:
-        return None
-    return RawSearchResult(best=best, other=other, price_range=result.price_range)
-
-
 def _filter_trip_options_by_flight_number(
     result: SearchResult,
     carrier: Optional[str],

@@ -524,6 +524,28 @@ class TestPriceExploreAll:
         dests = [_dest(destination="SFO"), _dest(destination="ERR"), _dest(destination="LAX")]
         assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
 
+    def test_rate_limit_stops_dispatch_and_propagates(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopRateLimitError
+
+        # A 429 is batch-wide: it must propagate (so the caller backs off) and
+        # stop further dispatch instead of hammering the limiter with the rest.
+        calls = {"n": 0}
+
+        def fake(dest, **kw):
+            calls["n"] += 1
+            if dest.destination == "RL":
+                raise SwoopRateLimitError()
+            return f"price-{dest.destination}"
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="RL")] + [_dest(destination=f"D{i:02d}") for i in range(20)]
+        with pytest.raises(SwoopRateLimitError):
+            # One worker => strictly sequential, so the first item's 429
+            # short-circuits all 20 that follow.
+            swoop.price_explore_all(dests, max_workers=1)
+        assert calls["n"] == 1
+
 
 class TestExploreCLI:
     def _run(self, args):

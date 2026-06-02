@@ -862,7 +862,7 @@ def price_explore(
 def price_explore_all(
     destinations: list[ExploreDestination],
     *,
-    max_workers: int = 8,
+    max_workers: int = 4,
     transport: TransportConfig = TransportConfig(),
 ) -> list[Optional[PriceResult]]:
     """Price many explore destinations concurrently.
@@ -874,41 +874,60 @@ def price_explore_all(
 
     Args:
         destinations: Destinations from :func:`explore` to price.
-        max_workers: Maximum concurrent pricing requests (default ``8``).
+        max_workers: Maximum concurrent pricing requests (default ``4``,
+            matching :func:`deals`'s multi-origin cap — each pricing call is
+            itself several RPCs, so a higher fan-out invites Google's rate
+            limiter).
         transport: HTTP transport configuration (default ``TransportConfig()``).
 
     Returns:
         A list of ``Optional[PriceResult]`` the same length and order as
         ``destinations``: a :class:`PriceResult` per destination, or ``None``
-        where it can't be priced. A destination yields ``None`` rather than
-        propagating when it has no matching itinerary, lacks an airport code /
-        departure date (a ``ValueError`` from :func:`price_explore`), or hits a
-        transport/parse failure — so one bad entry never discards the rest of
-        the batch's results. Transport/parse failures (including rate limiting)
-        are logged at WARNING; for fail-fast behavior, call :func:`price_explore`
-        per destination instead.
+        where it can't be priced (no matching itinerary, a missing airport
+        code / departure date — a ``ValueError`` from :func:`price_explore` —
+        or a non-rate-limit transport/parse failure, which is logged at
+        WARNING). One bad entry never discards the rest of the batch.
+
+    Raises:
+        SwoopRateLimitError: If Google rate-limits the batch. The first 429
+            stops further dispatch — continuing would only deepen the block —
+            and propagates so the caller backs off and retries later, instead
+            of receiving a quietly-incomplete list of mostly ``None``.
     """
     if not destinations:
         return []
+    import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    def _price(dest: ExploreDestination) -> Optional[PriceResult]:
+    results: list[Optional[PriceResult]] = [None] * len(destinations)
+    rate_limited = threading.Event()
+
+    def _price(index: int, dest: ExploreDestination) -> None:
+        if rate_limited.is_set():
+            return  # a 429 already fired — don't pile more load onto the limiter
         try:
-            return price_explore(dest, transport=transport)
+            results[index] = price_explore(dest, transport=transport)
         except ValueError:
             # Missing airport code / departure date — a permanent, per-item
             # data gap. Skip it silently (expected).
-            return None
+            pass
+        except SwoopRateLimitError:
+            # A batch-wide condition, not a per-item gap: stop dispatching and
+            # surface it after the pool drains so the caller backs off.
+            rate_limited.set()
         except SwoopError as exc:
-            # A transport/parse failure on one destination must not sink the
-            # batch: pool.map() would otherwise re-raise and abandon every
-            # other (already-computed) result. Log so it isn't silent.
+            # A non-rate-limit transport/parse failure on one destination must
+            # not sink the batch: index assignment leaves the rest intact. Log
+            # so it isn't silent.
             logger.warning("price_explore_all: could not price %s: %s", dest.destination or "?", exc)
-            return None
 
     workers = max(1, min(max_workers, len(destinations)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(_price, destinations))
+        list(pool.map(lambda pair: _price(*pair), enumerate(destinations)))
+
+    if rate_limited.is_set():
+        raise SwoopRateLimitError()
+    return results
 
 
 # ---------------------------------------------------------------------------

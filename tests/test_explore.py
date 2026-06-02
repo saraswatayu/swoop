@@ -218,6 +218,13 @@ class TestExploreCLI:
         # The rich IATA error (via the Click IATA type), not deals' weak one.
         assert "3 uppercase letters" in out.output
 
+    def test_trip_length_with_one_way_rejected(self):
+        # Must fail fast with a clear message, not run the query and then
+        # report "No destinations found" after filtering everything out.
+        out = self._run(["explore", "JFK", "--one-way", "--trip-length", "5-10"])
+        assert out.exit_code == 2
+        assert "roundtrip-only" in out.output
+
     def test_json_output(self, monkeypatch):
         import swoop
         from swoop.models import ExploreResult, ExploreDestination

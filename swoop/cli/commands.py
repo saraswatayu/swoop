@@ -955,6 +955,13 @@ def explore_cmd(
     transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
 
     parsed_trip_length = _parse_trip_length(trip_length, err=err, ctx=ctx)
+    if one_way and parsed_trip_length is not None:
+        # Trip length is measured between departure and return, so it can't
+        # apply to one-way trips. Fail loudly instead of silently filtering
+        # every (return-date-less) destination away.
+        err.print("[red]Error: --trip-length is roundtrip-only; drop --one-way to use it.[/red]")
+        ctx.exit(2)
+        return
 
     region_value: Optional[swoop.Region] = None
     if region_name:

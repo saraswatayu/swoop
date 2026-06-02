@@ -880,10 +880,13 @@ def price_explore_all(
     Returns:
         A list of ``Optional[PriceResult]`` the same length and order as
         ``destinations``: a :class:`PriceResult` per destination, or ``None``
-        where it can't be priced (no matching itinerary, or the destination
-        lacks an airport code / departure date). Unlike :func:`price_explore`,
-        a dateless/airport-less destination yields ``None`` rather than raising,
-        so one bad entry never aborts the batch.
+        where it can't be priced. A destination yields ``None`` rather than
+        propagating when it has no matching itinerary, lacks an airport code /
+        departure date (a ``ValueError`` from :func:`price_explore`), or hits a
+        transport/parse failure — so one bad entry never discards the rest of
+        the batch's results. Transport/parse failures (including rate limiting)
+        are logged at WARNING; for fail-fast behavior, call :func:`price_explore`
+        per destination instead.
     """
     if not destinations:
         return []
@@ -893,6 +896,14 @@ def price_explore_all(
         try:
             return price_explore(dest, transport=transport)
         except ValueError:
+            # Missing airport code / departure date — a permanent, per-item
+            # data gap. Skip it silently (expected).
+            return None
+        except SwoopError as exc:
+            # A transport/parse failure on one destination must not sink the
+            # batch: pool.map() would otherwise re-raise and abandon every
+            # other (already-computed) result. Log so it isn't silent.
+            logger.warning("price_explore_all: could not price %s: %s", dest.destination or "?", exc)
             return None
 
     workers = max(1, min(max_workers, len(destinations)))

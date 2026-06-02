@@ -1,5 +1,6 @@
 """Offline tests for the explore() endpoint."""
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -114,6 +115,31 @@ class TestParse:
         from swoop.exceptions import SwoopParseError
         with pytest.raises(SwoopParseError):
             _extract_inner((FIX / "error_response.txt").read_text())
+
+    def test_extract_inner_prefers_destination_chunk(self):
+        from swoop._explore import _extract_inner, parse_explore_payload
+        # First data line is garbled, second is a wrb.fr with an empty
+        # destination list, third carries the real destinations. Robust
+        # parsing must skip the first two and find the third.
+        empty_inner = json.dumps([None, None, None, [[]]])
+        row: list = [None] * 16
+        row[0], row[2], row[11], row[12], row[15] = "/m/x", "Test", "2026-07-02", "2026-07-10", "SFO"
+        real_inner = json.dumps([None, None, None, [[row]]])
+        text = (
+            ")]}'\n\n"
+            "5\n[[garbled\n"
+            f'99\n[["wrb.fr",null,{json.dumps(empty_inner)}]]\n'
+            f'99\n[["wrb.fr",null,{json.dumps(real_inner)}]]\n'
+        )
+        result = parse_explore_payload(_extract_inner(text), origin="JFK")
+        assert [d.destination for d in result.destinations] == ["SFO"]
+
+    def test_extract_inner_detects_mixed_case_consent(self):
+        from swoop._explore import _extract_inner
+        from swoop.exceptions import SwoopParseError
+        # A mixed-case consent host must still be flagged as a block.
+        with pytest.raises(SwoopParseError, match="consent page"):
+            _extract_inner(")]}'\n\nredirecting to Consent.Google.com now")
 
     def test_oneway_drops_return_date_even_when_present(self):
         from swoop._explore import _parse_destination

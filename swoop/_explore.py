@@ -86,25 +86,44 @@ def _encode_explore_f_req(payload: list[Any]) -> bytes:
 
 
 def _extract_inner(text: str) -> list[Any]:
-    """Unwrap the RPC framing to the inner destination payload."""
+    """Unwrap the RPC framing to the inner destination payload.
+
+    Google batchexecute responses are chunked: a ``)]}'`` prefix, then repeated
+    (length-prefix line, ``[[...]]`` data line) pairs. Scan every candidate line
+    for a ``wrb.fr`` frame, skip unparseable ones, and prefer the chunk that
+    actually carries destinations — so a reordered/empty leading chunk or a
+    garbled first chunk doesn't yield empty or missing results.
+    """
     stripped = text[4:].lstrip() if text.startswith(")]}'") else text
     lowered = stripped.lstrip().lower()
-    if lowered.startswith("<!doctype") or lowered.startswith("<html") or "consent.google.com" in stripped:
+    if lowered.startswith("<!doctype") or lowered.startswith("<html") or "consent.google.com" in lowered:
         raise SwoopParseError("Explore RPC returned an HTML/consent page (likely blocked)")
-    line = next(
-        (ln.strip() for ln in stripped.splitlines() if ln.strip().startswith("[[")),
-        stripped.strip(),
-    )
-    try:
-        outer = json.loads(line)
-    except ValueError as exc:
-        raise SwoopParseError(f"Failed to parse Explore response JSON: {exc}") from exc
-    for entry in outer if isinstance(outer, list) else []:
-        if isinstance(entry, list) and entry and entry[0] == "wrb.fr" and len(entry) > 2 and isinstance(entry[2], str):
-            try:
-                return json.loads(entry[2])
-            except ValueError as exc:
-                raise SwoopParseError(f"Failed to parse inner Explore JSON: {exc}") from exc
+
+    candidates: list[Any] = []
+    for raw_line in stripped.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("[["):
+            continue
+        try:
+            outer = json.loads(line)
+        except ValueError:
+            continue
+        for entry in outer if isinstance(outer, list) else []:
+            if (isinstance(entry, list) and entry and entry[0] == "wrb.fr"
+                    and len(entry) > 2 and isinstance(entry[2], str)):
+                try:
+                    candidates.append(json.loads(entry[2]))
+                except ValueError:
+                    continue
+
+    # Prefer a chunk carrying a non-empty destination list; fall back to the
+    # first valid frame so origin metadata still parses.
+    for inner in candidates:
+        rows = _safe_get(inner, [3, 0])
+        if isinstance(rows, list) and rows:
+            return inner
+    if candidates:
+        return candidates[0]
     raise SwoopParseError("Explore response missing inner payload")
 
 

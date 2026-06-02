@@ -706,6 +706,25 @@ def search_deal(
     return search(transport=transport, **deal.to_search_kwargs())
 
 
+def _price_cheapest(
+    result: SearchResult, transport: TransportConfig
+) -> Optional[PriceResult]:
+    """Price the cheapest itinerary in a search result, or ``None`` if empty.
+
+    Shared by :func:`price_deal` and :func:`price_explore`: both run a search
+    for a discovered route, then price its cheapest matching itinerary via
+    :func:`price_selector`.
+    """
+    if not result.results:
+        return None
+    # Cheapest itinerary first (discovery listed the cheapest known price).
+    cheapest = min(
+        result.results,
+        key=lambda opt: opt.price if opt.price is not None else float("inf"),
+    )
+    return price_selector(cheapest.selector, transport=transport)
+
+
 def price_deal(
     deal: "Deal",
     *,
@@ -725,15 +744,7 @@ def price_deal(
     Returns:
         A :class:`PriceResult`, or ``None`` if the deal can't be priced.
     """
-    result = search_deal(deal, transport=transport)
-    if not result.results:
-        return None
-    # Cheapest itinerary first (the deal listed the cheapest known price).
-    cheapest = min(
-        result.results,
-        key=lambda opt: opt.price if opt.price is not None else float("inf"),
-    )
-    return price_selector(cheapest.selector, transport=transport)
+    return _price_cheapest(search_deal(deal, transport=transport), transport)
 
 
 # ---------------------------------------------------------------------------
@@ -815,13 +826,7 @@ def price_explore(
         A :class:`PriceResult`, or ``None`` if the destination can't be priced.
     """
     result = search(transport=transport, **destination.to_search_kwargs())
-    if not result.results:
-        return None
-    cheapest = min(
-        result.results,
-        key=lambda opt: opt.price if opt.price is not None else float("inf"),
-    )
-    return price_selector(cheapest.selector, transport=transport)
+    return _price_cheapest(result, transport)
 
 
 # ---------------------------------------------------------------------------

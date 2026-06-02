@@ -26,5 +26,8 @@ htmlcov/
 # Local tooling artifacts (gstack browse audits, etc.)
 .gstack/
 
+# Transient gstack/agent worktree checkouts (duplicate the repo tree)
+.claude/worktrees/
+
 # examples/price_drop_watcher.py cache (written to CWD)
 .swoop-watch-cache.json

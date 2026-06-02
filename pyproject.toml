@@ -53,7 +53,7 @@ include = ["swoop/", "README.md", "LICENSE"]
 [tool.pyright]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
-exclude = ["swoop/flights_pb2.py", "tests/"]
+exclude = ["swoop/flights_pb2.py", "tests/", ".claude/worktrees"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

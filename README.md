@@ -259,6 +259,13 @@ for opt in options:
         print(f"  book at: {opt.booking_url}")
 ```
 
+Each `BookingOption` is a booking *channel*, not just a fare tier: the
+operating airline (`is_airline_direct`) plus any OTAs Google offers (Expedia,
+FlightHub, …), each with its own `seller_code` and `booking_url`. If every
+option shares one seller, the itinerary is airline-direct — see
+[`examples/booking_options.py`](examples/booking_options.py) for splitting
+channels and where OTAs show up.
+
 ### Deals discovery
 
 `deals()` is the third primitive: instead of "what flights from A to B?"

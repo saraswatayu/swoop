@@ -508,6 +508,34 @@
         "seller_codes": ["B6", "B6", "B6", "B6"],
         "is_airline_direct": [true, true, true, true]
       }
+    },
+    {
+      "id": "booking_intl_economy_ota_v1",
+      "path": "corpus/booking_intl_economy_ota_response.txt",
+      "registry_version": "2026-06-02",
+      "expected": {
+        "prices": [553, 525, 553, 536, 536, 533, 542, 553, 536, 553, 553, 554, 553, 3067, 3098],
+        "brands": ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "cabin_buckets": [
+          "economy", "economy", "economy", "economy", "economy", "economy",
+          "economy", "economy", "economy", "economy", "economy", "economy",
+          "economy", "business", "business"
+        ],
+        "fare_families": [
+          "unknown", "basic", "unknown", "unknown", "unknown", "basic",
+          "unknown", "unknown", "unknown", "unknown", "unknown", "unknown",
+          "unknown", "unknown", "unknown"
+        ],
+        "seller_codes": [
+          "PR", "ADAMVACATIONS", "EXPEDIA", "FLIGHTHUB", "TRAVOMINT",
+          "SCHOLAR_TRIP", "WEGO", "CHEAPOAIR", "JUSTFLY", "ONETRAVEL",
+          "OOJO", "BYOJET", "OVAGO", "BUSINESSCLASS", "ARANGRANT"
+        ],
+        "is_airline_direct": [
+          true, false, false, false, false, false, false, false,
+          false, false, false, false, false, false, false
+        ]
+      }
     }
   ]
 }

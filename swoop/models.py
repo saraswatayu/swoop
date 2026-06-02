@@ -383,3 +383,76 @@ class PriceResult:
         if detail:
             parts.append(", ".join(detail))
         return f"PriceResult({' '.join(parts)})"
+
+
+@dataclass
+class ExploreDestination:
+    """A single destination suggestion from Google Flights Explore.
+
+    Explore is destination *discovery* ("where could I go?"), not pricing:
+    the RPC returns no price (see ``docs/superpowers/specs``). ``departure_date``
+    / ``return_date`` are Google's per-destination suggestions; ``return_date``
+    is ``None`` for one-way queries. ``origin`` and the ``query_*`` fields are
+    denormalized so :func:`swoop.price_explore` / :meth:`to_search_kwargs` are
+    self-contained, mirroring :class:`Deal`.
+    """
+
+    origin: str
+    destination: Optional[str]          # destination IATA; None when Google omits it
+    destination_name: str               # city / region / landmark display name
+    destination_country: str
+    place_id: str                       # Google Knowledge Graph id, e.g. "/m/0d6lp"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    departure_date: Optional[str] = None
+    return_date: Optional[str] = None
+    image_url: Optional[str] = None
+    secondary_image_url: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    query_cabin: Optional[str] = None
+    query_adults: int = 1
+
+    def to_search_kwargs(self) -> dict:
+        """Convert this destination into keyword args for :func:`swoop.search`.
+
+        Explore surfaces dates but not the actual itineraries; this rebuilds
+        the search that produced this destination. Raises ``ValueError`` when
+        ``destination`` is missing (Google occasionally omits the airport
+        code), since a search needs a concrete destination.
+        """
+        if not self.destination:
+            raise ValueError("ExploreDestination has no destination airport to search")
+        kwargs: dict = {
+            "origin": self.origin,
+            "destination": self.destination,
+            "date": self.departure_date,
+        }
+        if self.return_date:
+            kwargs["return_date"] = self.return_date
+        if self.query_cabin:
+            kwargs["cabin"] = self.query_cabin
+        if self.query_adults != 1:
+            kwargs["passengers"] = Passengers(adults=self.query_adults)
+        return kwargs
+
+    def __repr__(self) -> str:
+        code = self.destination or "?"
+        parts = [f"{code} {self.destination_name} from {self.origin}"]
+        if self.departure_date:
+            parts.append(self.departure_date)
+        return f"ExploreDestination({', '.join(parts)})"
+
+
+@dataclass
+class ExploreResult:
+    """Result of an :func:`swoop.explore` destination-discovery query."""
+
+    destinations: list[ExploreDestination] = field(default_factory=list)
+    origin: str = ""
+    origin_name: Optional[str] = None
+    origin_place_id: Optional[str] = None
+    origin_latitude: Optional[float] = None
+    origin_longitude: Optional[float] = None
+
+    def __repr__(self) -> str:
+        return f"ExploreResult({len(self.destinations)} destinations from {self.origin})"

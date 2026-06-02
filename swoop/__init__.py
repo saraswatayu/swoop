@@ -40,7 +40,7 @@ from .decoder import (
 from ._regions import Region
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
-from .models import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -926,6 +926,8 @@ __all__ = [
     "Deal",
     "DealsDiff",
     "DealsResult",
+    "ExploreDestination",
+    "ExploreResult",
     "PriceChange",
     "Region",
     "Passengers",

@@ -10,7 +10,7 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -57,6 +57,8 @@ class TestFrozenExports:
         "Deal",
         "DealsDiff",
         "DealsResult",
+        "ExploreDestination",
+        "ExploreResult",
         "PriceChange",
         "Region",
         "Passengers",
@@ -311,6 +313,23 @@ class TestFrozenDataclassFields:
     def test_deals_result_currency_property(self):
         dr = DealsResult()
         assert dr.currency is None
+
+    def test_explore_destination_fields(self):
+        expected = {
+            "origin", "destination", "destination_name", "destination_country",
+            "place_id", "latitude", "longitude",
+            "departure_date", "return_date",
+            "image_url", "secondary_image_url", "duration_minutes",
+            "query_cabin", "query_adults",
+        }
+        assert self._field_names(ExploreDestination) == expected
+
+    def test_explore_result_fields(self):
+        expected = {
+            "destinations", "origin", "origin_name", "origin_place_id",
+            "origin_latitude", "origin_longitude",
+        }
+        assert self._field_names(ExploreResult) == expected
 
 
 class TestSearchSignature:

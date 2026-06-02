@@ -79,6 +79,16 @@ class TestBuildPayload:
         assert body.startswith(b"f.req=")
         assert body.endswith(b"&")
 
+    def test_passenger_count_wired_into_payload(self):
+        from swoop._explore import _build_explore_payload
+        # Default party is a single adult.
+        assert _build_explore_payload("JFK")[3][6] == [1, 0, 0, 0]
+        # A multi-passenger request must reach the RPC, not be hardcoded.
+        pl = _build_explore_payload(
+            "JFK", passengers=Passengers(adults=2, children=1, infants_on_lap=1)
+        )
+        assert pl[3][6] == [2, 1, 0, 1]
+
 
 class TestParse:
     def test_parses_jfk_fixture(self):

@@ -52,6 +52,7 @@ def _build_explore_payload(
     cabin: CabinClass = "economy",
     one_way: bool = False,
     max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
     origin_flag: int = 0,
 ) -> list[Any]:
     """Build the ``GetExploreDestinations`` ``f.req`` payload."""
@@ -63,9 +64,16 @@ def _build_explore_payload(
         segments = [[ob, [], None, stops_val]]
     else:
         segments = [[ob, [], None, stops_val], [[], ob, None, stops_val]]
+    # Slot 6 mirrors rpc._build_request: [adults, children, infants_in_seat,
+    # infants_on_lap]. Wire the real counts through so the explored set (and
+    # the dates Google suggests) reflect the requested party size.
+    pax = [
+        passengers.adults, passengers.children,
+        passengers.infants_in_seat, passengers.infants_on_lap,
+    ]
     filters = [
         None, None, trip_type, None, [], cabin_code,
-        [1, 0, 0, 0],
+        pax,
         None, None, None, None, None, None,
         segments,
         None, None, None, 0,
@@ -220,7 +228,9 @@ def fetch_explore(
         rpc_url = f"{rpc_url}{separator}{query}"
 
     body = _encode_explore_f_req(
-        _build_explore_payload(origin, cabin=cabin, one_way=one_way, max_stops=max_stops)
+        _build_explore_payload(
+            origin, cabin=cabin, one_way=one_way, max_stops=max_stops, passengers=passengers
+        )
     )
     headers = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",

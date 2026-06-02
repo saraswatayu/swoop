@@ -259,23 +259,12 @@ for opt in options:
         print(f"  book at: {opt.booking_url}")
 ```
 
-Each `BookingOption` is one **booking channel**, not just one fare tier. A
-single itinerary can be sold by the operating airline (`is_airline_direct`)
-and by online travel agencies — Expedia, FlightHub, CheapOair, etc. — each
-with its own `seller_code`, `seller_name`, and `booking_url`. Split them with:
-
-```python
-direct = [o for o in options if o.is_airline_direct]
-otas   = [o for o in options if not o.is_airline_direct]
-```
-
-**Whether OTAs appear is Google's call, not swoop's.** Premium cabins and
-most major US carriers (AA/DL/UA/B6) come back airline-direct only — one
-seller across several fare brands, which is expected. International economy
-on foreign carriers (PR, OZ, CI, LO, …) typically returns a wall of OTAs
-alongside the airline. If every option shares one `seller_code`, the
-itinerary is airline-direct; try an international economy route on a foreign
-carrier to see the OTA list. See [`examples/booking_options.py`](examples/booking_options.py).
+Each `BookingOption` is a booking *channel*, not just a fare tier: the
+operating airline (`is_airline_direct`) plus any OTAs Google offers (Expedia,
+FlightHub, …), each with its own `seller_code` and `booking_url`. If every
+option shares one seller, the itinerary is airline-direct — see
+[`examples/booking_options.py`](examples/booking_options.py) for splitting
+channels and where OTAs show up.
 
 ### Deals discovery
 

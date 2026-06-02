@@ -47,6 +47,31 @@ def _err_console(no_color: bool = False) -> Console:
     return Console(stderr=True, no_color=no_color)
 
 
+def _parse_trip_length(trip_length, *, err, ctx) -> Optional[tuple[int, int]]:
+    """Parse a ``MIN-MAX`` nights range; ``ctx.exit(2)`` on malformed input.
+
+    Shared by the deals and explore commands, which validate the
+    ``--trip-length`` flag identically. Returns ``None`` when no value was
+    given, otherwise the ``(lo, hi)`` pair.
+    """
+    if not trip_length:
+        return None
+    bits = trip_length.split("-")
+    try:
+        if len(bits) != 2:
+            raise ValueError("must have exactly two parts")
+        lo, hi = int(bits[0]), int(bits[1])
+    except (IndexError, ValueError):
+        err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
+        ctx.exit(2)
+        return None
+    if not (0 <= lo <= hi <= 365):
+        err.print(f"[red]Error: --trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})[/red]")
+        ctx.exit(2)
+        return None
+    return (lo, hi)
+
+
 def _run_search(
     origin, destination, date, *,
     return_date, cabin, passengers, children, infants_in_seat, infants_on_lap,
@@ -809,22 +834,7 @@ def deals_cmd(
             ctx.exit(2)
             return
         parsed_depart_window = (bits[0], bits[1])
-    parsed_trip_length: Optional[tuple[int, int]] = None
-    if trip_length:
-        bits = trip_length.split("-")
-        try:
-            if len(bits) != 2:
-                raise ValueError("must have exactly two parts")
-            lo, hi = int(bits[0]), int(bits[1])
-        except (IndexError, ValueError):
-            err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
-            ctx.exit(2)
-            return
-        if not (0 <= lo <= hi <= 365):
-            err.print(f"[red]Error: --trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})[/red]")
-            ctx.exit(2)
-            return
-        parsed_trip_length = (lo, hi)
+    parsed_trip_length = _parse_trip_length(trip_length, err=err, ctx=ctx)
     parsed_region: Optional[swoop.Region] = None
     if region_name:
         from swoop._regions import _airportsdata_available
@@ -944,22 +954,7 @@ def explore_cmd(
     pax = swoop.Passengers(adults=passengers)
     transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
 
-    parsed_trip_length: Optional[tuple[int, int]] = None
-    if trip_length:
-        bits = trip_length.split("-")
-        try:
-            if len(bits) != 2:
-                raise ValueError("must have exactly two parts")
-            lo, hi = int(bits[0]), int(bits[1])
-        except (IndexError, ValueError):
-            err.print("[red]Error: --trip-length must be MIN-MAX (e.g. 5-10)[/red]")
-            ctx.exit(2)
-            return
-        if not (0 <= lo <= hi <= 365):
-            err.print(f"[red]Error: --trip-length needs 0 <= MIN <= MAX <= 365 (got {lo}-{hi})[/red]")
-            ctx.exit(2)
-            return
-        parsed_trip_length = (lo, hi)
+    parsed_trip_length = _parse_trip_length(trip_length, err=err, ctx=ctx)
 
     region_value: Optional[swoop.Region] = None
     if region_name:

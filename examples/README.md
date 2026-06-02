@@ -9,6 +9,7 @@ Each script uses only the public API from `swoop.__all__`. No CLI, no extra depe
 - **`price_drop_watcher.py`** — Watch a known flight for price drops on a schedule, cache the last-seen price to disk, and print when the price falls. Similar in spirit to what [Perch](https://perchtravel.com) uses in production to save users an average of $247 per trip.
 - **`multi_city_finder.py`** — Run an official multi-city / open-jaw search across arbitrary legs, show the top 5 trip options with per-leg details, and tune the beam search knobs (`max_results`, `beam_width`, `time_budget`).
 - **`deals_watcher.py`** — Discovery-style watcher: run a `swoop.deals()` query (with the full filter surface — region, budget, trip-length, depart-window, discount), diff against the prior run, and print new deals + price changes. Mirrors the single-watcher-per-cache-file pattern from `price_drop_watcher.py` but at the exploration layer.
+- **`booking_options.py`** — Show every booking channel for one itinerary: split airline-direct from online travel agencies (Expedia, FlightHub, CheapOair, …), print price/seller/brand per channel, and surface the cheapest `booking_url`. Defaults to an OTA-rich route (SFO→MNL economy) so the seller diversity is visible out of the box. Answers "why do all my options show the same seller?" — OTAs only appear on the itineraries Google offers them for.
 
 ## Notes
 

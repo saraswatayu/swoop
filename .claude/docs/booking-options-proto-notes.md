@@ -61,6 +61,33 @@ Each parsed `BookingOption` dataclass includes:
 - `_brand_attribute_vector` (scalar-normalized diagnostic slice)
 - `_registry_version`
 
+## Seller list (airline-direct vs OTA)
+
+`option[1]` is a list of seller entries; `option[1][0]` is
+`[seller_code, seller_name, logo_code_or_None, is_airline_direct_bool]`. The
+parser takes the first entry per option (multi-seller `option[1]` is permitted
+by the wire format but unobserved — logged at DEBUG if it ever appears).
+
+Each booking option is one **booking channel**, not just a fare tier. Whether
+Google returns OTAs is route-dependent, not a swoop limitation:
+
+- Premium cabins and major US carriers (AA/DL/UA/B6) → airline-direct only.
+- International economy on foreign carriers → airline-direct + a wall of OTAs.
+
+OTA options carry `is_airline_direct = False`, a non-IATA `seller_code`, and
+typically **null brand fields** (no `brand_label`/`brand_code`) — they still
+carry cabin class at `[6][0][0]`, so the parser keeps them via the option[21]
+fallback rather than dropping them.
+
+Seller codes observed live on SFO→MNL economy (Philippine Airlines), captured
+as fixture `booking_intl_economy_ota_response.txt` / contract case
+`booking_intl_economy_ota_v1`:
+
+`PR` (airline-direct), `EXPEDIA`, `FLIGHTHUB`, `CHEAPOAIR`, `JUSTFLY`,
+`ONETRAVEL`, `BYOJET`, `OVAGO`, `OOJO`, `WEGO`, `TRAVOMINT`, `SCHOLAR_TRIP`,
+`ADAMVACATIONS`, `BUSINESSCLASS`, `ARANGRANT`. Other captures also show
+`ETRAVELI_*` prefixed codes (e.g. `ETRAVELI_Gotogate`, `ETRAVELI_FALLBACK`).
+
 ## Basic economy signal
 
 Observed robust signal:

@@ -69,7 +69,7 @@ One commit per task/phase — not one giant commit at the end. Format: `<type>: 
 
 ```
 swoop/
-├── __init__.py       # Public API: search(), search_legs(), check_price(), price_selector(), price_legs(), deals(), search_deal(), price_deal(), explore(), price_explore(), watch_deals(), diff_deals(), dataclasses, version
+├── __init__.py       # Public API: search(), search_legs(), check_price(), price_selector(), price_legs(), deals(), search_deal(), price_deal(), explore(), price_explore(), price_explore_all(), watch_deals(), diff_deals(), dataclasses, version
 ├── __main__.py       # `python -m swoop` entry point
 ├── models.py         # Public trip-level + deals + explore models (SearchResult, TripOption, TripLeg, PriceResult, Deal, DealsResult, DealsDiff, PriceChange, ExploreDestination, ExploreResult)
 ├── rpc.py            # HTTP client — builds requests, calls Google Flights RPC, shared _post_with_retry
@@ -79,7 +79,8 @@ swoop/
 ├── _deals.py         # Deals endpoint — session, payload, streaming response parser
 ├── _deals_filter.py  # Client-side filter pipeline applied to parsed Deal lists
 ├── _deals_watch.py   # Persistent deals watcher — diff + JSON snapshot save/load
-├── _explore.py       # Explore endpoint — destination discovery (GetExploreDestinations); metadata only, no prices
+├── _explore.py       # Explore endpoint — destination discovery (GetExploreDestinations); metadata only, no prices; caches bl/f.sid session params
+├── _explore_filter.py # Client-side filter pipeline applied to parsed ExploreDestination lists
 ├── _regions.py       # Region enum + ISO country → region table (airportsdata-backed)
 ├── _booking.py       # Booking option parsing (GetBookingResults)
 ├── _validate.py      # IATA code validation (optional airportsdata)
@@ -104,12 +105,13 @@ swoop/
 
 **Deals flow:** `swoop deals` → `commands.deals_cmd()` → `swoop.deals()` → (`_deals.fetch_deals()` for one RPC call, or `_fetch_deals_per_origin` for parallel mode) → `_deals_filter.filter_deals()` → `formatters.format_deals_table()`
 
-**Explore flow:** `swoop explore` → `commands.explore_cmd()` → `swoop.explore()` → `_explore.fetch_explore()` → `_explore.parse_explore_payload()` → client-side filters → `formatters.format_explore_table()`
+**Explore flow:** `swoop explore` → `commands.explore_cmd()` → `swoop.explore()` → `_explore.fetch_explore()` → `_explore.parse_explore_payload()` → `_explore_filter.filter_explore()` (client-side filters live in `explore()`, not the CLI) → `formatters.format_explore_table()`
 
 **Deal / explore bridge flows:**
 - `swoop.search_deal(deal)` → `search()` with deal's route/dates/airlines → `SearchResult`
 - `swoop.price_deal(deal)` → `search_deal(deal)` → cheapest itinerary → `price_selector()` → `PriceResult`
 - `swoop.price_explore(destination)` → `search()` for the destination's route/suggested dates → cheapest itinerary → `price_selector()` → `PriceResult`
+- `swoop.price_explore_all(destinations)` → `price_explore()` per destination in a thread pool → `list[Optional[PriceResult]]` (order-preserving)
 
 **Deals watcher flow:** `examples/deals_watcher.py` → `swoop.deals()` → `swoop.watch_deals(result, cache_path=...)` → `_deals_watch.load_snapshot()` → `diff_deals()` → `save_snapshot()` → `DealsDiff`
 
@@ -125,15 +127,16 @@ swoop/
 | `_deals.py` | Deals endpoint client — session, payload builder, streaming response parser. Payload slot indexing mirrors `rpc._build_request`. |
 | `_deals_filter.py` | `filter_deals()` — single-pass AND-style client-side filter (`depart_window`, `trip_length`, `destinations`, `region`, `max_price`, `min_discount_pct`) |
 | `_deals_watch.py` | `diff_deals()`, `watch_deals()`, atomic `save_snapshot()` / `load_snapshot()` for JSON-backed deals tracking |
-| `_explore.py` | Explore endpoint client — `fetch_explore()`, payload builder, nested-list parser. Metadata only (no prices); supports one-way + roundtrip. |
+| `_explore.py` | Explore endpoint client — `fetch_explore()`, payload builder, nested-list parser. Metadata only (no prices); supports one-way + roundtrip; caches bl/f.sid session params with parse-failure invalidation. |
+| `_explore_filter.py` | `filter_explore()` — single-pass AND-style client-side filter (`destinations`, `exclude_destinations`, `region`, `trip_length`); mirrors `_deals_filter`. |
 | `_regions.py` | `Region` enum + ISO 2-letter country → region static table; `region_for_iata()` bridges via `airportsdata` |
 | `_booking.py` | `parse_booking_payload()` — booking option extraction |
 | `_validate.py` | `validate_iata()` with optional airportsdata |
 | `exceptions.py` | `SwoopError`, `SwoopRPCError`, `SwoopValidationError` |
-| `__init__.py` | Public re-exports: `search`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `deals`, `search_deal`, `price_deal`, `watch_deals`, `diff_deals`, all dataclasses, `Region`, etc. Also `_fetch_deals_per_origin` (internal). |
+| `__init__.py` | Public re-exports: `search`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `deals`, `search_deal`, `price_deal`, `explore`, `price_explore`, `price_explore_all`, `watch_deals`, `diff_deals`, all dataclasses, `Region`, etc. Also `_fetch_deals_per_origin`, `_price_cheapest` (internal). |
 | `cli/__init__.py` | Click group + `main()` entry point (uses `swoop.__version__` for `--version`) |
-| `cli/commands.py` | `search_cmd`, `price_cmd`, `deals_cmd`, `_SearchFormatKwargs` TypedDict for formatter kwargs |
-| `cli/formatters.py` | Trip-level table, JSON, CSV (search + price + deals), and brief formatters; CSV escapes formula prefixes |
+| `cli/commands.py` | `search_cmd`, `price_cmd`, `deals_cmd`, `explore_cmd`, `_parse_trip_length` (shared deals/explore), `_SearchFormatKwargs` TypedDict for formatter kwargs |
+| `cli/formatters.py` | Trip-level table, JSON, CSV (search + price + deals + explore), and brief formatters; shared `_csv_safe` escapes formula prefixes |
 | `cli/utils.py` | `IATACodeType`, `DateType`, `format_time()`, `format_duration()`, `resolve_quiet()`, `configure_verbose_logging()` (scoped to Click ctx) |
 | `flights_pb2.pyi` | Hand-written stub mirroring `flights.proto` — restores pyright on `PB.*` |
 | `__main__.py` | `python -m swoop` with graceful ImportError |

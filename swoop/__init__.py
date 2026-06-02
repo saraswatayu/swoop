@@ -737,6 +737,94 @@ def price_deal(
 
 
 # ---------------------------------------------------------------------------
+# explore() — discover destinations you could fly to from an origin.
+# ---------------------------------------------------------------------------
+
+
+def explore(
+    origin: str,
+    *,
+    cabin: CabinClass = "economy",
+    one_way: bool = False,
+    max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
+    transport: TransportConfig = TransportConfig(),
+) -> ExploreResult:
+    """Discover destinations you could fly to from an origin ("where could I go?").
+
+    swoop's fourth primitive, alongside :func:`search`, :func:`check_price`,
+    and :func:`deals`. Returns destination suggestions (name, country, images,
+    coordinates, and Google's suggested dates), one-way or roundtrip, via the
+    ``GetExploreDestinations`` RPC.
+
+    The Explore RPC returns no price — use :func:`price_explore` to price a
+    chosen destination. ``explore`` is destination *discovery* (inspiration),
+    while :func:`deals` is *bargain* discovery (cheap roundtrips, with prices);
+    they answer the same question with different selection criteria.
+
+    Args:
+        origin: Origin airport IATA code (e.g. ``"JFK"``).
+        cabin: Cabin class (default ``"economy"``).
+        one_way: One-way (``True``) or roundtrip (``False``, default). For a
+            one-way query, each destination's ``return_date`` is ``None``.
+        max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
+        passengers: Passenger counts (default ``Passengers()``).
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        An :class:`ExploreResult` with the suggested destinations.
+    """
+    validate_iata_code(origin, "origin")
+    validate_cabin(cabin)
+    validate_adults(passengers.adults)
+    if max_stops is not None and not (0 <= max_stops <= 2):
+        raise ValueError(f"max_stops must be 0, 1, or 2, got {max_stops!r}")
+    from ._explore import fetch_explore
+
+    return fetch_explore(
+        origin,
+        cabin=cabin,
+        one_way=one_way,
+        max_stops=max_stops,
+        passengers=passengers,
+        transport=transport,
+    )
+
+
+def price_explore(
+    destination: ExploreDestination,
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> Optional[PriceResult]:
+    """Get the current bookable price for an explore destination.
+
+    Runs :func:`search` for the destination's route and Google-suggested dates,
+    then prices the cheapest matching itinerary via :func:`price_selector`.
+    Returns ``None`` if no itineraries match. Raises ``ValueError`` if the
+    destination has no airport code (Google occasionally omits it).
+
+    This bridges discovery to pricing, mirroring :func:`price_deal`. Note it
+    prices the *suggested* dates; for the cheapest dates, use :func:`search`
+    with date flexibility.
+
+    Args:
+        destination: An :class:`ExploreDestination` from :func:`explore`.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`PriceResult`, or ``None`` if the destination can't be priced.
+    """
+    result = search(transport=transport, **destination.to_search_kwargs())
+    if not result.results:
+        return None
+    cheapest = min(
+        result.results,
+        key=lambda opt: opt.price if opt.price is not None else float("inf"),
+    )
+    return price_selector(cheapest.selector, transport=transport)
+
+
+# ---------------------------------------------------------------------------
 # deals() — discover the best flight deals from an origin airport.
 # ---------------------------------------------------------------------------
 
@@ -902,6 +990,8 @@ __all__ = [
     "price_deal",
     "watch_deals",
     "diff_deals",
+    "explore",
+    "price_explore",
     "get_booking_results",
     "search_raw",
     "set_country",

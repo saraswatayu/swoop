@@ -128,3 +128,46 @@ class TestFetchExplore:
         assert len(result.destinations) > 0
         assert b"f.req=" in captured["body"]
         assert "bl=BL123" in captured["url"]
+
+
+class TestPublicExplore:
+    def test_invalid_origin_raises(self):
+        import swoop
+        with pytest.raises(ValueError):
+            swoop.explore("xx")
+
+    def test_invalid_cabin_raises(self):
+        import swoop
+        with pytest.raises(ValueError):
+            swoop.explore("JFK", cabin="ultra")  # type: ignore[arg-type]
+
+    def test_invalid_max_stops_raises(self):
+        import swoop
+        with pytest.raises(ValueError):
+            swoop.explore("JFK", max_stops=9)
+
+
+class TestPriceExplore:
+    def _fake_option(self, price, selector):
+        return type("Opt", (), {"price": price, "selector": selector})()
+
+    def test_prices_cheapest(self, monkeypatch):
+        import swoop
+        from swoop.models import SearchResult
+
+        fake_result = SearchResult(results=[
+            self._fake_option(400, "sel-expensive"),
+            self._fake_option(250, "sel-cheapest"),
+        ])
+        captured: dict = {}
+        monkeypatch.setattr(swoop, "search", lambda **kw: fake_result)
+        monkeypatch.setattr(swoop, "price_selector", lambda sel, **kw: captured.setdefault("sel", sel))
+        swoop.price_explore(_dest())
+        assert captured["sel"] == "sel-cheapest"
+
+    def test_no_results_returns_none(self, monkeypatch):
+        import swoop
+        from swoop.models import SearchResult
+
+        monkeypatch.setattr(swoop, "search", lambda **kw: SearchResult(results=[]))
+        assert swoop.price_explore(_dest()) is None

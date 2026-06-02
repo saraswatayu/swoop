@@ -46,6 +46,8 @@ class TestFrozenExports:
         "price_deal",
         "watch_deals",
         "diff_deals",
+        "explore",
+        "price_explore",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -420,6 +422,19 @@ class TestSearchSignature:
             "transport",
         ]
         assert param_names == expected
+
+    def test_explore_params(self):
+        sig = inspect.signature(swoop.explore)
+        param_names = list(sig.parameters.keys())
+        expected = [
+            "origin", "cabin", "one_way", "max_stops", "passengers", "transport",
+        ]
+        assert param_names == expected
+
+    def test_price_explore_params(self):
+        sig = inspect.signature(swoop.price_explore)
+        param_names = list(sig.parameters.keys())
+        assert param_names == ["destination", "transport"]
 
 
 class TestFrozenDefaults:

@@ -163,6 +163,23 @@ class TestParse:
         assert rt is not None and rt.return_date == "2026-07-10"
         assert ow is not None and ow.return_date is None
 
+    def test_oneway_parse_extracts_route_and_date(self):
+        # return_date is forced None for one-way, so it can't catch a layout
+        # drift. Assert the other wire-index fields ([2] name, [4] country,
+        # [11] departure, [15] IATA) still parse on the one-way path, so a
+        # column shift surfaces here rather than silently in production.
+        from swoop._explore import _parse_destination
+        row: list = [None] * 18
+        row[0], row[2], row[4] = "/m/x", "San Francisco", "United States"
+        row[11], row[15] = "2026-07-02", "SFO"
+        d = _parse_destination(row, origin="JFK", cabin="economy", adults=1, one_way=True)
+        assert d is not None
+        assert d.destination == "SFO"
+        assert d.departure_date == "2026-07-02"
+        assert d.destination_name == "San Francisco"
+        assert d.destination_country == "United States"
+        assert d.return_date is None
+
     def test_parse_carries_query_context(self):
         # The discovery cabin / party / stop limit must be denormalized onto each
         # destination so price_explore re-prices the same product.

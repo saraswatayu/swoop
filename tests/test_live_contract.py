@@ -378,3 +378,12 @@ class TestExploreContract:
         assert all(d.return_date is None for d in result.destinations), (
             "One-way explore should carry no return dates"
         )
+        # return_date is forced None for one-way, so the assertion above can't
+        # detect a one-way response layout drift. Assert the wire-derived fields
+        # parse too: at least one suggested departure date, plus a name/place id
+        # on the first row — a column shift would break these.
+        assert any(d.departure_date for d in result.destinations), (
+            "One-way explore should still parse Google's suggested departure dates"
+        )
+        d = result.destinations[0]
+        assert d.destination_name and d.place_id.startswith("/m/")

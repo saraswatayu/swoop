@@ -52,3 +52,19 @@ def fake_primp(monkeypatch):
         monkeypatch.setitem(sys.modules, "primp", types.SimpleNamespace(Client=FakeClient))
         return response
     return _install
+
+
+@pytest.fixture(autouse=True)
+def _isolate_explore_session_cache():
+    """Clear the module-global explore session-param cache around every test.
+
+    _explore caches bl/f.sid (and per-key locks) process-wide. Tests that seed
+    or populate it would otherwise leak that state into later tests — even in
+    other modules and live runs — making behavior order-dependent.
+    """
+    from swoop import _explore
+    _explore._browser_params_cache.clear()
+    _explore._browser_params_key_locks.clear()
+    yield
+    _explore._browser_params_cache.clear()
+    _explore._browser_params_key_locks.clear()

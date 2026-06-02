@@ -831,3 +831,42 @@ def test_get_client_thread_safe(monkeypatch) -> None:
     # ensures only one Client was actually constructed for the shared key).
     assert len({id(r) for r in results}) == 1
     assert len(instantiations) == 1
+
+
+class TestPostWithRetry:
+    """_post_with_retry must always make at least one HTTP attempt."""
+
+    class _FakeRes:
+        def __init__(self, status_code=200, text="ok"):
+            self.status_code = status_code
+            self.text = text
+
+    def _client(self, response, counter):
+        class _FakeClient:
+            def post(self, *_a, **_k):
+                counter["n"] += 1
+                return response
+
+        return _FakeClient()
+
+    def test_negative_retries_still_attempts_once(self):
+        # A stray TransportConfig(retries=-1) (the CLI --retries has no lower
+        # bound) must not make range() empty, fall through, and return None —
+        # callers dereference res.text and would crash with AttributeError.
+        from swoop.models import TransportConfig
+        counter = {"n": 0}
+        client = self._client(self._FakeRes(200, "ok"), counter)
+        res = rpc._post_with_retry(
+            client, "https://x/y", b"body", {}, transport=TransportConfig(retries=-1)
+        )
+        assert res is not None and res.status_code == 200
+        assert counter["n"] == 1
+
+    def test_zero_retries_attempts_once(self):
+        from swoop.models import TransportConfig
+        counter = {"n": 0}
+        client = self._client(self._FakeRes(200, "ok"), counter)
+        rpc._post_with_retry(
+            client, "https://x/y", b"body", {}, transport=TransportConfig(retries=0)
+        )
+        assert counter["n"] == 1

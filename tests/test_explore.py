@@ -293,6 +293,113 @@ class TestFetchExplore:
         # Params were already fresh, so no pointless second page fetch/POST.
         assert state["gets"] == 1 and state["posts"] == 1
 
+    def test_empty_params_not_cached(self):
+        # A page with neither token must not poison the cache: caching {} and
+        # serving it forever (the `if cached is not None` bug) would send every
+        # later request session-less.
+        from swoop import _explore
+        from swoop.models import TransportConfig
+
+        class FakeRes:
+            def __init__(self, text):
+                self.text, self.status_code = text, 200
+
+        class FakeClient:
+            def get(self, url, **kw):
+                return FakeRes("<page with no session tokens>")
+
+        params, from_cache = _explore._get_browser_params(
+            FakeClient(), "http://x", key="EMPTY", transport=TransportConfig()
+        )
+        assert params == {} and from_cache is False
+        assert "EMPTY" not in _explore._browser_params_cache
+        # A second call still fetches — the empty result was never cached.
+        _, from_cache2 = _explore._get_browser_params(
+            FakeClient(), "http://x", key="EMPTY", transport=TransportConfig()
+        )
+        assert from_cache2 is False
+
+    def test_partial_params_not_cached(self):
+        # Only bl, no f.sid — incomplete params must not be cached either.
+        from swoop import _explore
+        from swoop.models import TransportConfig
+
+        class FakeRes:
+            def __init__(self, text):
+                self.text, self.status_code = text, 200
+
+        class FakeClient:
+            def get(self, url, **kw):
+                return FakeRes('boot with "cfb2h":"BL999" but no f.sid token')
+
+        params, from_cache = _explore._get_browser_params(
+            FakeClient(), "http://x", key="PARTIAL", transport=TransportConfig()
+        )
+        assert params == {"bl": "BL999"} and from_cache is False
+        assert "PARTIAL" not in _explore._browser_params_cache
+
+    def test_block_response_not_retried(self, monkeypatch):
+        # A consent/HTML interstitial is a hard block, not a stale session, so
+        # fetch_explore must NOT burn a second page GET + POST trying to "heal".
+        from swoop import _explore
+        from swoop.exceptions import SwoopParseError
+        _explore._browser_params_cache.clear()
+        _explore._browser_params_cache["||"] = {"bl": "BL123", "f.sid": "SID123"}
+        state = {"gets": 0, "posts": 0}
+
+        class FakeRes:
+            def __init__(self, text, status=200):
+                self.text, self.status_code = text, status
+
+        class FakeClient:
+            def get(self, url, **kw):
+                state["gets"] += 1
+                return FakeRes('x"cfb2h":"BL123"y"FdrFJe":"SID123"z')
+
+            def post(self, url, content=None, **kw):
+                state["posts"] += 1
+                return FakeRes("<!doctype html><html>consent.google.com</html>")
+
+        monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: FakeClient())
+        with pytest.raises(SwoopParseError):
+            _explore.fetch_explore("JFK")
+        # Warm cache used (no GET); the block short-circuits the retry.
+        assert state["gets"] == 0 and state["posts"] == 1
+
+    def test_concurrent_calls_single_flight(self, monkeypatch):
+        # Concurrent cold callers for the same key must trigger exactly one page
+        # GET — the per-key lock makes the fetch single-flight.
+        import threading
+        import time
+        from swoop import _explore
+        _explore._browser_params_cache.clear()
+        body_text = (FIX / "jfk_response.txt").read_text()
+        page_html = 'x"cfb2h":"BL123"y"FdrFJe":"SID123"z'
+        state = {"gets": 0}
+        glock = threading.Lock()
+
+        class FakeRes:
+            def __init__(self, text):
+                self.text, self.status_code = text, 200
+
+        class FakeClient:
+            def get(self, url, **kw):
+                with glock:
+                    state["gets"] += 1
+                time.sleep(0.05)  # widen the contention window
+                return FakeRes(page_html)
+
+            def post(self, url, content=None, **kw):
+                return FakeRes(body_text)
+
+        monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: FakeClient())
+        threads = [threading.Thread(target=lambda: _explore.fetch_explore("JFK")) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert state["gets"] == 1
+
 
 class TestPublicExplore:
     def test_invalid_origin_raises(self):

@@ -43,6 +43,16 @@ EXPLORE_RPC_URL = (
 )
 
 
+class _ExploreBlockedError(SwoopParseError):
+    """The page/RPC returned an HTML or consent interstitial (anti-bot block).
+
+    A subclass of :class:`SwoopParseError` (so callers catching that still
+    catch this), used internally so :func:`fetch_explore` can tell a real
+    block — which a fresh session cannot clear — apart from a stale-session
+    parse failure that a page refresh would heal.
+    """
+
+
 def _origin_block(origin: str, flag: int = 0) -> list:
     """Build the nested origin structure ``[[[code, flag]]]``."""
     return [[[origin, flag]]]
@@ -99,7 +109,7 @@ def _extract_inner(text: str) -> list[Any]:
     stripped = text[4:].lstrip() if text.startswith(")]}'") else text
     lowered = stripped.lstrip().lower()
     if lowered.startswith("<!doctype") or lowered.startswith("<html") or "consent.google.com" in lowered:
-        raise SwoopParseError("Explore RPC returned an HTML/consent page (likely blocked)")
+        raise _ExploreBlockedError("Explore RPC returned an HTML/consent page (likely blocked)")
 
     candidates: list[Any] = []
     for raw_line in stripped.splitlines():
@@ -224,29 +234,70 @@ def _browser_params(page_html: str) -> dict[str, str]:
 
 # bl / f.sid are stable build/session identifiers, so cache them per
 # (proxy, impersonate, country) to avoid a full page GET on every explore()
-# call. Invalidated on a parse failure (a likely sign they went stale).
+# call. Invalidated on a rejection (a likely sign they went stale).
 _browser_params_cache: dict[str, dict[str, str]] = {}
+# Guards the cache dict AND the per-key lock registry. Critical sections are
+# tiny (dict read/write only) and are never held across the page GET.
 _browser_params_lock = threading.Lock()
+# One lock per cache key so a cold miss is single-flight: concurrent callers
+# for the same key wait for the first page fetch and then hit the cache,
+# instead of each issuing a redundant GET (and racing on the write).
+_browser_params_key_locks: dict[str, threading.Lock] = {}
+
+
+def _params_complete(params: dict[str, str]) -> bool:
+    """True only when both session tokens are present.
+
+    A partial/empty extraction — Google reshuffled the page markup, or served a
+    thin/soft-blocked body — must NOT be cached: doing so would pin a broken,
+    session-less request for every later call until something happened to raise.
+    """
+    return bool(params.get("bl") and params.get("f.sid"))
+
+
+def _key_lock(key: str) -> threading.Lock:
+    """Return the per-key single-flight lock, creating it on first use."""
+    with _browser_params_lock:
+        lock = _browser_params_key_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _browser_params_key_locks[key] = lock
+        return lock
 
 
 def _get_browser_params(
     client: Any, page_url: str, *, key: str, transport: TransportConfig, force_refresh: bool = False
-) -> dict[str, str]:
-    """Return cached RPC session params, fetching the page on a miss/refresh."""
+) -> tuple[dict[str, str], bool]:
+    """Return ``(session_params, served_from_cache)``.
+
+    Fetches the page on a miss/refresh. Only *complete* params (both ``bl`` and
+    ``f.sid``) are cached, so a failed extraction can never poison the cache.
+    ``served_from_cache`` lets the caller decide whether a downstream rejection
+    is worth a fresh-page retry (stale cache) or is real.
+    """
     if not force_refresh:
         with _browser_params_lock:
             cached = _browser_params_cache.get(key)
-        if cached is not None:
-            return cached
-    page = client.get(
-        page_url,
-        headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
-        timeout=transport.timeout,
-    )
-    params = _browser_params(page.text)
-    with _browser_params_lock:
-        _browser_params_cache[key] = params
-    return params
+        if cached:
+            return cached, True
+    # Single-flight per key: one cold caller fetches the page; the rest block
+    # here and then find the populated cache on the re-check below.
+    with _key_lock(key):
+        if not force_refresh:
+            with _browser_params_lock:
+                cached = _browser_params_cache.get(key)
+            if cached:
+                return cached, True
+        page = client.get(
+            page_url,
+            headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
+            timeout=transport.timeout,
+        )
+        params = _browser_params(page.text)
+        if _params_complete(params):
+            with _browser_params_lock:
+                _browser_params_cache[key] = params
+        return params, False
 
 
 def _explore_rpc_url(rpc_url: str, params: dict[str, str]) -> str:
@@ -291,10 +342,14 @@ def fetch_explore(
         "referer": page_url,
     }
 
+    used_cache = False
+
     def _attempt(force_refresh: bool) -> ExploreResult:
-        params = _get_browser_params(
+        nonlocal used_cache
+        params, from_cache = _get_browser_params(
             client, page_url, key=cache_key, transport=transport, force_refresh=force_refresh
         )
+        used_cache = from_cache
         rpc_url = _explore_rpc_url(rpc_base, params)
         res = _post_with_retry(client, rpc_url, body, headers, transport=transport)
         inner = _extract_inner(res.text)
@@ -302,20 +357,19 @@ def fetch_explore(
             inner, origin=origin, cabin=cabin, adults=passengers.adults, one_way=one_way
         )
 
-    # Cached bl/f.sid can go stale. A rejection (HTML/consent page -> parse
-    # error, or a 4xx -> HTTP error) is the classic symptom, so drop the cache
-    # and — if this attempt actually used cached params — retry once with a
-    # fresh page. Rate limiting is about volume, not a stale session (and the
-    # per-request backoff already ran), so it propagates untouched.
-    with _browser_params_lock:
-        had_cached_params = cache_key in _browser_params_cache
+    # Cached bl/f.sid can go stale. A stale-session rejection (a generic parse
+    # error or a 4xx) is healed by dropping the cache and retrying once with a
+    # fresh page — but only if this attempt actually USED cached params, decided
+    # from `used_cache` (set at the moment of use) so a concurrent populate can't
+    # mislead the retry. A hard block (HTML/consent interstitial) or a rate limit
+    # is not a stale-session symptom, so both propagate without a wasted retry.
     try:
         return _attempt(force_refresh=False)
-    except SwoopRateLimitError:
+    except (SwoopRateLimitError, _ExploreBlockedError):
         raise
     except (SwoopParseError, SwoopHTTPError):
         with _browser_params_lock:
             _browser_params_cache.pop(cache_key, None)
-        if not had_cached_params:
+        if not used_cache:
             raise  # params were already fresh — the failure is real, not stale
     return _attempt(force_refresh=True)

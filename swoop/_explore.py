@@ -30,7 +30,7 @@ from typing import Any, Optional
 
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get
-from .exceptions import SwoopParseError
+from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .models import ExploreDestination, ExploreResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
@@ -291,23 +291,31 @@ def fetch_explore(
         "referer": page_url,
     }
 
-    # Cached bl/f.sid can go stale; on a parse failure, drop the cache and
-    # refetch the page once before giving up.
-    for attempt in range(2):
+    def _attempt(force_refresh: bool) -> ExploreResult:
         params = _get_browser_params(
-            client, page_url, key=cache_key, transport=transport, force_refresh=(attempt == 1)
+            client, page_url, key=cache_key, transport=transport, force_refresh=force_refresh
         )
         rpc_url = _explore_rpc_url(rpc_base, params)
         res = _post_with_retry(client, rpc_url, body, headers, transport=transport)
-        try:
-            inner = _extract_inner(res.text)
-        except SwoopParseError:
-            with _browser_params_lock:
-                _browser_params_cache.pop(cache_key, None)
-            if attempt == 0:
-                continue
-            raise
+        inner = _extract_inner(res.text)
         return parse_explore_payload(
             inner, origin=origin, cabin=cabin, adults=passengers.adults, one_way=one_way
         )
-    raise SwoopParseError("Explore response could not be parsed after a session refresh")
+
+    # Cached bl/f.sid can go stale. A rejection (HTML/consent page -> parse
+    # error, or a 4xx -> HTTP error) is the classic symptom, so drop the cache
+    # and — if this attempt actually used cached params — retry once with a
+    # fresh page. Rate limiting is about volume, not a stale session (and the
+    # per-request backoff already ran), so it propagates untouched.
+    with _browser_params_lock:
+        had_cached_params = cache_key in _browser_params_cache
+    try:
+        return _attempt(force_refresh=False)
+    except SwoopRateLimitError:
+        raise
+    except (SwoopParseError, SwoopHTTPError):
+        with _browser_params_lock:
+            _browser_params_cache.pop(cache_key, None)
+        if not had_cached_params:
+            raise  # params were already fresh — the failure is real, not stale
+    return _attempt(force_refresh=True)

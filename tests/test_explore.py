@@ -209,12 +209,69 @@ class TestFetchExplore:
         # bl/f.sid page fetched once, then reused on the second call.
         assert gets["n"] == 1
 
-    def test_parse_failure_refetches_params_once(self, monkeypatch):
-        from swoop import _explore
-        _explore._browser_params_cache.clear()
-
+    def _stale_param_client(self, state, *, bad):
+        """A FakeClient whose POST rejects stale (bl=STALE) params via `bad`."""
         page_html = 'x"cfb2h":"BL123"y"FdrFJe":"SID123"z'
         good = (FIX / "jfk_response.txt").read_text()
+
+        class FakeRes:
+            def __init__(self, text, status=200):
+                self.text, self.status_code = text, status
+
+        class FakeClient:
+            def get(self, url, **kw):
+                state["gets"] += 1
+                return FakeRes(page_html)
+
+            def post(self, url, content=None, **kw):
+                state["posts"] += 1
+                if "bl=STALE" in url:
+                    return bad
+                return FakeRes(good)
+
+        return FakeClient()
+
+    def test_stale_cached_params_self_heal_on_parse_error(self, monkeypatch):
+        from swoop import _explore
+        _explore._browser_params_cache.clear()
+        _explore._browser_params_cache["||"] = {"bl": "STALE"}
+        state = {"gets": 0, "posts": 0}
+
+        class FakeRes:
+            def __init__(self, text, status=200):
+                self.text, self.status_code = text, status
+
+        client = self._stale_param_client(state, bad=FakeRes("garbage-not-json"))
+        monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: client)
+        result = _explore.fetch_explore("JFK")
+        assert len(result.destinations) > 0
+        # Only the refresh fetched the page; the cache now holds fresh params.
+        assert state["gets"] == 1 and state["posts"] == 2
+        assert _explore._browser_params_cache["||"] == {"bl": "BL123", "f.sid": "SID123"}
+
+    def test_stale_cached_params_self_heal_on_http_error(self, monkeypatch):
+        # The poisoning case: a 4xx (not a parse error) must still invalidate
+        # the cache and recover, instead of leaving the bad params cached.
+        from swoop import _explore
+        _explore._browser_params_cache.clear()
+        _explore._browser_params_cache["||"] = {"bl": "STALE"}
+        state = {"gets": 0, "posts": 0}
+
+        class FakeRes:
+            def __init__(self, text, status=200):
+                self.text, self.status_code = text, status
+
+        client = self._stale_param_client(state, bad=FakeRes("", status=400))
+        monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: client)
+        result = _explore.fetch_explore("JFK")
+        assert len(result.destinations) > 0
+        assert _explore._browser_params_cache["||"]["bl"] == "BL123"
+
+    def test_fresh_params_failure_propagates_without_retry(self, monkeypatch):
+        from swoop import _explore
+        from swoop.exceptions import SwoopParseError
+        _explore._browser_params_cache.clear()  # cold cache -> attempt uses fresh params
+        page_html = 'x"cfb2h":"BL123"y"FdrFJe":"SID123"z'
         state = {"gets": 0, "posts": 0}
 
         class FakeRes:
@@ -228,13 +285,13 @@ class TestFetchExplore:
 
             def post(self, url, content=None, **kw):
                 state["posts"] += 1
-                # First POST is unparseable (stale session); second is valid.
-                return FakeRes("garbage-not-json" if state["posts"] == 1 else good)
+                return FakeRes("garbage-not-json")
 
         monkeypatch.setattr(_explore, "_get_client", lambda *a, **k: FakeClient())
-        result = _explore.fetch_explore("JFK")
-        assert len(result.destinations) > 0
-        assert state["gets"] == 2 and state["posts"] == 2
+        with pytest.raises(SwoopParseError):
+            _explore.fetch_explore("JFK")
+        # Params were already fresh, so no pointless second page fetch/POST.
+        assert state["gets"] == 1 and state["posts"] == 1
 
 
 class TestPublicExplore:
@@ -343,6 +400,21 @@ class TestPriceExploreAll:
             _dest(destination="ORD", departure_date=None),
             _dest(destination="LAX"),
         ]
+        assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
+
+    def test_transport_error_on_one_does_not_sink_batch(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopHTTPError
+
+        # A transport failure on ONE destination must not discard the prices
+        # already computed for the others.
+        def fake(dest, **kw):
+            if dest.destination == "ERR":
+                raise SwoopHTTPError(503)
+            return f"price-{dest.destination}"
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="SFO"), _dest(destination="ERR"), _dest(destination="LAX")]
         assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
 
 

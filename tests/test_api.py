@@ -19,7 +19,7 @@ from tests.factories import FakeHTTPResponse
 
 def test_version():
     assert hasattr(swoop, "__version__")
-    assert swoop.__version__ == "0.5.0"
+    assert swoop.__version__ == "0.6.0"
 
 
 def test_all_exports_importable():

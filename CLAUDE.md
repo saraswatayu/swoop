@@ -55,6 +55,7 @@ One commit per task/phase — not one giant commit at the end. Format: `<type>: 
 | ItinerarySummary b64 path | `[1]` not `[1][1]` — wrong path causes all prices = $0 |
 | Departure time format varies | Sometimes `[hour]`, sometimes `[hour, min]` — use `_safe_tuple` with defaults |
 | Roundtrip booking price | GetBookingResults return price IS the roundtrip total — don't sum outbound + return |
+| OTA sellers can be session-trust-gated | One seller back ≠ "no OTAs exist." On some routes (esp. domestic/ULCC like F9, TO) Google gates the OTA list behind session trust (signed-in account, residential IP, BotGuard `X-Goog-BatchExecute-Bgr` signature). swoop is signature-free, so it returns the unauthenticated view — verified identical to a signed-out Chrome (SFO→MNL=14 sellers, TLS→ALG=1). Reproduce with `scripts/replicate_ota_gating.py`. Signed transport is PR-welcome, not built. |
 | `data[2]` (best flights) often null from RPC | All results come in `data[3]` instead |
 | Deals API is roundtrip-only | Upstream ignores `trip_type=2`; deals always come back with a return date. For one-way exploration use `search()` with explicit destination. |
 | Deals API ignores payload dates | Server picks its own ~4-month forward window; `depart_window` is enforced client-side in `_deals_filter.filter_deals`. |

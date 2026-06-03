@@ -262,7 +262,12 @@ for opt in options:
 Each `BookingOption` is a booking *channel*, not just a fare tier: the
 operating airline (`is_airline_direct`) plus any OTAs Google offers (Expedia,
 FlightHub, …), each with its own `seller_code` and `booking_url`. If every
-option shares one seller, the itinerary is airline-direct — see
+option shares one seller, the itinerary is *either* genuinely airline-direct
+*or* its OTAs are gated behind Google's session-trust signals (signed-in
+account, residential IP, a BotGuard request signature) that swoop does not
+send. swoop returns what an unauthenticated client sees, which is the same
+list a signed-out browser gets — so one seller does not always mean "no OTAs
+exist." See
 [`examples/booking_options.py`](examples/booking_options.py) for splitting
 channels and where OTAs show up.
 

@@ -383,3 +383,99 @@ class PriceResult:
         if detail:
             parts.append(", ".join(detail))
         return f"PriceResult({' '.join(parts)})"
+
+
+@dataclass
+class ExploreDestination:
+    """A single destination suggestion from Google Flights Explore.
+
+    Explore is destination *discovery* ("where could I go?"), not pricing:
+    the RPC returns no price (see ``docs/superpowers/specs``). ``departure_date``
+    / ``return_date`` are Google's per-destination suggestions; ``return_date``
+    is ``None`` for one-way queries. ``origin`` and the ``query_*`` fields are
+    denormalized so :func:`swoop.price_explore` / :meth:`to_search_kwargs` are
+    self-contained, mirroring :class:`Deal`.
+    """
+
+    origin: str
+    destination: Optional[str]          # destination IATA; None when Google omits it
+    destination_name: str               # city / region / landmark display name
+    destination_country: str
+    place_id: str                       # Google Knowledge Graph id, e.g. "/m/0d6lp"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    departure_date: Optional[str] = None
+    return_date: Optional[str] = None
+    image_url: Optional[str] = None
+    secondary_image_url: Optional[str] = None
+    # Ground/drive time (minutes) from the origin metro for nearby drivable
+    # suggestions; None for destinations Explore expects you to fly to. This is
+    # NOT a flight duration — the Explore RPC does not return one.
+    drive_minutes: Optional[int] = None
+    # Discovery query context, denormalized so price_explore/to_search_kwargs
+    # re-price the SAME product the user explored — not a default economy / 1
+    # adult / any-stops search. Mirrors Deal's query_* fields.
+    query_cabin: Optional[str] = None
+    query_adults: int = 1
+    query_children: int = 0
+    query_infants_in_seat: int = 0
+    query_infants_on_lap: int = 0
+    query_max_stops: Optional[int] = None
+
+    def to_search_kwargs(self) -> dict:
+        """Convert this destination into keyword args for :func:`swoop.search`.
+
+        Explore surfaces dates but not the actual itineraries; this rebuilds
+        the search that produced this destination, carrying the discovery query
+        context (cabin, full passenger party, max_stops) forward so pricing
+        reflects the same product — e.g. a ``max_stops=0`` exploration prices a
+        nonstop, not a cheaper connection. Raises ``ValueError`` when
+        ``destination`` or ``departure_date`` is missing (Google occasionally
+        omits either), since a search needs a concrete destination and date.
+        """
+        if not self.destination:
+            raise ValueError("ExploreDestination has no destination airport to search")
+        if not self.departure_date:
+            raise ValueError("ExploreDestination has no departure date to search")
+        kwargs: dict = {
+            "origin": self.origin,
+            "destination": self.destination,
+            "date": self.departure_date,
+        }
+        if self.return_date:
+            kwargs["return_date"] = self.return_date
+        if self.query_cabin:
+            kwargs["cabin"] = self.query_cabin
+        if self.query_max_stops is not None:
+            kwargs["max_stops"] = self.query_max_stops
+        pax = Passengers(
+            adults=self.query_adults,
+            children=self.query_children,
+            infants_in_seat=self.query_infants_in_seat,
+            infants_on_lap=self.query_infants_on_lap,
+        )
+        if pax != Passengers():
+            kwargs["passengers"] = pax
+        return kwargs
+
+    def __repr__(self) -> str:
+        code = self.destination or "?"
+        parts = [f"{code} {self.destination_name} from {self.origin}"]
+        if self.departure_date:
+            parts.append(self.departure_date)
+        return f"ExploreDestination({', '.join(parts)})"
+
+
+@dataclass
+class ExploreResult:
+    """Result of an :func:`swoop.explore` destination-discovery query."""
+
+    destinations: list[ExploreDestination] = field(default_factory=list)
+    origin: str = ""
+    origin_name: Optional[str] = None
+    origin_place_id: Optional[str] = None
+    origin_latitude: Optional[float] = None
+    origin_longitude: Optional[float] = None
+
+    def __repr__(self) -> str:
+        return f"ExploreResult({len(self.destinations)} destinations from {self.origin})"

@@ -327,7 +327,7 @@ def search_trip_options(
     is_complete = len(first_candidates) <= beam_width
     prefixes = [[itinerary] for itinerary in first_candidates[:beam_width]]
 
-    for stage_index in range(1, len(request_legs)):
+    for _ in range(1, len(request_legs)):
         next_prefixes: list[list[Itinerary]] = []
         if not prefixes:
             break
@@ -527,7 +527,7 @@ def resolve_selected_trip(
     selections: list[str] = []
     rpc_calls = 0
 
-    for index, requested_flight in enumerate(requested_flights):
+    for requested_flight in requested_flights:
         selected_payloads = _selected_payloads_for_itineraries(resolved)
         if resolved and selected_payloads is None:
             return [], [], rpc_calls

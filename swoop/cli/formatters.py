@@ -36,14 +36,31 @@ def _format_price(price: Optional[int], currency: Optional[str] = None) -> str:
     return f"{_currency_symbol(currency)}{price:,}"
 
 
-def _stderr_console(**kwargs) -> Console:
-    """Console that writes to stderr (for non-data output)."""
-    return Console(stderr=True, **kwargs)
-
-
 def _stdout_console(**kwargs) -> Console:
     """Console that writes to stdout."""
     return Console(**kwargs)
+
+
+# CSV-injection guard: when Excel/Sheets/LibreOffice open a CSV and see a cell
+# beginning with `=`, `+`, `-`, `@`, tab, or CR, they treat it as a formula.
+# Google's RPC returns seller/brand/place strings that swoop passes through
+# opaquely; if any ever start with one of those characters, opening the CSV
+# could execute attacker-controlled content. Prefix with a single quote to
+# neuter the cell while keeping it human-readable after manual unquoting.
+_DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value) -> str:
+    """Neuter CSV formula-injection on a cell value; "" for None/empty.
+
+    Shared by the price/deals/explore CSV formatters.
+    """
+    if value is None or value == "":
+        return ""
+    s = str(value)
+    if s.startswith(_DANGEROUS_PREFIXES):
+        return "'" + s
+    return s
 
 
 # ---------------------------------------------------------------------------
@@ -129,44 +146,6 @@ def _trip_header(
     if date:
         trip += f" · {format_date_display(date)}"
     return trip
-
-
-def _trip_leg_line(leg) -> str:
-    itinerary = leg.itinerary
-    if itinerary is None:
-        return f"{leg.origin}->{leg.destination} ({leg.date})"
-    dep = _format_clock(itinerary.departure_time)
-    if dep is None and itinerary.segments:
-        dep = _format_clock(itinerary.segments[0].departure_time)
-    arr = _format_clock(itinerary.arrival_time)
-    if arr is None and itinerary.segments:
-        arr = _format_clock(itinerary.segments[-1].arrival_time)
-    has_overnight = any(getattr(seg, "overnight", False) for seg in itinerary.segments)
-    arr_suffix = "+1" if has_overnight else ""
-    duration = format_duration(itinerary.travel_time)
-    stops = itinerary.stop_count if itinerary.stop_count is not None else len(itinerary.layovers)
-    has_overnight_layover = any(getattr(lay, "is_overnight", False) for lay in itinerary.layovers)
-    stop_str = "Nonstop" if stops == 0 else f"{stops} stop{'s' if stops > 1 else ''}"
-    if has_overnight_layover:
-        stop_str += " (overnight)"
-    # Show legroom for nonstop flights with a single segment
-    legroom_str = ""
-    if stops == 0 and itinerary.segments and len(itinerary.segments) == 1:
-        lr = itinerary.segments[0].legroom
-        if lr:
-            legroom_str = f"  {lr}"
-    route = "->".join(
-        [segment.departure_airport_code for segment in itinerary.segments] +
-        ([itinerary.segments[-1].arrival_airport_code] if itinerary.segments else [])
-    )
-    return (
-        f"{_flight_summary(itinerary)}  {route or f'{leg.origin}->{leg.destination}'}  "
-        f"{dep or '?'}-{arr or '?'}{arr_suffix}  {duration}  {stop_str}{legroom_str}"
-    )
-
-
-def _trip_lines(option) -> list[str]:
-    return [f"Leg {index + 1}: {_trip_leg_line(leg)}" for index, leg in enumerate(option.legs)]
 
 
 def _trip_summary(option) -> str:
@@ -688,22 +667,7 @@ def format_price_csv(
     def _b(v: bool) -> str:
         return "true" if v else "false"
 
-    # CSV-injection guard: when Excel/Sheets/LibreOffice open a CSV and
-    # see a cell beginning with `=`, `+`, `-`, `@`, tab, or CR, they
-    # treat it as a formula. Google's RPC returns seller/brand strings
-    # that swoop passes through opaquely; if any of those ever start
-    # with one of those characters, opening the CSV could execute
-    # attacker-controlled content. Prefix with a single quote to neuter
-    # the cell while keeping it human-readable after manual unquoting.
-    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-    def _s(value: Optional[str]) -> str:
-        if not value:
-            return ""
-        if value.startswith(_DANGEROUS_PREFIXES):
-            return "'" + value
-        return value
-
+    _s = _csv_safe
     currency = result.currency or ""
     writer = csv.writer(sys.stdout)
     writer.writerow([
@@ -907,20 +871,7 @@ def format_deals_csv(
 ) -> None:
     """Render deals as CSV to stdout."""
     deals = list(result.deals[:limit]) if limit else list(result.deals)
-
-    # CSV-injection guard: matches format_price_csv. See the long-form
-    # comment there for the rationale (formula execution on open in
-    # Excel/Sheets/LibreOffice when a cell starts with =, +, -, @, \t, \r).
-    _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-    def _s(value) -> str:
-        if value is None or value == "":
-            return ""
-        s = str(value)
-        if s.startswith(_DANGEROUS_PREFIXES):
-            return "'" + s
-        return s
-
+    _s = _csv_safe
     writer = csv.writer(sys.stdout)
     writer.writerow([
         "origin", "destination", "destination_city", "destination_country",
@@ -960,3 +911,124 @@ def format_deals_brief(
         dates = _deals_date_range(d)
         airline_label = ", ".join(d.airline_names) or ", ".join(d.airlines)
         print(f"{i:3d}  {d.destination:4s}  {d.destination_city:<25s} {price_str:>10s}{savings:>10s}  {dates:>12s}  {stops:>8s}  {airline_label}")
+
+
+# ---------------------------------------------------------------------------
+# Explore formatters
+# ---------------------------------------------------------------------------
+
+
+def _explore_date_range(d) -> str:
+    """Compact suggested-date range; just the departure for one-way."""
+    if not d.departure_date:
+        return "—"
+    dep = format_date_display(d.departure_date)
+    if d.return_date:
+        return f"{dep} – {format_date_display(d.return_date)}"
+    return dep
+
+
+def format_explore_table(
+    result,
+    *,
+    cabin: str = "economy",
+    no_color: bool = False,
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations as a Rich table to stdout."""
+    console = _stdout_console(no_color=no_color)
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+
+    table = Table(title=f"Explore from {result.origin} ({cabin})", show_lines=False)
+    table.add_column("#", style="dim", width=3)
+    table.add_column("Destination", min_width=20)
+    table.add_column("Airport", width=7)
+    table.add_column("Dates", min_width=12)
+    table.add_column("Drive", justify="right")
+
+    for i, d in enumerate(dests, 1):
+        name = d.destination_name
+        if d.destination_country:
+            name += f", {d.destination_country}"
+        drive = format_duration(d.drive_minutes) if d.drive_minutes is not None else "—"
+        table.add_row(str(i), name, d.destination or "—", _explore_date_range(d), drive)
+
+    console.print(table)
+
+
+def format_explore_json(
+    result,
+    *,
+    cabin: str = "economy",
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations as JSON to stdout."""
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    output = {
+        "query": {"origin": result.origin, "cabin": cabin},
+        "origin": {
+            "code": result.origin,
+            "name": result.origin_name,
+            "place_id": result.origin_place_id,
+            "latitude": result.origin_latitude,
+            "longitude": result.origin_longitude,
+        },
+        "total_destinations": len(result.destinations),
+        "destinations": [
+            {
+                "index": i,
+                "destination": d.destination,
+                "destination_name": d.destination_name,
+                "destination_country": d.destination_country,
+                "place_id": d.place_id,
+                "latitude": d.latitude,
+                "longitude": d.longitude,
+                "departure_date": d.departure_date,
+                "return_date": d.return_date,
+                "drive_minutes": d.drive_minutes,
+                "image_url": d.image_url,
+                "secondary_image_url": d.secondary_image_url,
+            }
+            for i, d in enumerate(dests, 1)
+        ],
+    }
+    print(json.dumps(output, indent=2))
+
+
+def format_explore_csv(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations as CSV to stdout."""
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    _s = _csv_safe
+    writer = csv.writer(sys.stdout)
+    writer.writerow([
+        "origin", "destination", "destination_name", "destination_country",
+        "place_id", "latitude", "longitude",
+        "departure_date", "return_date", "drive_minutes",
+    ])
+    for d in dests:
+        writer.writerow([
+            _s(d.origin), _s(d.destination or ""), _s(d.destination_name),
+            _s(d.destination_country), _s(d.place_id),
+            d.latitude if d.latitude is not None else "",
+            d.longitude if d.longitude is not None else "",
+            _s(d.departure_date or ""), _s(d.return_date or ""),
+            d.drive_minutes if d.drive_minutes is not None else "",
+        ])
+
+
+def format_explore_brief(
+    result,
+    *,
+    limit: Optional[int] = None,
+) -> None:
+    """Render explore destinations in compact one-line-per-destination format."""
+    dests = list(result.destinations[:limit]) if limit else list(result.destinations)
+    for i, d in enumerate(dests, 1):
+        dur = format_duration(d.drive_minutes) if d.drive_minutes is not None else ""
+        dates = _explore_date_range(d)
+        code = d.destination or "???"
+        print(f"{i:3d}  {code:4s}  {d.destination_name:<25s}  {dates:>16s}  {dur}")

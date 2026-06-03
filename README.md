@@ -336,6 +336,44 @@ shows up as a `PriceChange` rather than a new+gone pair.
 > [!TIP]
 > Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
 
+### Destination discovery (explore)
+
+`explore()` is the fourth primitive. Where `search()` answers "what flights from
+A to B?", `check_price()` answers "how much for this exact flight?", and
+`deals()` answers "where's cheap right now?", `explore()` answers
+**"where could I go from here?"** — destination inspiration with images,
+coordinates, and Google's suggested dates, one-way or roundtrip.
+
+```python
+from swoop import explore, price_explore, price_explore_all, Region
+
+# Destinations you could fly to from JFK (roundtrip; one_way=True for one-way).
+# Narrow client-side with the same filters deals() exposes:
+result = explore("JFK", region=Region.EUROPE, trip_length=(5, 10))
+for d in result.destinations[:5]:
+    print(f"{d.destination_name:20} {d.destination}  {d.departure_date}")
+
+# explore() is metadata-only (no price). Price a chosen destination on demand:
+priced = price_explore(result.destinations[0])
+if priced:
+    print(f"${priced.price}")
+
+# Or price a whole page of destinations concurrently (order-preserving;
+# None where a destination can't be priced):
+prices = price_explore_all(result.destinations[:10])
+```
+
+> [!NOTE]
+> The Explore RPC returns **no price** — it is a discovery/inspiration tool, not
+> a pricing one. Use `price_explore()` (or `price_explore_all()` to price many
+> in parallel) to price chosen destinations, or `deals()` for priced bargains.
+> It supports one-way and roundtrip; the result set is geographic-scope-driven
+> rather than a fixed count. The `destinations`, `exclude_destinations`,
+> `region`, and `trip_length` filters narrow the set client-side (`trip_length`
+> is roundtrip-only).
+
+CLI: `swoop explore JFK` (add `--one-way`, `--region europe`, `--trip-length 5-10`, `--destination LIS`, `-o json -q | jq`).
+
 ### Runnable examples
 
 Real-world patterns are in [`examples/`](examples/):

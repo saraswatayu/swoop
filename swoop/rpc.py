@@ -406,7 +406,11 @@ def _post_with_retry(
     import time
 
     short_url = url.split("/")[-1]
-    for attempt in range(1 + transport.retries):
+    # Always make at least one attempt: a negative `retries` (e.g. a stray
+    # `--retries -1` from the CLI, which has no lower bound) would otherwise
+    # make range() empty, fall off the end, and return None — crashing callers
+    # that dereference `res.text`.
+    for attempt in range(max(1, 1 + transport.retries)):
         res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
         if res.status_code == 200:
             logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))

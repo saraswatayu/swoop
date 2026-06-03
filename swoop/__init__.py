@@ -22,7 +22,7 @@ Basic usage::
 
 from __future__ import annotations
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from .decoder import (
     AmenityFlags,
@@ -40,7 +40,7 @@ from .decoder import (
 from ._regions import Region
 from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .builders import CabinClass, SearchLeg
-from .models import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -84,19 +84,6 @@ from ._validate import (
 from .rpc import _normalize_rpc_leg
 
 logger = logging.getLogger(__name__)
-
-
-def _filter_by_flight_number(
-    result: Optional[RawSearchResult], carrier: Optional[str], number: str
-) -> Optional[RawSearchResult]:
-    """Filter a raw search result to only itineraries matching a flight number."""
-    if result is None:
-        return None
-    best = [it for it in result.best if itinerary_matches_flight(it, carrier, number)]
-    other = [it for it in result.other if itinerary_matches_flight(it, carrier, number)]
-    if not best and not other:
-        return None
-    return RawSearchResult(best=best, other=other, price_range=result.price_range)
 
 
 def _filter_trip_options_by_flight_number(
@@ -719,6 +706,25 @@ def search_deal(
     return search(transport=transport, **deal.to_search_kwargs())
 
 
+def _price_cheapest(
+    result: SearchResult, transport: TransportConfig
+) -> Optional[PriceResult]:
+    """Price the cheapest itinerary in a search result, or ``None`` if empty.
+
+    Shared by :func:`price_deal` and :func:`price_explore`: both run a search
+    for a discovered route, then price its cheapest matching itinerary via
+    :func:`price_selector`.
+    """
+    if not result.results:
+        return None
+    # Cheapest itinerary first (discovery listed the cheapest known price).
+    cheapest = min(
+        result.results,
+        key=lambda opt: opt.price if opt.price is not None else float("inf"),
+    )
+    return price_selector(cheapest.selector, transport=transport)
+
+
 def price_deal(
     deal: "Deal",
     *,
@@ -738,15 +744,190 @@ def price_deal(
     Returns:
         A :class:`PriceResult`, or ``None`` if the deal can't be priced.
     """
-    result = search_deal(deal, transport=transport)
-    if not result.results:
-        return None
-    # Cheapest itinerary first (the deal listed the cheapest known price).
-    cheapest = min(
-        result.results,
-        key=lambda opt: opt.price if opt.price is not None else float("inf"),
+    return _price_cheapest(search_deal(deal, transport=transport), transport)
+
+
+# ---------------------------------------------------------------------------
+# explore() — discover destinations you could fly to from an origin.
+# ---------------------------------------------------------------------------
+
+
+def explore(
+    origin: str,
+    *,
+    cabin: CabinClass = "economy",
+    one_way: bool = False,
+    max_stops: Optional[int] = None,
+    passengers: Passengers = Passengers(),
+    # Client-side discovery filters (applied to the full set the RPC returns)
+    destinations: Optional[list[str]] = None,
+    exclude_destinations: Optional[list[str]] = None,
+    region: Optional["Region"] = None,
+    trip_length: Optional[tuple[int, int]] = None,
+    transport: TransportConfig = TransportConfig(),
+) -> ExploreResult:
+    """Discover destinations you could fly to from an origin ("where could I go?").
+
+    swoop's fourth primitive, alongside :func:`search`, :func:`check_price`,
+    and :func:`deals`. Returns destination suggestions (name, country, images,
+    coordinates, and Google's suggested dates), one-way or roundtrip, via the
+    ``GetExploreDestinations`` RPC.
+
+    The Explore RPC returns no price — use :func:`price_explore` to price a
+    chosen destination. ``explore`` is destination *discovery* (inspiration),
+    while :func:`deals` is *bargain* discovery (cheap roundtrips, with prices);
+    they answer the same question with different selection criteria.
+
+    The Explore RPC returns the full destination set; ``destinations``,
+    ``exclude_destinations``, ``region``, and ``trip_length`` narrow it
+    client-side, mirroring :func:`deals`'s filters so library callers get the
+    same filtering the CLI exposes.
+
+    Args:
+        origin: Origin airport IATA code (e.g. ``"JFK"``).
+        cabin: Cabin class (default ``"economy"``).
+        one_way: One-way (``True``) or roundtrip (``False``, default). For a
+            one-way query, each destination's ``return_date`` is ``None``.
+        max_stops: Maximum stops. ``None`` = any, ``0`` = nonstop.
+        passengers: Passenger counts (default ``Passengers()``).
+        destinations: Whitelist of destination IATA codes; only these are kept.
+        exclude_destinations: Blacklist of destination IATA codes.
+        region: Limit to destinations in this :class:`Region`. Requires the
+            optional ``airportsdata`` dependency (silently matches nothing
+            without it).
+        trip_length: Inclusive ``(min_nights, max_nights)`` filter. Roundtrip
+            only — combining it with ``one_way`` raises ``ValueError``.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        An :class:`ExploreResult` with the destinations that passed every filter.
+    """
+    validate_iata_code(origin, "origin")
+    validate_cabin(cabin)
+    validate_adults(passengers.adults)
+    if max_stops is not None and not (0 <= max_stops <= 2):
+        raise ValueError(f"max_stops must be 0, 1, or 2, got {max_stops!r}")
+    if one_way and trip_length is not None:
+        raise ValueError("trip_length is roundtrip-only; it cannot be combined with one_way")
+    from ._explore import fetch_explore
+
+    result = fetch_explore(
+        origin,
+        cabin=cabin,
+        one_way=one_way,
+        max_stops=max_stops,
+        passengers=passengers,
+        transport=transport,
     )
-    return price_selector(cheapest.selector, transport=transport)
+    if destinations or exclude_destinations or region is not None or trip_length is not None:
+        from ._explore_filter import filter_explore
+        result.destinations = filter_explore(
+            result.destinations,
+            destinations=destinations,
+            exclude_destinations=exclude_destinations,
+            region=region,
+            trip_length=trip_length,
+        )
+    return result
+
+
+def price_explore(
+    destination: ExploreDestination,
+    *,
+    transport: TransportConfig = TransportConfig(),
+) -> Optional[PriceResult]:
+    """Get the current bookable price for an explore destination.
+
+    Runs :func:`search` for the destination's route and Google-suggested dates,
+    then prices the cheapest matching itinerary via :func:`price_selector`.
+    Returns ``None`` if no itineraries match. Raises ``ValueError`` if the
+    destination has no airport code or no departure date (Google occasionally
+    omits either).
+
+    This bridges discovery to pricing, mirroring :func:`price_deal`. Note it
+    prices the *suggested* dates; for the cheapest dates, use :func:`search`
+    with date flexibility.
+
+    Args:
+        destination: An :class:`ExploreDestination` from :func:`explore`.
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A :class:`PriceResult`, or ``None`` if the destination can't be priced.
+    """
+    result = search(transport=transport, **destination.to_search_kwargs())
+    return _price_cheapest(result, transport)
+
+
+def price_explore_all(
+    destinations: list[ExploreDestination],
+    *,
+    max_workers: int = 4,
+    transport: TransportConfig = TransportConfig(),
+) -> list[Optional[PriceResult]]:
+    """Price many explore destinations concurrently.
+
+    Like calling :func:`price_explore` once per destination, but issues the
+    searches in parallel (each destination is independent) — turning a whole
+    explore page's worth of sequential round trips into one concurrent batch,
+    mirroring the threading :func:`deals` uses for multi-origin fetches.
+
+    Args:
+        destinations: Destinations from :func:`explore` to price.
+        max_workers: Maximum concurrent pricing requests (default ``4``,
+            matching :func:`deals`'s multi-origin cap — each pricing call is
+            itself several RPCs, so a higher fan-out invites Google's rate
+            limiter).
+        transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A list of ``Optional[PriceResult]`` the same length and order as
+        ``destinations``: a :class:`PriceResult` per destination, or ``None``
+        where it can't be priced (no matching itinerary, a missing airport
+        code / departure date — a ``ValueError`` from :func:`price_explore` —
+        or a non-rate-limit transport/parse failure, which is logged at
+        WARNING). One bad entry never discards the rest of the batch.
+
+    Raises:
+        SwoopRateLimitError: If Google rate-limits the batch. The first 429
+            stops further dispatch — continuing would only deepen the block —
+            and propagates so the caller backs off and retries later, instead
+            of receiving a quietly-incomplete list of mostly ``None``.
+    """
+    if not destinations:
+        return []
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    results: list[Optional[PriceResult]] = [None] * len(destinations)
+    rate_limited = threading.Event()
+
+    def _price(index: int, dest: ExploreDestination) -> None:
+        if rate_limited.is_set():
+            return  # a 429 already fired — don't pile more load onto the limiter
+        try:
+            results[index] = price_explore(dest, transport=transport)
+        except ValueError:
+            # Missing airport code / departure date — a permanent, per-item
+            # data gap. Skip it silently (expected).
+            pass
+        except SwoopRateLimitError:
+            # A batch-wide condition, not a per-item gap: stop dispatching and
+            # surface it after the pool drains so the caller backs off.
+            rate_limited.set()
+        except SwoopError as exc:
+            # A non-rate-limit transport/parse failure on one destination must
+            # not sink the batch: index assignment leaves the rest intact. Log
+            # so it isn't silent.
+            logger.warning("price_explore_all: could not price %s: %s", dest.destination or "?", exc)
+
+    workers = max(1, min(max_workers, len(destinations)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(lambda pair: _price(*pair), enumerate(destinations)))
+
+    if rate_limited.is_set():
+        raise SwoopRateLimitError()
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -915,6 +1096,9 @@ __all__ = [
     "price_deal",
     "watch_deals",
     "diff_deals",
+    "explore",
+    "price_explore",
+    "price_explore_all",
     "get_booking_results",
     "search_raw",
     "set_country",
@@ -926,6 +1110,8 @@ __all__ = [
     "Deal",
     "DealsDiff",
     "DealsResult",
+    "ExploreDestination",
+    "ExploreResult",
     "PriceChange",
     "Region",
     "Passengers",

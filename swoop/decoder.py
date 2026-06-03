@@ -47,7 +47,7 @@ Itinerary summary:
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple
 
 from ._formatting import fmt_clock, fmt_duration
 from .builders import ItinerarySummary

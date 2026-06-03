@@ -350,3 +350,40 @@ class TestBookingContract:
 
         report = _booking_report("booking_jfk_lax", itinerary, options, len(rpc_captures))
         _record_booking_artifacts("booking_jfk_lax", rpc_captures, report)
+
+
+class TestExploreContract:
+    """Canary for the GetExploreDestinations RPC (destination discovery).
+
+    Explore returns metadata only (no price), so this asserts the structural
+    contract: a non-empty destination set with names + place ids, and the
+    one-way variant carrying no return dates. Count is geographic-scope-driven
+    and variable, so we assert ``>= 1`` rather than an exact number.
+    """
+
+    def test_roundtrip_explore_returns_destinations(self):
+        result = swoop.explore("JFK", transport=TransportConfig(timeout=30, retries=1))
+
+        assert result.origin == "JFK"
+        assert len(result.destinations) >= 1, "Expected at least one live explore destination"
+        d = result.destinations[0]
+        assert d.destination_name, "Destination should have a display name"
+        assert d.place_id.startswith("/m/"), "Destination should carry a Google place id"
+        assert d.origin == "JFK"
+
+    def test_oneway_explore_has_no_return_dates(self):
+        result = swoop.explore("JFK", one_way=True, transport=TransportConfig(timeout=30, retries=1))
+
+        assert len(result.destinations) >= 1, "Expected at least one live one-way destination"
+        assert all(d.return_date is None for d in result.destinations), (
+            "One-way explore should carry no return dates"
+        )
+        # return_date is forced None for one-way, so the assertion above can't
+        # detect a one-way response layout drift. Assert the wire-derived fields
+        # parse too: at least one suggested departure date, plus a name/place id
+        # on the first row — a column shift would break these.
+        assert any(d.departure_date for d in result.destinations), (
+            "One-way explore should still parse Google's suggested departure dates"
+        )
+        d = result.destinations[0]
+        assert d.destination_name and d.place_id.startswith("/m/")

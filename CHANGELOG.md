@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-03
+
+### Added
+
+- **Destination discovery API** — `swoop.explore(origin, …)` and `swoop explore <ORIGIN>` CLI: swoop's fourth primitive, "where could I go from here?", via the `GetExploreDestinations` RPC. Returns `ExploreDestination` objects (name, country, coordinates, images, Google's suggested dates, and drive time for nearby drivable destinations), one-way or roundtrip.
+- **Explore bridge** — `swoop.price_explore(destination)` prices a chosen destination's cheapest itinerary via the existing search/price pipeline; `swoop.price_explore_all(destinations)` prices a whole page of destinations concurrently (order-preserving, capped worker pool; `None` for unpriceable entries; a rate limit stops the batch and propagates so the caller backs off rather than hammering); `ExploreDestination.to_search_kwargs()` for direct integration. The Explore RPC returns no price (it is discovery, not pricing), so prices come from composition — mirroring `deals()` → `price_deal()`. The discovery query context — cabin, full passenger party, and `max_stops` — is carried onto each `ExploreDestination`, so pricing re-prices the same product (a nonstop exploration prices a nonstop, not a cheaper connection).
+- New `ExploreDestination` and `ExploreResult` dataclasses with frozen API-surface coverage. The deals-style client-side filters (`destinations`, `exclude_destinations`, `region`, `trip_length`) are exposed on `explore()` itself — not just the CLI — so library callers can narrow the set too. CLI supports table/JSON/CSV/brief output (CSV neutralizes spreadsheet formula prefixes) and `--destination`, `--exclude-destination`, `--region`, `--trip-length`, plus `--one-way`. Stable `bl`/`f.sid` session params are cached across calls (complete params only, fetched single-flight) to skip a redundant page fetch, with self-healing on a stale-session rejection.
+
 ## [0.5.0] - 2026-05-24
 
 ### Added

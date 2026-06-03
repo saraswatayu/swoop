@@ -10,7 +10,7 @@ from dataclasses import fields
 import pytest
 
 import swoop
-from swoop import Deal, DealsDiff, DealsResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from swoop import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
     CarbonEmissions,
@@ -46,6 +46,9 @@ class TestFrozenExports:
         "price_deal",
         "watch_deals",
         "diff_deals",
+        "explore",
+        "price_explore",
+        "price_explore_all",
         "get_booking_results",
         "search_raw",
         "set_country",
@@ -57,6 +60,8 @@ class TestFrozenExports:
         "Deal",
         "DealsDiff",
         "DealsResult",
+        "ExploreDestination",
+        "ExploreResult",
         "PriceChange",
         "Region",
         "Passengers",
@@ -312,6 +317,24 @@ class TestFrozenDataclassFields:
         dr = DealsResult()
         assert dr.currency is None
 
+    def test_explore_destination_fields(self):
+        expected = {
+            "origin", "destination", "destination_name", "destination_country",
+            "place_id", "latitude", "longitude",
+            "departure_date", "return_date",
+            "image_url", "secondary_image_url", "drive_minutes",
+            "query_cabin", "query_adults", "query_children",
+            "query_infants_in_seat", "query_infants_on_lap", "query_max_stops",
+        }
+        assert self._field_names(ExploreDestination) == expected
+
+    def test_explore_result_fields(self):
+        expected = {
+            "destinations", "origin", "origin_name", "origin_place_id",
+            "origin_latitude", "origin_longitude",
+        }
+        assert self._field_names(ExploreResult) == expected
+
 
 class TestSearchSignature:
     """Verify search() accepts the expected parameters."""
@@ -401,6 +424,21 @@ class TestSearchSignature:
             "transport",
         ]
         assert param_names == expected
+
+    def test_explore_params(self):
+        sig = inspect.signature(swoop.explore)
+        param_names = list(sig.parameters.keys())
+        expected = [
+            "origin", "cabin", "one_way", "max_stops", "passengers",
+            "destinations", "exclude_destinations", "region", "trip_length",
+            "transport",
+        ]
+        assert param_names == expected
+
+    def test_price_explore_params(self):
+        sig = inspect.signature(swoop.price_explore)
+        param_names = list(sig.parameters.keys())
+        assert param_names == ["destination", "transport"]
 
 
 class TestFrozenDefaults:

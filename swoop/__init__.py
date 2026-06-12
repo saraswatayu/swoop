@@ -38,7 +38,13 @@ from .decoder import (
     itinerary_matches_flight,
 )
 from ._regions import Region
-from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+from .exceptions import (
+    SwoopError,
+    SwoopHTTPError,
+    SwoopParseError,
+    SwoopRateLimitError,
+    SwoopUpstreamError,
+)
 from .builders import CabinClass, SearchLeg
 from .models import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
@@ -286,6 +292,10 @@ def search(
     Raises:
         SwoopHTTPError: If Google Flights returns a non-200 response.
         SwoopRateLimitError: If Google Flights returns HTTP 429.
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope (HTTP 200, but no result payload). Distinct
+            from a genuinely empty result, which returns an empty
+            :class:`SearchResult` rather than raising.
         SwoopParseError: If the response cannot be parsed.
 
     Example::
@@ -1138,6 +1148,7 @@ __all__ = [
     "SwoopHTTPError",
     "SwoopParseError",
     "SwoopRateLimitError",
+    "SwoopUpstreamError",
     # Constants
     "SORT_TOP",
     "SORT_CHEAPEST",

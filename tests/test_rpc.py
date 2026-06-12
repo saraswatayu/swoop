@@ -567,6 +567,67 @@ def test_extract_booking_payload_and_rpc_parsers(monkeypatch) -> None:
         rpc._parse_rpc_response(bad_inner_json)
 
 
+# The exact ErrorResponse body Google returned during the 2026-06-11 outage
+# (issue #30): HTTP 200, no payload at [0][2], a gRPC 13 (INTERNAL) error block
+# at [0][5] referencing travel.frontend.flights.ErrorResponse.
+_SHOPPING_ERROR_RESPONSE = (
+    ")]}'\n\n"
+    + json.dumps(
+        [
+            [
+                "wrb.fr", None, None, None, None,
+                [
+                    13, None,
+                    [
+                        [
+                            "type.googleapis.com/travel.frontend.flights.ErrorResponse",
+                            [[None, [[1781231390777253, 99197463, 3005791615], None, None, None, None, [[0]]], 0, "Hm8raqW4L5fEpt8P__qimQs", "HfM91MiaVuJkABZsRgBG"], 0],
+                        ]
+                    ],
+                ],
+            ],
+            ["di", 198],
+            ["af.httprm", 198, "-5465642232923047722", 16],
+        ]
+    )
+)
+
+
+def test_parse_rpc_response_raises_on_error_envelope() -> None:
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        rpc._parse_rpc_response(_SHOPPING_ERROR_RESPONSE)
+    err = excinfo.value
+    assert err.grpc_code == 13
+    assert err.type_url == "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+    # The message should name the gRPC status so an outage reads clearly.
+    assert "13 INTERNAL" in str(err)
+    assert "upstream error" in str(err).lower()
+
+
+def test_rpc_error_envelope_detection() -> None:
+    # Success frame: payload at index 2, no error block.
+    assert rpc._rpc_error_envelope(["wrb.fr", None, "{...}"]) is None
+    # Genuinely-empty frame: null payload but no error envelope -> not an error.
+    assert rpc._rpc_error_envelope(["wrb.fr", None, None]) is None
+    # Error frame: gRPC code + ErrorResponse type url.
+    frame = [
+        "wrb.fr", None, None, None, None,
+        [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
+    ]
+    assert rpc._rpc_error_envelope(frame) == (
+        13, "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+    )
+    # Non-list input is tolerated.
+    assert rpc._rpc_error_envelope(None) is None
+
+
+def test_empty_result_still_returns_none_not_error() -> None:
+    # A null payload that is NOT an error envelope must stay a quiet None,
+    # so "no flights found" never masquerades as an upstream outage.
+    empty = ")]}'" + json.dumps([["wrb.fr", None, None]])
+    assert rpc._parse_rpc_response(empty) is None
+
+
 def test_booking_parser_logs_debug_for_partial_drops_and_warning_for_total_drop(caplog) -> None:
     mixed_payload = [
         make_booking_option(price=250, brand_code="DELTA MAIN CLASSIC", brand_label="Delta Main Classic"),

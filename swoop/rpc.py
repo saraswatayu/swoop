@@ -32,7 +32,12 @@ from ._booking import (
 )
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get
-from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+from .exceptions import (
+    SwoopHTTPError,
+    SwoopParseError,
+    SwoopRateLimitError,
+    SwoopUpstreamError,
+)
 from .models import Passengers, TransportConfig
 
 logger = logging.getLogger(__name__)
@@ -669,12 +674,46 @@ def get_trip_booking_results(
     return _parse_booking_rpc_response(res.text)
 
 
+def _rpc_error_envelope(frame: Any) -> Optional[tuple[Optional[int], Optional[str]]]:
+    """Detect Google's structured ErrorResponse envelope in a ``wrb.fr`` frame.
+
+    On success the frame is ``["wrb.fr", null, "<json>"]`` and the result
+    payload sits at index 2. When Google rejects the request it still answers
+    HTTP 200, but replaces that payload with an error block, e.g.::
+
+        ["wrb.fr", null, null, null, null,
+         [13, null, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", ...]]]]
+
+    The leading int (``13`` here) is a gRPC status code (13 = INTERNAL).
+    Returns ``(grpc_code, type_url)`` when such a block is present, else None.
+    """
+    if not isinstance(frame, list):
+        return None
+    for element in frame:
+        if (
+            isinstance(element, list)
+            and len(element) >= 3
+            and isinstance(element[0], int)
+        ):
+            type_url = _safe_get(element, [2, 0, 0])
+            if isinstance(type_url, str) and "ErrorResponse" in type_url:
+                return element[0], type_url
+    return None
+
+
 def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
     """Parse the RPC response.
 
     Response format: `)]}'` security prefix -> strip -> JSON parse
     -> extract [0][2] -> JSON parse again -> flight data.
     The inner structure matches what decode_result() expects.
+
+    Raises:
+        SwoopUpstreamError: If Google returns a structured ErrorResponse
+            envelope (HTTP 200, but the request was rejected) instead of a
+            result payload. This is distinct from a genuinely empty result,
+            which returns a decoded result with no itineraries.
+        SwoopParseError: If the response is malformed JSON.
     """
     # Strip security prefix
     stripped = text.lstrip(")]}'")
@@ -687,14 +726,26 @@ def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
         raise SwoopParseError(f"Failed to parse RPC response JSON: {e}") from e
 
     # Extract inner JSON string at [0][2]
-    inner_json = None
     try:
-        inner_json = outer[0][2]
+        frame = outer[0]
+        inner_json = frame[2]
     except (IndexError, TypeError):
         logger.warning("RPC response missing data at [0][2]")
         return None
 
     if not inner_json:
+        # No payload at [0][2]. Before treating this as an (empty) result,
+        # check whether Google rejected the request with a structured
+        # ErrorResponse envelope — surface that as a loud error so callers
+        # can distinguish an upstream outage from "no flights found".
+        error = _rpc_error_envelope(frame)
+        if error is not None:
+            grpc_code, type_url = error
+            logger.warning(
+                "GetShoppingResults returned an ErrorResponse (gRPC %s, %s)",
+                grpc_code, type_url,
+            )
+            raise SwoopUpstreamError(grpc_code, type_url=type_url)
         return None
 
     # Inner value is a JSON string that needs to be parsed again

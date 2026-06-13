@@ -63,6 +63,11 @@ class SearchLeg:
         elif isinstance(from_airport, list):
             if not from_airport:
                 raise ValueError("from_airport list must not be empty")
+            for i, code in enumerate(from_airport):
+                if not isinstance(code, str):
+                    raise TypeError(f"from_airport[{i}] must be str, got {type(code).__name__}")
+                if not code:
+                    raise ValueError(f"from_airport[{i}] must not be empty")
             self._from_airports = [a.upper() for a in from_airport]
         else:
             raise TypeError(f"from_airport must be str or list[str], got {type(from_airport).__name__}")
@@ -74,6 +79,11 @@ class SearchLeg:
         elif isinstance(to_airport, list):
             if not to_airport:
                 raise ValueError("to_airport list must not be empty")
+            for i, code in enumerate(to_airport):
+                if not isinstance(code, str):
+                    raise TypeError(f"to_airport[{i}] must be str, got {type(code).__name__}")
+                if not code:
+                    raise ValueError(f"to_airport[{i}] must not be empty")
             self._to_airports = [a.upper() for a in to_airport]
         else:
             raise TypeError(f"to_airport must be str or list[str], got {type(to_airport).__name__}")
@@ -104,6 +114,34 @@ class SearchLeg:
     def to_airports(self) -> list[str]:
         """Destination airport(s) as a list. Always a list, even for single-airport legs."""
         return self._to_airports
+
+    @property
+    def from_airport(self) -> str:
+        """Backward-compatible single-airport accessor.
+
+        Returns the airport code when this is a single-airport leg.
+        Raises ``ValueError`` for multi-airport legs — use ``from_airports`` instead.
+        """
+        if len(self._from_airports) != 1:
+            raise ValueError(
+                f"from_airport is ambiguous for multi-airport leg {self._from_airports!r}; "
+                "use from_airports instead"
+            )
+        return self._from_airports[0]
+
+    @property
+    def to_airport(self) -> str:
+        """Backward-compatible single-airport accessor.
+
+        Returns the airport code when this is a single-airport leg.
+        Raises ``ValueError`` for multi-airport legs — use ``to_airports`` instead.
+        """
+        if len(self._to_airports) != 1:
+            raise ValueError(
+                f"to_airport is ambiguous for multi-airport leg {self._to_airports!r}; "
+                "use to_airports instead"
+            )
+        return self._to_airports[0]
 
     def apply_to(self, info) -> None:
         """Write this leg into a protobuf Info message.

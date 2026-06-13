@@ -78,6 +78,11 @@ def _normalize_rpc_leg(
             raise ValueError("origin must not be empty")
         origin_norm: str | list[str] = origin.upper()
     elif isinstance(origin, list):
+        for i, code in enumerate(origin):
+            if not isinstance(code, str):
+                raise TypeError(f"origin[{i}] must be str, got {type(code).__name__}")
+            if not code:
+                raise ValueError(f"origin[{i}] must not be empty")
         origin_norm = list(dict.fromkeys(c.upper() for c in origin))  # dedup, preserve order
         if not origin_norm:
             raise ValueError("origin must not be empty")
@@ -89,6 +94,11 @@ def _normalize_rpc_leg(
             raise ValueError("destination must not be empty")
         destination_norm: str | list[str] = destination.upper()
     elif isinstance(destination, list):
+        for i, code in enumerate(destination):
+            if not isinstance(code, str):
+                raise TypeError(f"destination[{i}] must be str, got {type(code).__name__}")
+            if not code:
+                raise ValueError(f"destination[{i}] must not be empty")
         destination_norm = list(dict.fromkeys(c.upper() for c in destination))
         if not destination_norm:
             raise ValueError("destination must not be empty")
@@ -530,8 +540,8 @@ def _build_selected_legs(itinerary: Itinerary) -> list[list[Any]]:
 def get_booking_results(
     itinerary_or_token: Itinerary | str,
     *,
-    origin: str | list[str] = "",
-    destination: str | list[str] = "",
+    origin: str | list[str] | None = None,
+    destination: str | list[str] | None = None,
     date: str = "",
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),

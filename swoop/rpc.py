@@ -73,8 +73,20 @@ def _normalize_rpc_leg(
     selected_legs: Optional[list[list[Any]]] = None,
 ) -> dict[str, Any]:
     """Normalize a single search leg for generic request building."""
-    origin_list = [origin] if isinstance(origin, str) else list(origin)
-    destination_list = [destination] if isinstance(destination, str) else list(destination)
+    if isinstance(origin, str):
+        origin_list = [origin.upper()]
+    elif isinstance(origin, list):
+        origin_list = list(dict.fromkeys(c.upper() for c in origin))  # dedup, preserve order
+    else:
+        raise TypeError(f"origin must be str or list[str], got {type(origin).__name__}")
+
+    if isinstance(destination, str):
+        destination_list = [destination.upper()]
+    elif isinstance(destination, list):
+        destination_list = list(dict.fromkeys(c.upper() for c in destination))
+    else:
+        raise TypeError(f"destination must be str or list[str], got {type(destination).__name__}")
+
     if not origin_list:
         raise ValueError("origin must not be empty")
     if not destination_list:

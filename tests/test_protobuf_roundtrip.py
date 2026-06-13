@@ -278,5 +278,5 @@ class TestSearchLegValidation:
 
     def test_airport_uppercased(self):
         leg = SearchLeg(date="2026-06-15", from_airport="jfk", to_airport="lax")
-        assert leg.from_airport == "JFK"
-        assert leg.to_airport == "LAX"
+        assert leg.from_airports == ["JFK"]
+        assert leg.to_airports == ["LAX"]

@@ -211,8 +211,8 @@ def search_legs(
 
     request_legs = [
         _normalize_rpc_leg(
-            leg._from_airports,
-            leg._to_airports,
+            leg._from_airports if len(leg._from_airports) > 1 else leg._from_airports[0],
+            leg._to_airports if len(leg._to_airports) > 1 else leg._to_airports[0],
             leg.date,
             max_stops=leg.max_stops,
             airlines=list(leg.airlines) if leg.airlines else None,

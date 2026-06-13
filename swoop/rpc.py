@@ -74,26 +74,30 @@ def _normalize_rpc_leg(
 ) -> dict[str, Any]:
     """Normalize a single search leg for generic request building."""
     if isinstance(origin, str):
-        origin_list = [origin.upper()]
+        if not origin:
+            raise ValueError("origin must not be empty")
+        origin_norm: str | list[str] = origin.upper()
     elif isinstance(origin, list):
-        origin_list = list(dict.fromkeys(c.upper() for c in origin))  # dedup, preserve order
+        origin_norm = list(dict.fromkeys(c.upper() for c in origin))  # dedup, preserve order
+        if not origin_norm:
+            raise ValueError("origin must not be empty")
     else:
         raise TypeError(f"origin must be str or list[str], got {type(origin).__name__}")
 
     if isinstance(destination, str):
-        destination_list = [destination.upper()]
+        if not destination:
+            raise ValueError("destination must not be empty")
+        destination_norm: str | list[str] = destination.upper()
     elif isinstance(destination, list):
-        destination_list = list(dict.fromkeys(c.upper() for c in destination))
+        destination_norm = list(dict.fromkeys(c.upper() for c in destination))
+        if not destination_norm:
+            raise ValueError("destination must not be empty")
     else:
         raise TypeError(f"destination must be str or list[str], got {type(destination).__name__}")
 
-    if not origin_list:
-        raise ValueError("origin must not be empty")
-    if not destination_list:
-        raise ValueError("destination must not be empty")
     return {
-        "origin": origin_list,
-        "destination": destination_list,
+        "origin": origin_norm,
+        "destination": destination_norm,
         "date": date,
         "max_stops": max_stops,
         "airlines": sorted(airlines) if airlines else None,
@@ -136,6 +140,11 @@ def _trip_type_from_legs(legs: list[dict[str, Any]]) -> int:
     return 3  # multi-city
 
 
+def _as_list(value: str | list[str]) -> list[str]:
+    """Wrap a str in a list; pass a list through unchanged."""
+    return [value] if isinstance(value, str) else value
+
+
 def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
     """Build a single RPC segment entry from a normalized leg."""
     max_stops = leg.get("max_stops")
@@ -145,8 +154,8 @@ def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
         stops_val = max_stops + 1
 
     return [
-        [[[code, 0] for code in leg["origin"]]],       # departure airports
-        [[[code, 0] for code in leg["destination"]]],  # arrival airports
+        [[[code, 0] for code in _as_list(leg["origin"])]],       # departure airports
+        [[[code, 0] for code in _as_list(leg["destination"])]],  # arrival airports
         _build_time_restrictions(
             leg.get("earliest_departure"),
             leg.get("latest_departure"),

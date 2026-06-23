@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from swoop.cli import main
 from swoop import PriceResult, SearchResult, TripLeg, TripOption
 from swoop.cli.commands import search_cmd, price_cmd
+from swoop.exceptions import SwoopUpstreamError
 from swoop.cli.utils import format_time, format_duration, format_date_display, format_route, check_past_date, IATACodeType, DateType
 from swoop.decoder import (
     BookingOption,
@@ -1558,3 +1559,30 @@ class TestPastDateWarningStreamSeparation:
         assert data["price"] == 342
         assert "is in the past" in result.stderr
         assert "is in the past" not in result.stdout
+
+
+class TestUpstreamErrorHandling:
+    """SwoopUpstreamError is a sibling of SwoopHTTPError/SwoopParseError, so the
+    CLI must catch it explicitly — otherwise an upstream outage (which fires
+    often under throttling) crashes the command with a raw traceback."""
+
+    @patch("swoop.cli.commands._run_search")
+    def test_search_reports_upstream_error_cleanly(self, mock_search):
+        mock_search.side_effect = SwoopUpstreamError(
+            13, type_url="type.googleapis.com/travel.frontend.flights.ErrorResponse"
+        )
+        result = CliRunner().invoke(main, ["search", "JFK", "LAX", _FUTURE, "-q"])
+        # Handled, not crashed: clean exit code, no leaked exception/traceback.
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "gRPC 13" in result.output
+
+    @patch("swoop.check_price")
+    def test_price_reports_upstream_error_cleanly(self, mock_price):
+        mock_price.side_effect = SwoopUpstreamError(13)
+        result = CliRunner().invoke(
+            main, ["price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-q"]
+        )
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "upstream error" in result.output.lower()

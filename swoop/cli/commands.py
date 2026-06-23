@@ -316,7 +316,7 @@ def search_cmd(
       swoop search JFK LAX 2026-06-15 --show-price-commands
       swoop search JFK LAX 2026-06-15 -o json -q | jq '.results[0]'
     """
-    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError
 
     from .formatters import (
         format_search_brief,
@@ -409,6 +409,9 @@ def search_cmd(
             ctx.exit(2)
         except SwoopRateLimitError:
             err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+            ctx.exit(3)
+        except SwoopUpstreamError as e:
+            err.print(f"[red]Google Flights upstream error (gRPC {e.grpc_code}). Not an empty result — try again shortly.[/red]")
             ctx.exit(3)
         except SwoopHTTPError as e:
             err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
@@ -520,7 +523,7 @@ def price_cmd(
       swoop price --selector 'swoop:sel:1:...'
     """
     import swoop
-    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError
 
     from .formatters import (
         format_price_brief,
@@ -669,6 +672,9 @@ def price_cmd(
     except SwoopRateLimitError:
         err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
         ctx.exit(3)
+    except SwoopUpstreamError as e:
+        err.print(f"[red]Google Flights upstream error (gRPC {e.grpc_code}). Not an empty result — try again shortly.[/red]")
+        ctx.exit(3)
     except SwoopHTTPError as e:
         err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
         ctx.exit(3)
@@ -780,7 +786,7 @@ def deals_cmd(
       swoop deals JFK --nonstop --cabin business
       swoop deals JFK -o json -q | jq '.deals[0]'
     """
-    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError
 
     from .formatters import (
         format_deals_brief,
@@ -871,6 +877,9 @@ def deals_cmd(
         except SwoopRateLimitError:
             err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
             ctx.exit(3)
+        except SwoopUpstreamError as e:
+            err.print(f"[red]Google Flights upstream error (gRPC {e.grpc_code}). Not an empty result — try again shortly.[/red]")
+            ctx.exit(3)
         except SwoopHTTPError as e:
             err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")
             ctx.exit(3)
@@ -931,7 +940,7 @@ def explore_cmd(
       swoop explore JFK --one-way --region europe
       swoop explore JFK -o json -q | jq '.destinations[0]'
     """
-    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+    from swoop.exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError
 
     from .formatters import (
         format_explore_brief,
@@ -982,6 +991,9 @@ def explore_cmd(
             ctx.exit(2)
         except SwoopRateLimitError:
             err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+            ctx.exit(3)
+        except SwoopUpstreamError as e:
+            err.print(f"[red]Google Flights upstream error (gRPC {e.grpc_code}). Not an empty result — try again shortly.[/red]")
             ctx.exit(3)
         except SwoopHTTPError as e:
             err.print(f"[red]Google Flights returned HTTP {e.status_code}[/red]")

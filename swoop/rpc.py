@@ -31,7 +31,7 @@ from ._booking import (
     parse_booking_payload,
 )
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get
+from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, detect_error_envelope
 from .exceptions import (
     SwoopHTTPError,
     SwoopParseError,
@@ -674,31 +674,14 @@ def get_trip_booking_results(
     return _parse_booking_rpc_response(res.text)
 
 
-def _rpc_error_envelope(frame: Any) -> Optional[tuple[Optional[int], Optional[str]]]:
-    """Detect Google's structured ErrorResponse envelope in a ``wrb.fr`` frame.
+def _rpc_error_envelope(frame: Any) -> Optional[tuple[int, Optional[str]]]:
+    """Backward-compatible alias for :func:`decoder.detect_error_envelope`.
 
-    On success the frame is ``["wrb.fr", null, "<json>"]`` and the result
-    payload sits at index 2. When Google rejects the request it still answers
-    HTTP 200, but replaces that payload with an error block, e.g.::
-
-        ["wrb.fr", null, null, null, null,
-         [13, null, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", ...]]]]
-
-    The leading int (``13`` here) is a gRPC status code (13 = INTERNAL).
-    Returns ``(grpc_code, type_url)`` when such a block is present, else None.
+    The detection logic is shared across every RPC parser (shopping, booking,
+    deals, explore); it lives in ``decoder`` so the booking module can import
+    it without a circular dependency on ``rpc``.
     """
-    if not isinstance(frame, list):
-        return None
-    for element in frame:
-        if (
-            isinstance(element, list)
-            and len(element) >= 3
-            and isinstance(element[0], int)
-        ):
-            type_url = _safe_get(element, [2, 0, 0])
-            if isinstance(type_url, str) and "ErrorResponse" in type_url:
-                return element[0], type_url
-    return None
+    return detect_error_envelope(frame)
 
 
 def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:

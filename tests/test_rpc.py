@@ -15,6 +15,7 @@ import urllib.parse
 
 import pytest
 
+import swoop
 import swoop._booking as _booking
 import swoop.rpc as rpc
 from swoop._booking import _extract_booking_url, _extract_seller
@@ -621,11 +622,50 @@ def test_rpc_error_envelope_detection() -> None:
     assert rpc._rpc_error_envelope(None) is None
 
 
+def test_rpc_error_envelope_hardening() -> None:
+    # gRPC code 0 (OK) is success, never an error -> not detected.
+    ok_frame = [
+        "wrb.fr", None, None, None, None,
+        [0, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
+    ]
+    assert rpc._rpc_error_envelope(ok_frame) is None
+    # bool is an int subclass; a True/False leading value must not be read as a
+    # gRPC code.
+    bool_frame = [
+        "wrb.fr", None, None, None, None,
+        [True, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
+    ]
+    assert rpc._rpc_error_envelope(bool_frame) is None
+    # A type url that merely CONTAINS the substring (no ".ErrorResponse" suffix)
+    # must not false-positive.
+    loose_frame = [
+        "wrb.fr", None, None, None, None,
+        [13, None, [["type.googleapis.com/x.NotAnErrorResponseReally", [[None]]]]],
+    ]
+    assert rpc._rpc_error_envelope(loose_frame) is None
+
+
 def test_empty_result_still_returns_none_not_error() -> None:
     # A null payload that is NOT an error envelope must stay a quiet None,
     # so "no flights found" never masquerades as an upstream outage.
     empty = ")]}'" + json.dumps([["wrb.fr", None, None]])
     assert rpc._parse_rpc_response(empty) is None
+
+
+def test_public_search_raises_upstream_error_end_to_end(monkeypatch) -> None:
+    # The PR's headline contract lives in the public search() docstring, but
+    # every other test exercises the private _parse_rpc_response directly. Pin
+    # the full path search() -> search_trip_options -> _search_from_legs so a
+    # regression that swallows the error (e.g. an `if result is None` guard
+    # absorbing it) can't slip through unnoticed.
+    class _FakeResponse:
+        text = _SHOPPING_ERROR_RESPONSE
+
+    monkeypatch.setattr(rpc, "_http_post", lambda *args, **kwargs: _FakeResponse())
+
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        swoop.search("JFK", "LAX", "2030-01-01", max_stops=0)
+    assert excinfo.value.grpc_code == 13
 
 
 def test_booking_parser_logs_debug_for_partial_drops_and_warning_for_total_drop(caplog) -> None:

@@ -200,6 +200,11 @@ def search_legs(
 
     Returns:
         A trip-level :class:`SearchResult` with shopping totals.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     _validate_leg_search_inputs(legs, cabin=cabin, passengers=passengers)
 
@@ -406,6 +411,11 @@ def price_legs(
 
     Returns:
         A :class:`PriceResult` or ``None`` if the flight was not found.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     if len(legs) == 0:
         raise ValueError("at least one leg is required")
@@ -465,6 +475,11 @@ def price_selector(
     Returns:
         A :class:`PriceResult`, or ``None`` if the selected itinerary no
         longer exists.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     return price_trip_selector(selector, transport=transport)
 
@@ -505,6 +520,11 @@ def check_price(
     Returns:
         A :class:`PriceResult` with the price and matched itinerary,
         or ``None`` if the flight was not found.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
 
     Example::
 
@@ -811,6 +831,11 @@ def explore(
 
     Returns:
         An :class:`ExploreResult` with the destinations that passed every filter.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     validate_iata_code(origin, "origin")
     validate_cabin(cabin)

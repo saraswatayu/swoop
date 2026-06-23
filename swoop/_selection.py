@@ -12,7 +12,7 @@ from typing import Any, Optional
 from .builders import CabinClass
 from ._validate import parse_flight_number
 from .decoder import Itinerary, RawSearchResult, itinerary_matches_flight
-from .exceptions import SwoopError
+from .exceptions import SwoopError, SwoopUpstreamError
 from .models import Passengers, PriceResult, ResolvedLeg, SearchResult, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_DEPARTURE_TIME,
@@ -343,15 +343,25 @@ def search_trip_options(
                 continue
 
             staged_legs = _with_selected_prefix(request_legs, selected_payloads)
-            stage_result = _search_from_legs(
-                staged_legs,
-                cabin=cabin,
-                passengers=passengers,
-                sort=sort,
-                transport=transport,
-                exclude_basic_economy=exclude_basic,
-                retain_raw=False,
-            )
+            try:
+                stage_result = _search_from_legs(
+                    staged_legs,
+                    cabin=cabin,
+                    passengers=passengers,
+                    sort=sort,
+                    transport=transport,
+                    exclude_basic_economy=exclude_basic,
+                    retain_raw=False,
+                )
+            except SwoopUpstreamError:
+                # A transient upstream rejection on one beam branch must not
+                # sink the whole multi-city search. Before SwoopUpstreamError
+                # existed this path returned None and was absorbed here as an
+                # empty stage; preserve that graceful degradation and just mark
+                # the result incomplete. The first pass (no prefix yet) still
+                # raises, since a rejected first call means no results at all.
+                is_complete = False
+                continue
             stage_candidates = _iter_raw_itineraries(stage_result)
             if not stage_candidates:
                 continue

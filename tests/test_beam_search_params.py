@@ -165,3 +165,60 @@ class TestCLIBeamSearchFlags:
         assert "--max-results" in result.output
         assert "--beam-width" in result.output
         assert "--time-budget" in result.output
+
+
+class TestBeamUpstreamErrorDegradesGracefully:
+    """A transient upstream error on a later beam stage must not abort the whole
+    multi-city search. The first pass returning None used to be absorbed as an
+    empty stage; SwoopUpstreamError must degrade the same way (mark incomplete),
+    not propagate out of search_trip_options."""
+
+    def test_stage_upstream_error_marks_incomplete_not_raises(self, monkeypatch):
+        from swoop.exceptions import SwoopUpstreamError
+        from swoop.models import SearchResult
+        from tests.factories import make_simple_itinerary as _make_itinerary, make_raw_result as _raw_result
+
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+            {"origin": "LAX", "destination": "SFO", "date": "2026-04-18"},
+            {"origin": "SFO", "destination": "JFK", "date": "2026-04-20"},
+        ]
+        outbounds = [
+            _make_itinerary(
+                origin="JFK", destination="LAX", date="2026-04-15",
+                airline="DL", flight_number=str(2300 + i), price=249 + i * 10,
+                booking_token=f"token-out-{i}",
+            )
+            for i in range(2)
+        ]
+
+        def fake_search(legs, **_kwargs):
+            # First pass (no prefix selected) succeeds; any staged call rejects.
+            if legs[0].get("selected_legs") is None:
+                return _raw_result(*outbounds)
+            raise SwoopUpstreamError(13)
+
+        monkeypatch.setattr(selection, "_search_from_legs", fake_search)
+
+        # Must not raise — the staged rejection is absorbed.
+        result = selection.search_trip_options(request_legs, cabin="economy")
+        assert isinstance(result, SearchResult)
+        assert result.is_complete is False
+
+    def test_first_pass_upstream_error_still_raises(self, monkeypatch):
+        from swoop.exceptions import SwoopUpstreamError
+
+        request_legs = [
+            {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
+            {"origin": "LAX", "destination": "SFO", "date": "2026-04-18"},
+            {"origin": "SFO", "destination": "JFK", "date": "2026-04-20"},
+        ]
+
+        def fake_search(legs, **_kwargs):
+            raise SwoopUpstreamError(13)
+
+        monkeypatch.setattr(selection, "_search_from_legs", fake_search)
+
+        # A rejected first call means no results at all — surface it.
+        with pytest.raises(SwoopUpstreamError):
+            selection.search_trip_options(request_legs, cabin="economy")

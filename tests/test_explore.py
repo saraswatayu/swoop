@@ -122,10 +122,14 @@ class TestParse:
         assert d.query_cabin == "economy" and d.query_adults == 1
 
     def test_error_fixture_raises(self):
+        # error_response.txt is Google's structured ErrorResponse envelope
+        # (gRPC 13). It now surfaces as the specific SwoopUpstreamError rather
+        # than the generic "missing inner payload" parse error.
         from swoop._explore import _extract_inner
-        from swoop.exceptions import SwoopParseError
-        with pytest.raises(SwoopParseError):
+        from swoop.exceptions import SwoopUpstreamError
+        with pytest.raises(SwoopUpstreamError) as excinfo:
             _extract_inner((FIX / "error_response.txt").read_text())
+        assert excinfo.value.grpc_code == 13
 
     def test_extract_inner_handles_flat_array_framing(self):
         from swoop._explore import _extract_inner, parse_explore_payload
@@ -696,3 +700,24 @@ class TestExploreCLI:
         with contextlib.redirect_stdout(buf):
             format_explore_brief(res)
         assert "0m" in buf.getvalue()
+
+
+class TestExploreUpstreamError:
+    """A structured ErrorResponse envelope must surface as SwoopUpstreamError,
+    not the generic 'missing inner payload' parse error (which would otherwise
+    trigger a pointless stale-session retry)."""
+
+    def test_extract_inner_raises_upstream_error_on_envelope(self):
+        from swoop._explore import _extract_inner
+        from swoop.exceptions import SwoopUpstreamError, SwoopParseError
+
+        frame = [
+            "wrb.fr", None, None, None, None,
+            [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
+        ]
+        text = ")]}'\n" + json.dumps([frame])
+        with pytest.raises(SwoopUpstreamError) as excinfo:
+            _extract_inner(text)
+        assert excinfo.value.grpc_code == 13
+        # It's an upstream error, distinct from the generic parse error.
+        assert not isinstance(excinfo.value, SwoopParseError)

@@ -12,8 +12,8 @@ from typing import Any, Optional
 
 from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import _safe_get
-from .exceptions import SwoopParseError
+from .decoder import _safe_get, detect_error_envelope
+from .exceptions import SwoopParseError, SwoopUpstreamError
 from .models import Deal, DealsResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
@@ -155,6 +155,24 @@ def _extract_deals_from_entries(entries: list[Any]) -> list[Any]:
     return []
 
 
+def _raise_if_deals_error_envelope(frames: list[Any]) -> None:
+    """Raise :class:`SwoopUpstreamError` if any frame is an ErrorResponse.
+
+    The deals parser otherwise treats a rejected request (null payload, error
+    block at index 5) as zero deals — which can silently wipe the watcher's
+    snapshot baseline. Surface it as an upstream error instead, matching the
+    shopping path.
+    """
+    for frame in frames:
+        error = detect_error_envelope(frame)
+        if error is not None:
+            logger.warning(
+                "GetFlightDealsStreaming returned an ErrorResponse (gRPC %s, %s)",
+                error[0], error[1],
+            )
+            raise SwoopUpstreamError(error[0], type_url=error[1])
+
+
 def _parse_streaming_response(text: str) -> list[Any]:
     """Parse the deals streaming response and extract deal items.
 
@@ -186,12 +204,19 @@ def _parse_streaming_response(text: str) -> list[Any]:
     try:
         outer = json.loads(text)
         if isinstance(outer, list) and len(outer) > 1:
-            return _extract_deals_from_entries(outer)
+            items = _extract_deals_from_entries(outer)
+            if items:
+                return items
+            # No deals: distinguish a genuine empty result from a rejected
+            # request before falling through. Each entry is a wrb.fr frame.
+            _raise_if_deals_error_envelope(outer)
+            return items
     except json.JSONDecodeError:
         pass
 
     # Format 2: length-prefixed lines
     deals: list[Any] = []
+    frames: list[Any] = []
     for line in text.split("\n"):
         line = line.strip()
         if not line or len(line) < 100:
@@ -201,6 +226,9 @@ def _parse_streaming_response(text: str) -> list[Any]:
         except json.JSONDecodeError:
             continue
         # Each chunk is [["wrb.fr", null, "<inner JSON>", ...]]
+        frame = _safe_get(chunk, [0])
+        if isinstance(frame, list):
+            frames.append(frame)
         inner_str = _safe_get(chunk, [0, 2])
         if not isinstance(inner_str, str) or len(inner_str) < 500:
             continue
@@ -213,6 +241,8 @@ def _parse_streaming_response(text: str) -> list[Any]:
             deals = items
             break
 
+    if not deals:
+        _raise_if_deals_error_envelope(frames)
     return deals
 
 

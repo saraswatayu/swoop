@@ -21,9 +21,13 @@ of OTAs.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from swoop._booking import _parse_booking_rpc_response
+import pytest
+
+from swoop._booking import _parse_booking_rpc_response, parse_booking_payload
+from swoop.exceptions import SwoopUpstreamError
 
 FIXTURES = Path(__file__).parent / "fixtures"
 OTA_FIXTURE = FIXTURES / "corpus" / "booking_intl_economy_ota_response.txt"
@@ -33,6 +37,26 @@ REGISTRY_VERSION = "2026-06-02"
 def _ota_options():
     text = OTA_FIXTURE.read_text()
     return _parse_booking_rpc_response(text, registry_version=REGISTRY_VERSION)
+
+
+def _error_envelope_text() -> str:
+    """A GetBookingResults response carrying Google's ErrorResponse envelope."""
+    return ")]}'" + json.dumps(
+        [["wrb.fr", None, None, None, None,
+          [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]]]]
+    )
+
+
+def test_booking_payload_raises_on_error_envelope():
+    with pytest.raises(SwoopUpstreamError) as excinfo:
+        parse_booking_payload(_error_envelope_text())
+    assert excinfo.value.grpc_code == 13
+
+
+def test_booking_rpc_response_propagates_upstream_error():
+    # The higher-level parser must propagate it too, not swallow into [].
+    with pytest.raises(SwoopUpstreamError):
+        _parse_booking_rpc_response(_error_envelope_text(), registry_version=REGISTRY_VERSION)
 
 
 def test_ota_fixture_surfaces_full_seller_list() -> None:

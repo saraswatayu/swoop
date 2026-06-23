@@ -19,8 +19,39 @@ from swoop._deals import (
     _parse_deal,
     _parse_streaming_response,
 )
+from swoop.exceptions import SwoopUpstreamError
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "responses"
+
+
+_DEALS_ERROR_FRAME = [
+    "wrb.fr", None, None, None, None,
+    [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
+]
+
+
+class TestDealsUpstreamError:
+    """A rejected request must surface as SwoopUpstreamError, not zero deals —
+    a silent empty result can wipe the watcher's snapshot baseline."""
+
+    def test_flat_array_format_raises(self):
+        text = ")]}'" + json.dumps([_DEALS_ERROR_FRAME, ["di", 198], ["af.httprm", 198, "-1", 16]])
+        with pytest.raises(SwoopUpstreamError) as excinfo:
+            _parse_streaming_response(text)
+        assert excinfo.value.grpc_code == 13
+
+    def test_length_prefixed_format_raises(self):
+        # Length-prefixed path: a chunk line carrying only the error frame, plus
+        # a padding line so format 1 (single json.loads) doesn't apply.
+        line = json.dumps([_DEALS_ERROR_FRAME])
+        text = ")]}'\n" + line + "\n" + ("0" * 100)
+        with pytest.raises(SwoopUpstreamError):
+            _parse_streaming_response(text)
+
+    def test_genuinely_empty_still_returns_empty(self):
+        # A success-shaped frame with no deals must stay [] (not raised).
+        empty = ")]}'" + json.dumps([["wrb.fr", None, "{}"], ["di", 1]])
+        assert _parse_streaming_response(empty) == []
 
 
 def _load_fixture(name: str) -> str:

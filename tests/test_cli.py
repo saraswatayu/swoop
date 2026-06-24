@@ -1586,3 +1586,19 @@ class TestUpstreamErrorHandling:
         assert result.exit_code == 3
         assert not isinstance(result.exception, SwoopUpstreamError)
         assert "upstream error" in result.output.lower()
+
+    @patch("swoop.deals")
+    def test_deals_reports_upstream_error_cleanly(self, mock_deals):
+        mock_deals.side_effect = SwoopUpstreamError(13)
+        result = CliRunner().invoke(main, ["deals", "JFK", "-q"])
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "gRPC 13" in result.output
+
+    @patch("swoop.explore")
+    def test_explore_reports_upstream_error_cleanly(self, mock_explore):
+        mock_explore.side_effect = SwoopUpstreamError(13)
+        result = CliRunner().invoke(main, ["explore", "JFK", "-q"])
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "gRPC 13" in result.output

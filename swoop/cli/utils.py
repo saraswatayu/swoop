@@ -178,3 +178,34 @@ def check_past_date(date_str: str) -> str | None:
     except ValueError:
         pass
     return None
+
+
+def handle_rpc_error(exc, *, err, ctx) -> None:
+    """Print a clean message and exit for a Swoop RPC/transport error.
+
+    Shared by every CLI command so the wording and exit codes stay consistent
+    and a new exception type wires in one place, not four. Unknown ``SwoopError``
+    subclasses are re-raised rather than silently swallowed.
+    """
+    from swoop.exceptions import (
+        SwoopHTTPError,
+        SwoopParseError,
+        SwoopRateLimitError,
+        SwoopUpstreamError,
+    )
+
+    # Order matters: SwoopRateLimitError is a SwoopHTTPError subclass.
+    if isinstance(exc, SwoopRateLimitError):
+        err.print("[red]Rate limited. Wait a few minutes. Tip: use --retries 3[/red]")
+        ctx.exit(3)
+    elif isinstance(exc, SwoopUpstreamError):
+        err.print(f"[red]Google Flights upstream error (gRPC {exc.grpc_code}). Not an empty result — try again shortly.[/red]")
+        ctx.exit(3)
+    elif isinstance(exc, SwoopHTTPError):
+        err.print(f"[red]Google Flights returned HTTP {exc.status_code}[/red]")
+        ctx.exit(3)
+    elif isinstance(exc, SwoopParseError):
+        err.print("[red]Could not parse Google Flights response[/red]")
+        ctx.exit(4)
+    else:
+        raise exc

@@ -585,6 +585,35 @@ class TestPriceExploreAll:
         dests = [_dest(destination="SFO"), _dest(destination="ERR"), _dest(destination="LAX")]
         assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
 
+    def test_partial_upstream_error_leaves_none_not_raises(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopUpstreamError
+
+        # One destination down upstream is a logged None; the others still price.
+        def fake(dest, **kw):
+            if dest.destination == "ERR":
+                raise SwoopUpstreamError(13)
+            return f"price-{dest.destination}"
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="SFO"), _dest(destination="ERR"), _dest(destination="LAX")]
+        assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
+
+    def test_total_upstream_outage_raises(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopUpstreamError
+
+        # Every destination rejected upstream = a total outage, not "nothing
+        # priceable": surface it instead of an all-None list.
+        def fake(dest, **kw):
+            raise SwoopUpstreamError(13)
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="SFO"), _dest(destination="LAX")]
+        with pytest.raises(SwoopUpstreamError) as excinfo:
+            swoop.price_explore_all(dests)
+        assert excinfo.value.grpc_code == 13
+
     def test_rate_limit_stops_dispatch_and_propagates(self, monkeypatch):
         import swoop
         from swoop.exceptions import SwoopRateLimitError

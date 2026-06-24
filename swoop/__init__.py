@@ -935,7 +935,7 @@ def price_explore_all(
         ``destinations``: a :class:`PriceResult` per destination, or ``None``
         where it can't be priced (no matching itinerary, a missing airport
         code / departure date — a ``ValueError`` from :func:`price_explore` —
-        or a non-rate-limit transport/parse failure, which is logged at
+        or a per-item upstream/transport/parse failure, which is logged at
         WARNING). One bad entry never discards the rest of the batch.
 
     Raises:
@@ -943,6 +943,10 @@ def price_explore_all(
             stops further dispatch — continuing would only deepen the block —
             and propagates so the caller backs off and retries later, instead
             of receiving a quietly-incomplete list of mostly ``None``.
+        SwoopUpstreamError: If *every* destination is rejected upstream (a total
+            outage). A partial outage leaves the affected destinations ``None``
+            (logged) so one bad destination never sinks the batch — call
+            :func:`price_explore` directly if you need the per-destination error.
     """
     if not destinations:
         return []
@@ -951,6 +955,9 @@ def price_explore_all(
 
     results: list[Optional[PriceResult]] = [None] * len(destinations)
     rate_limited = threading.Event()
+    # 1-slot holder for the last upstream rejection seen (list write is atomic
+    # in CPython). Only acted on if EVERY destination came back empty.
+    upstream_error: list[Optional[SwoopUpstreamError]] = [None]
 
     def _price(index: int, dest: ExploreDestination) -> None:
         if rate_limited.is_set():
@@ -965,6 +972,13 @@ def price_explore_all(
             # A batch-wide condition, not a per-item gap: stop dispatching and
             # surface it after the pool drains so the caller backs off.
             rate_limited.set()
+        except SwoopUpstreamError as exc:
+            # An upstream outage on one destination. Record it (leave this slot
+            # None) — if EVERY destination fails this way we raise after the
+            # pool (a total outage), but a partial outage stays a logged None
+            # so one bad destination never sinks the whole batch.
+            upstream_error[0] = exc
+            logger.warning("price_explore_all: upstream error pricing %s: %s", dest.destination or "?", exc)
         except SwoopError as exc:
             # A non-rate-limit transport/parse failure on one destination must
             # not sink the batch: index assignment leaves the rest intact. Log
@@ -977,6 +991,11 @@ def price_explore_all(
 
     if rate_limited.is_set():
         raise SwoopRateLimitError()
+    if upstream_error[0] is not None and all(r is None for r in results):
+        # Every destination came back empty and at least one was an upstream
+        # rejection: a total outage. Surface it rather than returning an
+        # all-None list that conflates "Google was down" with "nothing priced".
+        raise upstream_error[0]
     return results
 
 

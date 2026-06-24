@@ -487,6 +487,12 @@ def search_raw(
 
     Args:
         transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope (HTTP 200, no result payload) — an upstream
+            outage, distinct from a genuinely empty result, which returns
+            ``None``. See :func:`swoop.search` for the full transport-error set.
     """
     logger.debug(
         "search_raw %s->%s on %s (cabin=%s, adults=%d)",
@@ -711,17 +717,22 @@ def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
         frame = outer[0]
         inner_json = frame[2]
     except (IndexError, TypeError):
+        # outer[0] is missing or too short to index — fall through to the
+        # shared no-payload handling below, which decides between an upstream
+        # ErrorResponse envelope and a genuinely empty result.
         logger.warning("RPC response missing data at [0][2]")
-        return None
+        inner_json = None
 
     if not inner_json:
-        # No payload at [0][2]. Before treating this as an (empty) result,
-        # check whether Google rejected the request with a structured
-        # ErrorResponse envelope — surface that as a loud error so callers
-        # can distinguish an upstream outage from "no flights found". Scan
-        # every frame (not just outer[0]) so detection matches deals/explore
-        # and an envelope in a later frame can't slip through as empty.
-        raise_if_error_envelope(outer, endpoint="GetShoppingResults")
+        # No usable payload at [0][2]. Before treating this as an (empty)
+        # result, check whether Google rejected the request with a structured
+        # ErrorResponse envelope — surface that as a loud error so callers can
+        # distinguish an upstream outage from "no flights found". Scan every
+        # frame (not just outer[0]) so detection matches deals/explore and an
+        # envelope in a *later* frame (e.g. behind a leading ["di", 198]
+        # metadata frame) can't slip through as a silent None. The isinstance
+        # guard covers the except branch above, where outer may not be a list.
+        raise_if_error_envelope(outer if isinstance(outer, list) else [], endpoint="GetShoppingResults")
         return None
 
     # Inner value is a JSON string that needs to be parsed again

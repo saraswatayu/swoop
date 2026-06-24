@@ -649,6 +649,27 @@ def test_parse_rpc_response_scans_all_frames_for_envelope() -> None:
     assert excinfo.value.grpc_code == 13
 
 
+def test_parse_rpc_response_detects_envelope_when_first_frame_malformed() -> None:
+    # outer[0] is too short to index at [2] (a leading ["di", 198] metadata
+    # frame, or a truncated wrb.fr) so frame[2] raises IndexError. The error
+    # envelope sits in a later frame. The exception branch must still scan every
+    # frame — otherwise a reordered rejection slips through as a silent None on
+    # the highest-traffic shopping endpoint, the exact bug this branch fixes.
+    short_first = ")]}'" + json.dumps([["di", 198], make_error_frame()])
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        rpc._parse_rpc_response(short_first)
+    assert excinfo.value.grpc_code == 13
+
+    # A non-subscriptable first frame (frame[2] raises TypeError) is handled too.
+    non_sub_first = ")]}'" + json.dumps(["x", make_error_frame()])
+    with pytest.raises(rpc.SwoopUpstreamError):
+        rpc._parse_rpc_response(non_sub_first)
+
+    # And a genuinely malformed-but-not-an-error response still returns None.
+    benign = ")]}'" + json.dumps([["di", 198], ["af.httprm", 198, "-1", 16]])
+    assert rpc._parse_rpc_response(benign) is None
+
+
 def test_public_search_raises_upstream_error_end_to_end(monkeypatch) -> None:
     # The PR's headline contract lives in the public search() docstring, but
     # every other test exercises the private _parse_rpc_response directly. Pin

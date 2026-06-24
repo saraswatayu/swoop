@@ -51,6 +51,7 @@ from typing import Any, List, Optional, Tuple
 
 from ._formatting import fmt_clock, fmt_duration
 from .builders import ItinerarySummary
+from .exceptions import SwoopUpstreamError
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,26 @@ def detect_error_envelope(frame: Any) -> Optional[Tuple[int, Optional[str]]]:
         if isinstance(type_url, str) and type_url.endswith(".ErrorResponse"):
             return code, type_url
     return None
+
+
+def raise_if_error_envelope(frames: list[Any], *, endpoint: str) -> None:
+    """Raise :class:`~swoop.exceptions.SwoopUpstreamError` if any frame is an
+    ErrorResponse envelope.
+
+    Centralizes the detect -> log -> raise reaction shared by every RPC parser
+    (shopping, booking, deals, explore) so a Google outage is reported
+    identically on all endpoints. Non-streaming parsers pass a single-frame
+    list. Returns normally when no frame carries an error envelope.
+    """
+    for frame in frames:
+        error = detect_error_envelope(frame)
+        if error is not None:
+            grpc_code, type_url = error
+            logger.warning(
+                "%s returned an ErrorResponse (gRPC %s, %s)",
+                endpoint, grpc_code, type_url,
+            )
+            raise SwoopUpstreamError(grpc_code, type_url=type_url)
 
 
 def _safe_tuple(val: Any, length: int, defaults: list) -> tuple:

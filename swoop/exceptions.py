@@ -74,22 +74,15 @@ class SwoopUpstreamError(SwoopError):
         type_url: The protobuf type URL Google attached, when present.
     """
 
-    def __init__(
-        self,
-        grpc_code: int | None,
-        type_url: str | None = None,
-        message: str | None = None,
-    ):
+    def __init__(self, grpc_code: int | None, type_url: str | None = None):
         self.grpc_code = grpc_code
         self.type_url = type_url
-        if message is None:
-            if grpc_code is not None:
-                name = _GRPC_CODE_NAMES.get(grpc_code)
-                label = f"{grpc_code} {name}" if name else str(grpc_code)
-            else:
-                label = "unknown"
-            message = (
-                f"Google Flights rejected the request (gRPC status {label}). "
-                "This is an upstream error, not an empty result."
-            )
-        super().__init__(message)
+        if grpc_code is None:
+            label = "unknown"
+        else:
+            name = _GRPC_CODE_NAMES.get(grpc_code)
+            label = f"{grpc_code} {name}" if name else str(grpc_code)
+        super().__init__(
+            f"Google Flights rejected the request (gRPC status {label}). "
+            "This is an upstream error, not an empty result."
+        )

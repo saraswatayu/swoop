@@ -710,12 +710,9 @@ class TestExploreUpstreamError:
     def test_extract_inner_raises_upstream_error_on_envelope(self):
         from swoop._explore import _extract_inner
         from swoop.exceptions import SwoopUpstreamError, SwoopParseError
+        from tests.factories import make_error_frame
 
-        frame = [
-            "wrb.fr", None, None, None, None,
-            [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
-        ]
-        text = ")]}'\n" + json.dumps([frame])
+        text = ")]}'\n" + json.dumps([make_error_frame()])
         with pytest.raises(SwoopUpstreamError) as excinfo:
             _extract_inner(text)
         assert excinfo.value.grpc_code == 13

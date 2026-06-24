@@ -29,8 +29,8 @@ import urllib.parse
 from typing import Any, Optional
 
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import _safe_get, detect_error_envelope
-from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError
+from .decoder import _safe_get, raise_if_error_envelope
+from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .models import ExploreDestination, ExploreResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
@@ -139,10 +139,7 @@ def _extract_inner(text: str) -> list[Any]:
     # with the shopping path) rather than a generic "missing payload" parse
     # error — it also bypasses the stale-session retry, which can't heal an
     # upstream outage.
-    for frame in frames:
-        error = detect_error_envelope(frame)
-        if error is not None:
-            raise SwoopUpstreamError(error[0], type_url=error[1])
+    raise_if_error_envelope(frames, endpoint="GetExploreDestinations")
     raise SwoopParseError("Explore response missing inner payload")
 
 

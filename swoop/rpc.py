@@ -31,7 +31,7 @@ from ._booking import (
     parse_booking_payload,
 )
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, detect_error_envelope
+from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, raise_if_error_envelope
 from .exceptions import (
     SwoopHTTPError,
     SwoopParseError,
@@ -674,16 +674,6 @@ def get_trip_booking_results(
     return _parse_booking_rpc_response(res.text)
 
 
-def _rpc_error_envelope(frame: Any) -> Optional[tuple[int, Optional[str]]]:
-    """Backward-compatible alias for :func:`decoder.detect_error_envelope`.
-
-    The detection logic is shared across every RPC parser (shopping, booking,
-    deals, explore); it lives in ``decoder`` so the booking module can import
-    it without a circular dependency on ``rpc``.
-    """
-    return detect_error_envelope(frame)
-
-
 def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
     """Parse the RPC response.
 
@@ -721,14 +711,7 @@ def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
         # check whether Google rejected the request with a structured
         # ErrorResponse envelope — surface that as a loud error so callers
         # can distinguish an upstream outage from "no flights found".
-        error = _rpc_error_envelope(frame)
-        if error is not None:
-            grpc_code, type_url = error
-            logger.warning(
-                "GetShoppingResults returned an ErrorResponse (gRPC %s, %s)",
-                grpc_code, type_url,
-            )
-            raise SwoopUpstreamError(grpc_code, type_url=type_url)
+        raise_if_error_envelope([frame], endpoint="GetShoppingResults")
         return None
 
     # Inner value is a JSON string that needs to be parsed again

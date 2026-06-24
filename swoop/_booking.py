@@ -12,8 +12,7 @@ import urllib.parse
 from typing import Any
 
 from .builders import CABIN_CLASS_MAP, ItinerarySummary
-from .decoder import BookingOption, _safe_get, detect_error_envelope
-from .exceptions import SwoopUpstreamError
+from .decoder import BookingOption, _safe_get, raise_if_error_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -437,9 +436,7 @@ def parse_booking_payload(text: str) -> list[list[Any]]:
             # A wrb.fr frame with no string payload may be Google's structured
             # ErrorResponse envelope (HTTP 200, request rejected). Surface it so
             # a booking lookup during an outage doesn't look like "no options".
-            error = detect_error_envelope(frame)
-            if error is not None:
-                raise SwoopUpstreamError(error[0], type_url=error[1])
+            raise_if_error_envelope([frame], endpoint="GetBookingResults")
             continue
         try:
             payload = json.loads(frame[2])

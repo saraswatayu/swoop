@@ -12,8 +12,8 @@ from typing import Any, Optional
 
 from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import _safe_get, detect_error_envelope
-from .exceptions import SwoopParseError, SwoopUpstreamError
+from .decoder import _safe_get, raise_if_error_envelope
+from .exceptions import SwoopParseError
 from .models import Deal, DealsResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
@@ -155,24 +155,6 @@ def _extract_deals_from_entries(entries: list[Any]) -> list[Any]:
     return []
 
 
-def _raise_if_deals_error_envelope(frames: list[Any]) -> None:
-    """Raise :class:`SwoopUpstreamError` if any frame is an ErrorResponse.
-
-    The deals parser otherwise treats a rejected request (null payload, error
-    block at index 5) as zero deals — which can silently wipe the watcher's
-    snapshot baseline. Surface it as an upstream error instead, matching the
-    shopping path.
-    """
-    for frame in frames:
-        error = detect_error_envelope(frame)
-        if error is not None:
-            logger.warning(
-                "GetFlightDealsStreaming returned an ErrorResponse (gRPC %s, %s)",
-                error[0], error[1],
-            )
-            raise SwoopUpstreamError(error[0], type_url=error[1])
-
-
 def _parse_streaming_response(text: str) -> list[Any]:
     """Parse the deals streaming response and extract deal items.
 
@@ -209,8 +191,8 @@ def _parse_streaming_response(text: str) -> list[Any]:
                 return items
             # No deals: distinguish a genuine empty result from a rejected
             # request before falling through. Each entry is a wrb.fr frame.
-            _raise_if_deals_error_envelope(outer)
-            return items
+            raise_if_error_envelope(outer, endpoint="GetFlightDealsStreaming")
+            return []
     except json.JSONDecodeError:
         pass
 
@@ -227,9 +209,10 @@ def _parse_streaming_response(text: str) -> list[Any]:
             continue
         # Each chunk is [["wrb.fr", null, "<inner JSON>", ...]]
         frame = _safe_get(chunk, [0])
-        if isinstance(frame, list):
-            frames.append(frame)
-        inner_str = _safe_get(chunk, [0, 2])
+        if not isinstance(frame, list):
+            continue
+        frames.append(frame)
+        inner_str = frame[2] if len(frame) > 2 else None
         if not isinstance(inner_str, str) or len(inner_str) < 500:
             continue
         try:
@@ -242,7 +225,7 @@ def _parse_streaming_response(text: str) -> list[Any]:
             break
 
     if not deals:
-        _raise_if_deals_error_envelope(frames)
+        raise_if_error_envelope(frames, endpoint="GetFlightDealsStreaming")
     return deals
 
 

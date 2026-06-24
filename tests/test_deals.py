@@ -20,14 +20,12 @@ from swoop._deals import (
     _parse_streaming_response,
 )
 from swoop.exceptions import SwoopUpstreamError
+from tests.factories import make_error_frame
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "responses"
 
 
-_DEALS_ERROR_FRAME = [
-    "wrb.fr", None, None, None, None,
-    [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
-]
+_DEALS_ERROR_FRAME = make_error_frame()
 
 
 class TestDealsUpstreamError:

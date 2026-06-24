@@ -152,6 +152,25 @@ def encode_rpc_outer(inner: object) -> str:
     return ")]}'" + json.dumps([["wrb.fr", None, json.dumps(inner)]])
 
 
+_ERROR_TYPE_URL = "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+
+
+def make_error_frame(
+    grpc_code: int = 13, type_url: str = _ERROR_TYPE_URL
+) -> list:
+    """A ``wrb.fr`` ErrorResponse envelope frame (HTTP 200, request rejected).
+
+    Mirrors what Google returns when it rejects an RPC: a null result payload
+    at index 2 and a ``[grpc_code, null, [[type_url, ...]]]`` block at index 5.
+    """
+    return ["wrb.fr", None, None, None, None, [grpc_code, None, [[type_url, [[None]]]]]]
+
+
+def make_error_response(grpc_code: int = 13) -> str:
+    """A full RPC response string carrying a single ErrorResponse envelope."""
+    return ")]}'" + json.dumps([make_error_frame(grpc_code)])
+
+
 def make_brand_block(code: str = "DELTA MAIN CLASSIC", label: str = "Delta Main Classic") -> list:
     """Build a brand block for booking options."""
     block = [None] * 22

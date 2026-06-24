@@ -19,7 +19,7 @@ import swoop
 import swoop._booking as _booking
 import swoop.rpc as rpc
 from swoop._booking import _extract_booking_url, _extract_seller
-from swoop.decoder import BookingOption
+from swoop.decoder import BookingOption, detect_error_envelope
 from swoop.rpc import (
     _build_booking_f_req,
     _build_filters_from_legs,
@@ -36,6 +36,7 @@ from tests.factories import (
     encode_rpc_outer,
     make_brand_block,
     make_booking_option,
+    make_error_frame,
     make_price_block,
     FakeHTTPResponse,
 )
@@ -605,44 +606,30 @@ def test_parse_rpc_response_raises_on_error_envelope() -> None:
     assert "upstream error" in str(err).lower()
 
 
-def test_rpc_error_envelope_detection() -> None:
+def test_detect_error_envelope_detection() -> None:
     # Success frame: payload at index 2, no error block.
-    assert rpc._rpc_error_envelope(["wrb.fr", None, "{...}"]) is None
+    assert detect_error_envelope(["wrb.fr", None, "{...}"]) is None
     # Genuinely-empty frame: null payload but no error envelope -> not an error.
-    assert rpc._rpc_error_envelope(["wrb.fr", None, None]) is None
+    assert detect_error_envelope(["wrb.fr", None, None]) is None
     # Error frame: gRPC code + ErrorResponse type url.
-    frame = [
-        "wrb.fr", None, None, None, None,
-        [13, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
-    ]
-    assert rpc._rpc_error_envelope(frame) == (
+    assert detect_error_envelope(make_error_frame()) == (
         13, "type.googleapis.com/travel.frontend.flights.ErrorResponse"
     )
     # Non-list input is tolerated.
-    assert rpc._rpc_error_envelope(None) is None
+    assert detect_error_envelope(None) is None
 
 
-def test_rpc_error_envelope_hardening() -> None:
+def test_detect_error_envelope_hardening() -> None:
     # gRPC code 0 (OK) is success, never an error -> not detected.
-    ok_frame = [
-        "wrb.fr", None, None, None, None,
-        [0, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
-    ]
-    assert rpc._rpc_error_envelope(ok_frame) is None
+    assert detect_error_envelope(make_error_frame(grpc_code=0)) is None
     # bool is an int subclass; a True/False leading value must not be read as a
     # gRPC code.
-    bool_frame = [
-        "wrb.fr", None, None, None, None,
-        [True, None, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", [[None]]]]],
-    ]
-    assert rpc._rpc_error_envelope(bool_frame) is None
+    assert detect_error_envelope(make_error_frame(grpc_code=True)) is None
     # A type url that merely CONTAINS the substring (no ".ErrorResponse" suffix)
     # must not false-positive.
-    loose_frame = [
-        "wrb.fr", None, None, None, None,
-        [13, None, [["type.googleapis.com/x.NotAnErrorResponseReally", [[None]]]]],
-    ]
-    assert rpc._rpc_error_envelope(loose_frame) is None
+    assert detect_error_envelope(
+        make_error_frame(type_url="type.googleapis.com/x.NotAnErrorResponseReally")
+    ) is None
 
 
 def test_empty_result_still_returns_none_not_error() -> None:

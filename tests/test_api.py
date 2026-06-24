@@ -88,15 +88,15 @@ def test_search_delegates_to_leg_search_core(monkeypatch):
         transport=transport,
     )
 
-    assert captured["legs"][0]["origin"] == "SFO"
-    assert captured["legs"][0]["destination"] == "NRT"
+    assert captured["legs"][0]["origin"] == ["SFO"]
+    assert captured["legs"][0]["destination"] == ["NRT"]
     assert captured["legs"][0]["date"] == "2026-07-01"
     assert captured["legs"][0]["max_stops"] == 1
     assert captured["legs"][0]["airlines"] == ["NH"]
     assert captured["legs"][0]["earliest_departure"] == 8
     assert captured["legs"][0]["latest_departure"] == 16
-    assert captured["legs"][1]["origin"] == "NRT"
-    assert captured["legs"][1]["destination"] == "SFO"
+    assert captured["legs"][1]["origin"] == ["NRT"]
+    assert captured["legs"][1]["destination"] == ["SFO"]
     assert captured["legs"][1]["date"] == "2026-07-15"
     assert captured["cabin"] == "business"
     assert captured["passengers"].adults == 2
@@ -132,10 +132,10 @@ def test_search_legs_uses_per_leg_filters(monkeypatch):
         ),
     ], cabin="business", passengers=swoop.Passengers(adults=2))
 
-    assert captured["legs"][0]["origin"] == "SFO"
+    assert captured["legs"][0]["origin"] == ["SFO"]
     assert captured["legs"][0]["max_stops"] == 0
     assert captured["legs"][0]["airlines"] == ["NH"]
-    assert captured["legs"][1]["origin"] == "NRT"
+    assert captured["legs"][1]["origin"] == ["NRT"]
     assert captured["legs"][1]["max_stops"] == 1
     assert captured["legs"][1]["airlines"] == ["JL"]
 

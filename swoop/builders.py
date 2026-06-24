@@ -37,26 +37,39 @@ class SearchLeg:
 
     Args:
         date: Departure date (YYYY-MM-DD).
-        from_airport: Origin IATA code.
-        to_airport: Destination IATA code.
+        from_airport: Origin IATA code or list of IATA codes.
+        to_airport: Destination IATA code or list of IATA codes.
         max_stops: Maximum number of stops. None = any.
         airlines: Filter to these airline IATA codes.
+
+    Attributes:
+        from_airport: Returns the origin as a ``str`` for single-airport legs
+            or a ``list[str]`` for multi-airport legs. Read-only.
+        to_airport: Same as ``from_airport`` for the destination.
     """
 
-    __slots__ = ("date", "from_airport", "to_airport", "max_stops", "airlines")
+    __slots__ = ("date", "_from_airports", "_to_airports", "max_stops", "airlines")
 
     def __init__(
         self,
         *,
         date: str,
-        from_airport: str,
-        to_airport: str,
+        from_airport: str | list[str],
+        to_airport: str | list[str],
         max_stops: Optional[int] = None,
         airlines: Optional[List[str]] = None,
     ):
         self.date = date
-        self.from_airport = from_airport.upper()
-        self.to_airport = to_airport.upper()
+        self._from_airports: list[str] = (
+            [from_airport.upper()]
+            if isinstance(from_airport, str)
+            else [a.upper() for a in from_airport]
+        )
+        self._to_airports: list[str] = (
+            [to_airport.upper()]
+            if isinstance(to_airport, str)
+            else [a.upper() for a in to_airport]
+        )
         self.max_stops = max_stops
 
         if airlines is not None:
@@ -72,11 +85,34 @@ class SearchLeg:
         else:
             self.airlines = None
 
+    @property
+    def from_airport(self) -> str | list[str]:
+        """Single IATA string or list of strings for multi-airport legs."""
+        return self._from_airports[0] if len(self._from_airports) == 1 else self._from_airports
+
+    @property
+    def to_airport(self) -> str | list[str]:
+        """Single IATA string or list of strings for multi-airport legs."""
+        return self._to_airports[0] if len(self._to_airports) == 1 else self._to_airports
+
     def apply_to(self, info) -> None:
+        """Write this leg into a protobuf Info message.
+
+        The TFS/protobuf path only supports a single airport per leg.
+        Multi-airport lists are supported by the RPC search path
+        (_normalize_rpc_leg / _build_segment_from_leg), not here.
+        Raises ValueError when called with more than one airport.
+        """
+        if len(self._from_airports) > 1 or len(self._to_airports) > 1:
+            raise ValueError(
+                "SearchLeg.apply_to() (TFS/protobuf path) supports only a single "
+                "airport per leg. For multi-airport searches use swoop.search() or "
+                "swoop.search_raw() directly."
+            )
         data = info.data.add()
         data.date = self.date
-        data.from_flight.airport = self.from_airport
-        data.to_flight.airport = self.to_airport
+        data.from_flight.airport = self._from_airports[0]
+        data.to_flight.airport = self._to_airports[0]
         if self.max_stops is not None:
             data.max_stops = self.max_stops
         if self.airlines is not None:

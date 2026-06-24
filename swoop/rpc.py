@@ -66,8 +66,8 @@ STOPS_TWO_OR_FEWER = 3
 
 
 def _normalize_rpc_leg(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     *,
     max_stops: Optional[int] = None,
@@ -79,9 +79,15 @@ def _normalize_rpc_leg(
     selected_legs: Optional[list[list[Any]]] = None,
 ) -> dict[str, Any]:
     """Normalize a single search leg for generic request building."""
+    origin_list = [origin] if isinstance(origin, str) else list(origin)
+    destination_list = [destination] if isinstance(destination, str) else list(destination)
+    if not origin_list:
+        raise ValueError("origin must not be empty")
+    if not destination_list:
+        raise ValueError("destination must not be empty")
     return {
-        "origin": origin,
-        "destination": destination,
+        "origin": origin_list,
+        "destination": destination_list,
         "date": date,
         "max_stops": max_stops,
         "airlines": sorted(airlines) if airlines else None,
@@ -133,8 +139,8 @@ def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
         stops_val = max_stops + 1
 
     return [
-        [[[leg["origin"], 0]]],       # departure airport
-        [[[leg["destination"], 0]]],  # arrival airport
+        [[[code, 0] for code in leg["origin"]]],       # departure airports
+        [[[code, 0] for code in leg["destination"]]],  # arrival airports
         _build_time_restrictions(
             leg.get("earliest_departure"),
             leg.get("latest_departure"),
@@ -460,8 +466,8 @@ def _http_post(
 
 
 def search_raw(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
@@ -555,8 +561,8 @@ def _build_selected_legs(itinerary: Itinerary) -> list[list[Any]]:
 def get_booking_results(
     itinerary_or_token: Itinerary | str,
     *,
-    origin: str = "",
-    destination: str = "",
+    origin: str | list[str] = "",
+    destination: str | list[str] = "",
     date: str = "",
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),

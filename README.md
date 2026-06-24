@@ -22,7 +22,7 @@ swoop calls Google Flights' internal `GetShoppingResults` and `GetBookingResults
 
 [Perch](https://perchtravel.com) uses swoop in production to monitor booked flights for price drops, saving users an average of $247 per trip.
 
-**[Landing page](https://ayushsaraswat.com/projects/swoop)** · **[How I built this](https://ayushsaraswat.com/writing/reverse-engineering-google-flights)**
+**[Landing Page](https://ayushsaraswat.com/projects/swoop)** · **[How I Built This](https://ayushsaraswat.com/writing/reverse-engineering-google-flights)**
 
 ---
 
@@ -66,7 +66,7 @@ swoop price --selector "$SELECTOR"
 ```
 
 <details>
-<summary>More CLI examples</summary>
+<summary>More CLI Examples</summary>
 
 ```bash
 # Roundtrip shorthand pricing
@@ -157,7 +157,7 @@ print(results.is_complete)
 Each price-check call costs ~2 RPCs (one search, one booking lookup) — including one-way trips, so `PriceResult.booking_options` is populated and `booking_url` is available. For high-volume scoring of many fares, expect rate-limit pressure to scale accordingly; increase `retries` or pace your calls.
 
 <details>
-<summary>More examples</summary>
+<summary>More Examples</summary>
 
 ### Price Check for a Specific Flight
 
@@ -409,10 +409,10 @@ Responses arrive as deeply nested list structures, no field names, just position
                                                                           └──────────────────┘
 ```
 
-For the full reverse-engineering story (744 lines of handmade schema, binary protobuf decoding, cabin class debugging), read **[How I built this](https://ayushsaraswat.com/writing/reverse-engineering-google-flights)**.
+For the full reverse-engineering story (744 lines of handmade schema, binary protobuf decoding, cabin class debugging), read **[How I Built This](https://ayushsaraswat.com/writing/reverse-engineering-google-flights)**.
 
 <details>
-<summary>API reference</summary>
+<summary>API Reference</summary>
 
 ### `search(origin, destination, date, **kwargs)`
 

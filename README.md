@@ -115,7 +115,7 @@ Run `swoop search --help` for all options.
 > [!TIP]
 > Search shows shopping totals for browsing. Use `--show-price-commands` for copy/paste `swoop price --selector ...` commands in human output, or use `selector` from JSON with `swoop price --selector ...` in scripts.
 
-### Shell completion
+### Shell Completion
 
 ```bash
 # bash (~/.bashrc)
@@ -132,7 +132,7 @@ After reloading your shell, `swoop <TAB>`, `swoop search --<TAB>`, and `-o <TAB>
 
 ## Python API
 
-### One-way search
+### One-Way Search
 
 ```python
 from swoop import search
@@ -159,7 +159,7 @@ Each price-check call costs ~2 RPCs (one search, one booking lookup) — includi
 <details>
 <summary>More examples</summary>
 
-### Price check for a specific flight
+### Price Check for a Specific Flight
 
 ```python
 from swoop import check_price
@@ -178,7 +178,7 @@ if result:
         print(f"  {leg.flight_summary} {leg.origin}->{leg.destination} ({leg.selection})")
 ```
 
-### Price a chosen search result by selector
+### Price a Chosen Search Result by Selector
 
 ```python
 from swoop import price_selector, search
@@ -191,7 +191,7 @@ if price:
     print(f"${price.price} — {price.fare_brand}")
 ```
 
-### Leg-based search and pricing
+### Leg-Based Search and Pricing
 
 ```python
 from swoop import SearchLeg, SelectedLeg, price_legs, search_legs
@@ -216,7 +216,7 @@ result = price_legs([
 ])
 ```
 
-### Roundtrip search
+### Roundtrip Search
 
 ```python
 results = search("SFO", "JFK", "2026-06-15", return_date="2026-06-22")
@@ -224,7 +224,7 @@ for option in results.results:
     print(option.price)  # roundtrip total
 ```
 
-### Cabin class and filters
+### Cabin Class and Filters
 
 ```python
 from swoop import search, SORT_CHEAPEST
@@ -240,7 +240,7 @@ results = search(
 )
 ```
 
-### Booking details (fare options)
+### Booking Details (Fare Options)
 
 ```python
 from swoop import search, get_booking_results
@@ -271,7 +271,7 @@ exist." See
 [`examples/booking_options.py`](examples/booking_options.py) for splitting
 channels and where OTAs show up.
 
-### Deals discovery
+### Deals Discovery
 
 `deals()` is the third primitive: instead of "what flights from A to B?"
 (`search()`) or "how much for this exact flight?" (`check_price()`),
@@ -311,7 +311,7 @@ date and time-window slots in the payload; swoop applies those filters
 client-side over the 30 deals returned. For one-way exploration, use
 `search()` with an explicit destination.
 
-### Watching deals over time
+### Watching Deals Over Time
 
 ```python
 from swoop import deals, watch_deals, Region
@@ -341,7 +341,7 @@ shows up as a `PriceChange` rather than a new+gone pair.
 > [!TIP]
 > Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
 
-### Destination discovery (explore)
+### Destination Discovery (explore)
 
 `explore()` is the fourth primitive. Where `search()` answers "what flights from
 A to B?", `check_price()` answers "how much for this exact flight?", and
@@ -379,14 +379,14 @@ prices = price_explore_all(result.destinations[:10])
 
 CLI: `swoop explore JFK` (add `--one-way`, `--region europe`, `--trip-length 5-10`, `--destination LIS`, `-o json -q | jq`).
 
-### Runnable examples
+### Runnable Examples
 
 Real-world patterns are in [`examples/`](examples/):
 
 - [`examples/price_drop_watcher.py`](examples/price_drop_watcher.py) — Watch a known flight for price drops on a schedule (the pattern Perch uses to save users ~$247/trip).
 - [`examples/multi_city_finder.py`](examples/multi_city_finder.py) — Multi-city / open-jaw search with beam-search tuning knobs.
 
-## How it works
+## How It Works
 
 swoop reverse-engineers the `FlightsFrontendService` RPC interface that powers Google Flights. Search parameters are encoded as nested JSON arrays matching Google's internal protobuf schema, then sent as HTTP POST requests. The HTTP client uses TLS fingerprint impersonation (via [primp](https://github.com/deedy5/primp)) so requests are indistinguishable from a real Chrome session.
 
@@ -497,7 +497,7 @@ Set the default country code for all subsequent requests. Controls point of sale
 
 Set the default proxy URL for all subsequent requests. Pass `None` to clear.
 
-### Result types
+### Result Types
 
 - **`PriceResult`** — `price: int`, `currency: str | None`, `fare_brand: str | None`, `is_basic_economy: bool`, `is_estimate: bool`, `booking_options: list[BookingOption]`, `itinerary: Itinerary | None`, `resolved_legs: list[ResolvedLeg]`, `rpc_calls: int`
 - **`ResolvedLeg`** — `flight_summary: str`, `origin: str`, `destination: str`, `date: str`, `itinerary: Itinerary | None`, `selection: str`
@@ -522,7 +522,7 @@ Set the default proxy URL for all subsequent requests. Pass `None` to clear.
 | `SORT_ARRIVAL_TIME` | `4` | By arrival time |
 | `SORT_DURATION` | `5` | Shortest first |
 
-### Error handling
+### Error Handling
 
 All exceptions inherit from `SwoopError`. Catch `SwoopRateLimitError` for HTTP 429, `SwoopHTTPError` for other HTTP failures, `SwoopParseError` for response decoding issues, and `SwoopUpstreamError` for a structured upstream rejection (Google answers HTTP 200 with a gRPC `ErrorResponse` envelope) — distinct from a genuinely empty result, which returns empty rather than raising. On a priced result, `PriceResult.is_estimate` is `True` when the price is a search-derived shopping estimate rather than a confirmed bookable fare.
 

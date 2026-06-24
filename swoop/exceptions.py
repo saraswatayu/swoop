@@ -1,4 +1,38 @@
-"""Custom exception types for swoop."""
+"""Custom exception types for swoop.
+
+Error-handling contract
+=======================
+swoop talks to an undocumented, sometimes-flaky upstream, so every public entry
+point follows one rule: **a failure the caller must act on is observable — as a
+typed exception or in the return value — never as a silent empty result or a log
+line.** The specifics:
+
+1. Single-shot calls raise. A structured upstream rejection (an HTTP 200 whose
+   body carries a ``travel.frontend.flights.ErrorResponse`` envelope with a gRPC
+   status code) on a one-fetch call — ``search``, ``search_legs``,
+   ``check_price``, ``price_selector``, ``price_legs``, ``deals``, ``explore``,
+   ``get_booking_results`` — raises :class:`SwoopUpstreamError`. A genuinely
+   empty result (no flights) is *not* an error: it returns an empty result.
+
+2. Aggregate / fan-out calls degrade, but not silently. The multi-city beam in
+   ``search`` keeps the chains it found and raises only if *every* branch was
+   rejected upstream. ``price_explore_all`` prices what it can and raises only
+   if *every* destination was rejected upstream; a partial outage leaves the
+   affected slots ``None`` (logged).
+
+3. Confirmed vs estimated price is observable. ``PriceResult.is_estimate`` is
+   ``True`` when the price is the search-derived shopping figure rather than a
+   confirmed bookable fare.
+
+4. Retry is the caller's policy. ``transport.retries`` governs HTTP 429 backoff;
+   upstream ErrorResponse codes are surfaced (with ``grpc_code``) so a caller
+   can apply its own retry rather than swoop hard-coding one — a default that
+   retried during a broad outage would turn a fleet of clients into a retry
+   storm and deepen the upstream's gating of everyone.
+
+``SwoopUpstreamError.grpc_code`` carries the status; ``_GRPC_CODE_NAMES`` labels
+the known codes.
+"""
 
 
 class SwoopError(Exception):

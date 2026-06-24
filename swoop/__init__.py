@@ -956,8 +956,13 @@ def price_explore_all(
     results: list[Optional[PriceResult]] = [None] * len(destinations)
     rate_limited = threading.Event()
     # 1-slot holder for the last upstream rejection seen (list write is atomic
-    # in CPython). Only acted on if EVERY destination came back empty.
+    # in CPython). Only acted on if EVERY destination was rejected upstream.
     upstream_error: list[Optional[SwoopUpstreamError]] = [None]
+    # Per-destination flag: True only when THIS destination was rejected
+    # upstream. Index writes are atomic in CPython (like ``results``), so no
+    # lock is needed. A total outage is "all True" — a permanent ValueError gap
+    # or other failure leaves its flag False so the batch isn't mislabeled.
+    upstream_rejected: list[bool] = [False] * len(destinations)
 
     def _price(index: int, dest: ExploreDestination) -> None:
         if rate_limited.is_set():
@@ -978,6 +983,7 @@ def price_explore_all(
             # pool (a total outage), but a partial outage stays a logged None
             # so one bad destination never sinks the whole batch.
             upstream_error[0] = exc
+            upstream_rejected[index] = True
             logger.warning("price_explore_all: upstream error pricing %s: %s", dest.destination or "?", exc)
         except SwoopError as exc:
             # A non-rate-limit transport/parse failure on one destination must
@@ -991,10 +997,13 @@ def price_explore_all(
 
     if rate_limited.is_set():
         raise SwoopRateLimitError()
-    if upstream_error[0] is not None and all(r is None for r in results):
-        # Every destination came back empty and at least one was an upstream
-        # rejection: a total outage. Surface it rather than returning an
-        # all-None list that conflates "Google was down" with "nothing priced".
+    if upstream_error[0] is not None and all(upstream_rejected):
+        # EVERY destination was rejected upstream: a total outage. Surface it
+        # rather than returning an all-None list that conflates "Google was
+        # down" with "nothing priced". A mix of an outage with permanent
+        # ValueError gaps or other failures is NOT a total outage — those slots
+        # won't heal on retry, so we leave them None and return instead of
+        # telling the caller to back off for the whole batch.
         raise upstream_error[0]
     return results
 

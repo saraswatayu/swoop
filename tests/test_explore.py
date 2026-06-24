@@ -614,6 +614,24 @@ class TestPriceExploreAll:
             swoop.price_explore_all(dests)
         assert excinfo.value.grpc_code == 13
 
+    def test_mixed_outage_and_permanent_gap_does_not_raise(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopUpstreamError
+
+        # One destination is an upstream outage, the other a permanent data gap
+        # (ValueError — missing airport/date that won't heal on retry). The
+        # batch is all-None, but it is NOT a total outage: the contract is
+        # "every destination rejected upstream", so this must return [None, None]
+        # rather than telling the caller to back off the whole batch.
+        def fake(dest, **kw):
+            if dest.destination == "ERR":
+                raise SwoopUpstreamError(13)
+            raise ValueError("missing departure date")
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="ERR"), _dest(destination="GAP")]
+        assert swoop.price_explore_all(dests) == [None, None]
+
     def test_rate_limit_stops_dispatch_and_propagates(self, monkeypatch):
         import swoop
         from swoop.exceptions import SwoopRateLimitError

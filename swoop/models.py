@@ -383,6 +383,8 @@ class PriceResult:
             parts.append(f"'{self.fare_brand}'")
         elif self.is_basic_economy:
             parts.append("basic_economy")
+        if self.is_estimate:
+            parts.append("estimate")
         detail = []
         if self.resolved_legs:
             detail.append(f"{len(self.resolved_legs)} leg{'s' if len(self.resolved_legs) != 1 else ''}")

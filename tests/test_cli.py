@@ -874,6 +874,33 @@ class TestPriceCommand:
         assert rows[1][rows[0].index("price")] == "342"
 
     @patch("swoop.check_price")
+    def test_price_output_surfaces_is_estimate(self, mock_check):
+        """An estimate (search-derived, no confirmed fare) must be visible in
+        machine-readable output — JSON and CSV — so consumers can tell it apart
+        from a confirmed bookable fare. The no-booking-options path is exactly
+        the is_estimate=True case."""
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD", is_estimate=True, rpc_calls=0,
+        )
+        runner = CliRunner()
+        json_res = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-o", "json", "-q",
+        ])
+        assert json_res.exit_code == 0
+        import json
+        assert json.loads(json_res.output)["is_estimate"] is True
+
+        csv_res = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-o", "csv", "-q",
+        ])
+        assert csv_res.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(csv_res.output)))
+        assert "is_estimate" in rows[0]
+        assert rows[1][rows[0].index("is_estimate")] == "true"
+
+    @patch("swoop.check_price")
     def test_price_csv_empty_currency_column_when_none(self, mock_check):
         """currency=None must serialize as an empty string, not 'None'."""
         mock_check.return_value = PriceResult(

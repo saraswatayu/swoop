@@ -277,7 +277,7 @@ class TestFrozenDataclassFields:
         assert self._field_names(PriceRange) == expected
 
     def test_price_result_fields(self):
-        expected = {"price", "currency", "fare_brand", "is_basic_economy", "booking_options", "itinerary", "resolved_legs", "rpc_calls"}
+        expected = {"price", "currency", "fare_brand", "is_basic_economy", "is_estimate", "booking_options", "itinerary", "resolved_legs", "rpc_calls"}
         assert self._field_names(PriceResult) == expected
 
     def test_resolved_leg_fields(self):

@@ -435,6 +435,7 @@ class TestExactPricing:
         assert result is not None
         assert result.price == 319
         assert result.fare_brand == "Main Cabin"
+        assert result.is_estimate is False  # price came from a booking option
         assert result.booking_options == options
         assert result.rpc_calls == 1
         assert calls[0][0] == request_legs
@@ -514,6 +515,7 @@ class TestExactPricing:
 
         assert result is not None
         assert result.price == 342
+        assert result.is_estimate is True  # degraded to the search estimate
         assert result.booking_options == []
         assert result.rpc_calls == 0
 

@@ -521,6 +521,7 @@ def price_selected_trip(
                 currency=final_itinerary.currency,
                 fare_brand=best_option.brand_label or best_option.brand_code or None,
                 is_basic_economy=best_option.is_basic,
+                is_estimate=False,  # price came from a real booking option
                 booking_options=booking_options,
                 itinerary=final_itinerary,
                 resolved_legs=resolved_legs,
@@ -530,9 +531,12 @@ def price_selected_trip(
     if base_price is None or base_price <= 0:
         return None
 
+    # No eligible booking option (lookup skipped, degraded, or none in cabin):
+    # the price is the search-derived shopping estimate, not a confirmed fare.
     return PriceResult(
         price=base_price,
         currency=final_itinerary.currency,
+        is_estimate=True,
         booking_options=booking_options,
         itinerary=final_itinerary,
         resolved_legs=resolved_legs,

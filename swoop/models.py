@@ -358,12 +358,20 @@ class PriceResult:
 
     ``price`` is in the currency's major unit (e.g. 342 for $342 USD,
     5540 for ¥5,540 JPY). ``currency`` is the ISO 4217 code.
+
+    ``is_estimate`` is ``True`` when ``price`` is the search-derived shopping
+    price rather than a confirmed bookable fare — i.e. the booking lookup was
+    skipped (no booking token) or degraded (a non-outage error), so no eligible
+    booking option was found. ``False`` means the price came from an actual
+    booking option. (An upstream outage during the lookup raises rather than
+    returning an estimate.)
     """
 
     price: int
     currency: Optional[str] = None
     fare_brand: Optional[str] = None
     is_basic_economy: bool = False
+    is_estimate: bool = False
     booking_options: list[BookingOption] = field(default_factory=list)
     itinerary: Optional[Itinerary] = None
     resolved_legs: list[ResolvedLeg] = field(default_factory=list)

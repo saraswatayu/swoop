@@ -9,9 +9,10 @@ line.** The specifics:
 
 1. Single-shot calls raise. A structured upstream rejection (an HTTP 200 whose
    body carries a ``travel.frontend.flights.ErrorResponse`` envelope with a gRPC
-   status code) on a one-fetch call — ``search``, ``search_legs``,
-   ``check_price``, ``price_selector``, ``price_legs``, ``deals``, ``explore``,
-   ``get_booking_results`` — raises :class:`SwoopUpstreamError`. A genuinely
+   status code) on a one-fetch call — ``search``, ``search_raw``,
+   ``search_legs``, ``check_price``, ``price_selector``, ``price_legs``,
+   ``deals``, ``explore``, ``get_booking_results`` — raises
+   :class:`SwoopUpstreamError`. A genuinely
    empty result (no flights) is *not* an error: it returns an empty result.
 
 2. Aggregate / fan-out calls degrade, but not silently. The multi-city beam in

@@ -732,6 +732,11 @@ def search_deal(
 
     Returns:
         A :class:`SearchResult` with itineraries that match the deal.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     return search(transport=transport, **deal.to_search_kwargs())
 
@@ -773,6 +778,11 @@ def price_deal(
 
     Returns:
         A :class:`PriceResult`, or ``None`` if the deal can't be priced.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     return _price_cheapest(search_deal(deal, transport=transport), transport)
 
@@ -889,6 +899,11 @@ def price_explore(
 
     Returns:
         A :class:`PriceResult`, or ``None`` if the destination can't be priced.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     result = search(transport=transport, **destination.to_search_kwargs())
     return _price_cheapest(result, transport)
@@ -1041,6 +1056,11 @@ def deals(
     Returns:
         A :class:`DealsResult` containing up to 30 :class:`Deal` objects
         that passed every active filter.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
 
     Example::
 

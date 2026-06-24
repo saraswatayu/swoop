@@ -580,6 +580,14 @@ def get_booking_results(
         registry_version: If provided, set as ``registry_version`` on each option.
         required_keys: If provided, warns when any key is missing from parsed options.
         transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A list of :class:`BookingOption` (empty when nothing is bookable).
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope (HTTP 200, no result payload) — an upstream
+            outage, distinct from a genuinely empty (no-options) result.
     """
     if isinstance(itinerary_or_token, Itinerary):
         itin = itinerary_or_token

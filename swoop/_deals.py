@@ -201,7 +201,11 @@ def _parse_streaming_response(text: str) -> list[Any]:
     frames: list[Any] = []
     for line in text.split("\n"):
         line = line.strip()
-        if not line or len(line) < 100:
+        # Collect every frame line for the error-envelope scan regardless of
+        # length — a compact ErrorResponse line can be well under the deal-line
+        # size, and gating on length here used to skip it silently. The 500-char
+        # inner-payload check below still selects deal-bearing lines.
+        if not line.startswith("[["):
             continue
         try:
             chunk = json.loads(line)

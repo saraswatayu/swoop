@@ -639,6 +639,16 @@ def test_empty_result_still_returns_none_not_error() -> None:
     assert rpc._parse_rpc_response(empty) is None
 
 
+def test_parse_rpc_response_scans_all_frames_for_envelope() -> None:
+    # outer[0] is a benign no-payload frame; the error envelope sits in a later
+    # frame. Detection must scan every frame (like deals/explore), not just
+    # outer[0], so an envelope can't slip through as an empty result.
+    text = ")]}'" + json.dumps([["wrb.fr", None, None], make_error_frame()])
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        rpc._parse_rpc_response(text)
+    assert excinfo.value.grpc_code == 13
+
+
 def test_public_search_raises_upstream_error_end_to_end(monkeypatch) -> None:
     # The PR's headline contract lives in the public search() docstring, but
     # every other test exercises the private _parse_rpc_response directly. Pin

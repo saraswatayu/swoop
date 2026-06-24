@@ -718,8 +718,10 @@ def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
         # No payload at [0][2]. Before treating this as an (empty) result,
         # check whether Google rejected the request with a structured
         # ErrorResponse envelope — surface that as a loud error so callers
-        # can distinguish an upstream outage from "no flights found".
-        raise_if_error_envelope([frame], endpoint="GetShoppingResults")
+        # can distinguish an upstream outage from "no flights found". Scan
+        # every frame (not just outer[0]) so detection matches deals/explore
+        # and an envelope in a later frame can't slip through as empty.
+        raise_if_error_envelope(outer, endpoint="GetShoppingResults")
         return None
 
     # Inner value is a JSON string that needs to be parsed again

@@ -46,6 +46,15 @@ class TestDealsUpstreamError:
         with pytest.raises(SwoopUpstreamError):
             _parse_streaming_response(text)
 
+    def test_length_prefixed_short_error_line_raises(self):
+        # A compact ErrorResponse line (well under the deal-line size) must still
+        # be detected — the old `len(line) < 100` filter skipped it silently.
+        short = json.dumps([make_error_frame(type_url="x.ErrorResponse")])
+        assert len(short) < 100  # guard: genuinely exercises the short-line path
+        with pytest.raises(SwoopUpstreamError) as excinfo:
+            _parse_streaming_response(")]}'\n" + short)
+        assert excinfo.value.grpc_code == 13
+
     def test_genuinely_empty_still_returns_empty(self):
         # A success-shaped frame with no deals must stay [] (not raised).
         empty = ")]}'" + json.dumps([["wrb.fr", None, "{}"], ["di", 1]])

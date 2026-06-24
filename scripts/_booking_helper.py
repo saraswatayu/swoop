@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Optional, Tuple
 
 from swoop import CabinClass, Passengers, TransportConfig
+from swoop.exceptions import SwoopUpstreamError
 from swoop.rpc import (
     BOOKING_RPC_URL,
     SORT_DEPARTURE_TIME,
@@ -64,4 +65,10 @@ def fetch_booking_results(
         content=f"f.req={encoded_body}".encode(),
         transport=TransportConfig(),
     )
-    return parse_booking_payload(res.text), res.text
+    try:
+        return parse_booking_payload(res.text), res.text
+    except SwoopUpstreamError:
+        # During a Google outage the response is an ErrorResponse envelope, not
+        # booking options. parse_booking_payload now raises rather than returning
+        # []; the diagnostic scripts should record/skip the raw text, not crash.
+        return [], res.text

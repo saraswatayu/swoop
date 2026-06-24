@@ -483,7 +483,7 @@ Look up the current bookable fare for a specific flight. Optimized for the "what
 | `country` | `str \| None` | `None` | Two-letter country code for point of sale |
 | `proxy` | `str \| None` | `None` | Proxy URL for routing requests |
 
-Returns `PriceResult | None`. `PriceResult` has `price`, `fare_brand`, `is_basic_economy`, `booking_options`, `itinerary`, `resolved_legs`, `rpc_calls`.
+Returns `PriceResult | None`. `PriceResult` has `price`, `currency`, `fare_brand`, `is_basic_economy`, `is_estimate`, `booking_options`, `itinerary`, `resolved_legs`, `rpc_calls`.
 
 ### `get_booking_results(itinerary_or_token, **kwargs)`
 
@@ -499,7 +499,7 @@ Set the default proxy URL for all subsequent requests. Pass `None` to clear.
 
 ### Result types
 
-- **`PriceResult`** — `price: int`, `currency: str | None`, `fare_brand: str | None`, `is_basic_economy: bool`, `booking_options: list[BookingOption]`, `itinerary: Itinerary | None`, `resolved_legs: list[ResolvedLeg]`, `rpc_calls: int`
+- **`PriceResult`** — `price: int`, `currency: str | None`, `fare_brand: str | None`, `is_basic_economy: bool`, `is_estimate: bool`, `booking_options: list[BookingOption]`, `itinerary: Itinerary | None`, `resolved_legs: list[ResolvedLeg]`, `rpc_calls: int`
 - **`ResolvedLeg`** — `flight_summary: str`, `origin: str`, `destination: str`, `date: str`, `itinerary: Itinerary | None`, `selection: str`
 - **`SelectedLeg`** — `flight_number: str`, `origin: str`, `destination: str`, `date: str`
 - **`SearchLeg`** — `date: str`, `from_airport: str`, `to_airport: str`, `max_stops: int | None`, `airlines: list[str] | None`

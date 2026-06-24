@@ -151,7 +151,7 @@ swoop/
 |-------|------|
 | Protobuf response schema | `.claude/docs/google-flights-protobuf-schema.md` |
 | Booking option parsing notes | `.claude/docs/booking-options-proto-notes.md` |
-| Version-to-version upgrade notes | `MIGRATION.md` (0.3 → 0.4, 0.4 → 0.5) |
+| Version-to-version upgrade notes | `MIGRATION.md` (0.3 → 0.4, 0.4 → 0.5, 0.6 → 0.7) |
 | Security policy and threat model | `SECURITY.md` |
 | Runnable end-user examples | `examples/README.md`, `examples/price_drop_watcher.py`, `examples/multi_city_finder.py`, `examples/deals_watcher.py` |
 | Diagnostic scripts shared helper | `scripts/_booking_helper.py` (fetch_booking_results — reused by the 7 record_*/sweep/validate scripts) |

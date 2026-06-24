@@ -433,10 +433,6 @@ def parse_booking_payload(text: str) -> list[list[Any]]:
         if not (isinstance(frame, list) and len(frame) >= 3):
             continue
         if frame[0] != "wrb.fr" or not isinstance(frame[2], str):
-            # A wrb.fr frame with no string payload may be Google's structured
-            # ErrorResponse envelope (HTTP 200, request rejected). Surface it so
-            # a booking lookup during an outage doesn't look like "no options".
-            raise_if_error_envelope([frame], endpoint="GetBookingResults")
             continue
         try:
             payload = json.loads(frame[2])
@@ -446,6 +442,11 @@ def parse_booking_payload(text: str) -> list[list[Any]]:
         if isinstance(options_raw, list) and options_raw:
             return [opt for opt in options_raw if isinstance(opt, list)]
 
+    # No bookable options found. If Google rejected the request with a
+    # structured ErrorResponse envelope (HTTP 200, no payload), surface it so a
+    # booking lookup during an outage doesn't look like "no options" — matching
+    # the results-win-over-error precedence of the other parsers.
+    raise_if_error_envelope(outer, endpoint="GetBookingResults")
     return []
 
 

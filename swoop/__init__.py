@@ -22,7 +22,7 @@ Basic usage::
 
 from __future__ import annotations
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from .decoder import (
     AmenityFlags,
@@ -38,7 +38,13 @@ from .decoder import (
     itinerary_matches_flight,
 )
 from ._regions import Region
-from .exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+from .exceptions import (
+    SwoopError,
+    SwoopHTTPError,
+    SwoopParseError,
+    SwoopRateLimitError,
+    SwoopUpstreamError,
+)
 from .builders import CabinClass, SearchLeg
 from .models import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from .rpc import (
@@ -194,6 +200,11 @@ def search_legs(
 
     Returns:
         A trip-level :class:`SearchResult` with shopping totals.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     _validate_leg_search_inputs(legs, cabin=cabin, passengers=passengers)
 
@@ -286,6 +297,10 @@ def search(
     Raises:
         SwoopHTTPError: If Google Flights returns a non-200 response.
         SwoopRateLimitError: If Google Flights returns HTTP 429.
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope (HTTP 200, but no result payload). Distinct
+            from a genuinely empty result, which returns an empty
+            :class:`SearchResult` rather than raising.
         SwoopParseError: If the response cannot be parsed.
 
     Example::
@@ -396,6 +411,11 @@ def price_legs(
 
     Returns:
         A :class:`PriceResult` or ``None`` if the flight was not found.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     if len(legs) == 0:
         raise ValueError("at least one leg is required")
@@ -455,6 +475,11 @@ def price_selector(
     Returns:
         A :class:`PriceResult`, or ``None`` if the selected itinerary no
         longer exists.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     return price_trip_selector(selector, transport=transport)
 
@@ -495,6 +520,11 @@ def check_price(
     Returns:
         A :class:`PriceResult` with the price and matched itinerary,
         or ``None`` if the flight was not found.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
 
     Example::
 
@@ -702,6 +732,11 @@ def search_deal(
 
     Returns:
         A :class:`SearchResult` with itineraries that match the deal.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     return search(transport=transport, **deal.to_search_kwargs())
 
@@ -743,6 +778,11 @@ def price_deal(
 
     Returns:
         A :class:`PriceResult`, or ``None`` if the deal can't be priced.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     return _price_cheapest(search_deal(deal, transport=transport), transport)
 
@@ -801,6 +841,11 @@ def explore(
 
     Returns:
         An :class:`ExploreResult` with the destinations that passed every filter.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     validate_iata_code(origin, "origin")
     validate_cabin(cabin)
@@ -854,6 +899,11 @@ def price_explore(
 
     Returns:
         A :class:`PriceResult`, or ``None`` if the destination can't be priced.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
     """
     result = search(transport=transport, **destination.to_search_kwargs())
     return _price_cheapest(result, transport)
@@ -885,7 +935,7 @@ def price_explore_all(
         ``destinations``: a :class:`PriceResult` per destination, or ``None``
         where it can't be priced (no matching itinerary, a missing airport
         code / departure date — a ``ValueError`` from :func:`price_explore` —
-        or a non-rate-limit transport/parse failure, which is logged at
+        or a per-item upstream/transport/parse failure, which is logged at
         WARNING). One bad entry never discards the rest of the batch.
 
     Raises:
@@ -893,6 +943,10 @@ def price_explore_all(
             stops further dispatch — continuing would only deepen the block —
             and propagates so the caller backs off and retries later, instead
             of receiving a quietly-incomplete list of mostly ``None``.
+        SwoopUpstreamError: If *every* destination is rejected upstream (a total
+            outage). A partial outage leaves the affected destinations ``None``
+            (logged) so one bad destination never sinks the batch — call
+            :func:`price_explore` directly if you need the per-destination error.
     """
     if not destinations:
         return []
@@ -901,6 +955,14 @@ def price_explore_all(
 
     results: list[Optional[PriceResult]] = [None] * len(destinations)
     rate_limited = threading.Event()
+    # 1-slot holder for the last upstream rejection seen (list write is atomic
+    # in CPython). Only acted on if EVERY destination was rejected upstream.
+    upstream_error: list[Optional[SwoopUpstreamError]] = [None]
+    # Per-destination flag: True only when THIS destination was rejected
+    # upstream. Index writes are atomic in CPython (like ``results``), so no
+    # lock is needed. A total outage is "all True" — a permanent ValueError gap
+    # or other failure leaves its flag False so the batch isn't mislabeled.
+    upstream_rejected: list[bool] = [False] * len(destinations)
 
     def _price(index: int, dest: ExploreDestination) -> None:
         if rate_limited.is_set():
@@ -915,6 +977,14 @@ def price_explore_all(
             # A batch-wide condition, not a per-item gap: stop dispatching and
             # surface it after the pool drains so the caller backs off.
             rate_limited.set()
+        except SwoopUpstreamError as exc:
+            # An upstream outage on one destination. Record it (leave this slot
+            # None) — if EVERY destination fails this way we raise after the
+            # pool (a total outage), but a partial outage stays a logged None
+            # so one bad destination never sinks the whole batch.
+            upstream_error[0] = exc
+            upstream_rejected[index] = True
+            logger.warning("price_explore_all: upstream error pricing %s: %s", dest.destination or "?", exc)
         except SwoopError as exc:
             # A non-rate-limit transport/parse failure on one destination must
             # not sink the batch: index assignment leaves the rest intact. Log
@@ -927,6 +997,14 @@ def price_explore_all(
 
     if rate_limited.is_set():
         raise SwoopRateLimitError()
+    if upstream_error[0] is not None and all(upstream_rejected):
+        # EVERY destination was rejected upstream: a total outage. Surface it
+        # rather than returning an all-None list that conflates "Google was
+        # down" with "nothing priced". A mix of an outage with permanent
+        # ValueError gaps or other failures is NOT a total outage — those slots
+        # won't heal on retry, so we leave them None and return instead of
+        # telling the caller to back off for the whole batch.
+        raise upstream_error[0]
     return results
 
 
@@ -1006,6 +1084,11 @@ def deals(
     Returns:
         A :class:`DealsResult` containing up to 30 :class:`Deal` objects
         that passed every active filter.
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope — an upstream outage, distinct from an empty
+            result. See :func:`search` for the full transport-error set.
 
     Example::
 
@@ -1138,6 +1221,7 @@ __all__ = [
     "SwoopHTTPError",
     "SwoopParseError",
     "SwoopRateLimitError",
+    "SwoopUpstreamError",
     # Constants
     "SORT_TOP",
     "SORT_CHEAPEST",

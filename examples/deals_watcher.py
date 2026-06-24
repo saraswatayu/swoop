@@ -140,6 +140,15 @@ def fetch_once(args: argparse.Namespace) -> int:
             print(f"[rate-limit] sleeping {RATE_LIMIT_BACKOFF_SECONDS}s extra")
             time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
         return 0
+    except swoop.SwoopUpstreamError as exc:
+        # A Google upstream outage (gRPC error envelope) now raises instead of
+        # returning an empty result that would wipe the snapshot baseline.
+        # Degrade for this cycle so the long-running watcher keeps polling
+        # rather than dying on a transient outage.
+        print(f"[upstream-error] {exc}")
+        if not (args.once or args.interval == 0):
+            time.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+        return 0
 
     diff = swoop.watch_deals(result, cache_path=args.cache)
 

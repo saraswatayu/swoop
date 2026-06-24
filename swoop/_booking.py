@@ -12,7 +12,7 @@ import urllib.parse
 from typing import Any
 
 from .builders import CABIN_CLASS_MAP, ItinerarySummary
-from .decoder import BookingOption, _safe_get
+from .decoder import BookingOption, _safe_get, raise_if_error_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +442,11 @@ def parse_booking_payload(text: str) -> list[list[Any]]:
         if isinstance(options_raw, list) and options_raw:
             return [opt for opt in options_raw if isinstance(opt, list)]
 
+    # No bookable options found. If Google rejected the request with a
+    # structured ErrorResponse envelope (HTTP 200, no payload), surface it so a
+    # booking lookup during an outage doesn't look like "no options" — matching
+    # the results-win-over-error precedence of the other parsers.
+    raise_if_error_envelope(outer, endpoint="GetBookingResults")
     return []
 
 

@@ -15,10 +15,11 @@ import urllib.parse
 
 import pytest
 
+import swoop
 import swoop._booking as _booking
 import swoop.rpc as rpc
 from swoop._booking import _extract_booking_url, _extract_seller
-from swoop.decoder import BookingOption
+from swoop.decoder import BookingOption, detect_error_envelope
 from swoop.rpc import (
     _build_booking_f_req,
     _build_filters_from_legs,
@@ -35,6 +36,7 @@ from tests.factories import (
     encode_rpc_outer,
     make_brand_block,
     make_booking_option,
+    make_error_frame,
     make_price_block,
     FakeHTTPResponse,
 )
@@ -565,6 +567,123 @@ def test_extract_booking_payload_and_rpc_parsers(monkeypatch) -> None:
     bad_inner_json = ")]}'" + json.dumps([["wrb.fr", None, "{bad"]])
     with pytest.raises(rpc.SwoopParseError, match="Failed to parse inner RPC response JSON"):
         rpc._parse_rpc_response(bad_inner_json)
+
+
+# The exact ErrorResponse body Google returned during the 2026-06-11 outage
+# (issue #30): HTTP 200, no payload at [0][2], a gRPC 13 (INTERNAL) error block
+# at [0][5] referencing travel.frontend.flights.ErrorResponse.
+_SHOPPING_ERROR_RESPONSE = (
+    ")]}'\n\n"
+    + json.dumps(
+        [
+            [
+                "wrb.fr", None, None, None, None,
+                [
+                    13, None,
+                    [
+                        [
+                            "type.googleapis.com/travel.frontend.flights.ErrorResponse",
+                            [[None, [[1781231390777253, 99197463, 3005791615], None, None, None, None, [[0]]], 0, "Hm8raqW4L5fEpt8P__qimQs", "HfM91MiaVuJkABZsRgBG"], 0],
+                        ]
+                    ],
+                ],
+            ],
+            ["di", 198],
+            ["af.httprm", 198, "-5465642232923047722", 16],
+        ]
+    )
+)
+
+
+def test_parse_rpc_response_raises_on_error_envelope() -> None:
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        rpc._parse_rpc_response(_SHOPPING_ERROR_RESPONSE)
+    err = excinfo.value
+    assert err.grpc_code == 13
+    assert err.type_url == "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+    # The message should name the gRPC status so an outage reads clearly.
+    assert "13 INTERNAL" in str(err)
+    assert "upstream error" in str(err).lower()
+
+
+def test_detect_error_envelope_detection() -> None:
+    # Success frame: payload at index 2, no error block.
+    assert detect_error_envelope(["wrb.fr", None, "{...}"]) is None
+    # Genuinely-empty frame: null payload but no error envelope -> not an error.
+    assert detect_error_envelope(["wrb.fr", None, None]) is None
+    # Error frame: gRPC code + ErrorResponse type url.
+    assert detect_error_envelope(make_error_frame()) == (
+        13, "type.googleapis.com/travel.frontend.flights.ErrorResponse"
+    )
+    # Non-list input is tolerated.
+    assert detect_error_envelope(None) is None
+
+
+def test_detect_error_envelope_hardening() -> None:
+    # gRPC code 0 (OK) is success, never an error -> not detected.
+    assert detect_error_envelope(make_error_frame(grpc_code=0)) is None
+    # bool is an int subclass; a True/False leading value must not be read as a
+    # gRPC code.
+    assert detect_error_envelope(make_error_frame(grpc_code=True)) is None
+    # A type url that merely CONTAINS the substring (no ".ErrorResponse" suffix)
+    # must not false-positive.
+    assert detect_error_envelope(
+        make_error_frame(type_url="type.googleapis.com/x.NotAnErrorResponseReally")
+    ) is None
+
+
+def test_empty_result_still_returns_none_not_error() -> None:
+    # A null payload that is NOT an error envelope must stay a quiet None,
+    # so "no flights found" never masquerades as an upstream outage.
+    empty = ")]}'" + json.dumps([["wrb.fr", None, None]])
+    assert rpc._parse_rpc_response(empty) is None
+
+
+def test_parse_rpc_response_scans_all_frames_for_envelope() -> None:
+    # outer[0] is a benign no-payload frame; the error envelope sits in a later
+    # frame. Detection must scan every frame (like deals/explore), not just
+    # outer[0], so an envelope can't slip through as an empty result.
+    text = ")]}'" + json.dumps([["wrb.fr", None, None], make_error_frame()])
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        rpc._parse_rpc_response(text)
+    assert excinfo.value.grpc_code == 13
+
+
+def test_parse_rpc_response_detects_envelope_when_first_frame_malformed() -> None:
+    # outer[0] is too short to index at [2] (a leading ["di", 198] metadata
+    # frame, or a truncated wrb.fr) so frame[2] raises IndexError. The error
+    # envelope sits in a later frame. The exception branch must still scan every
+    # frame — otherwise a reordered rejection slips through as a silent None on
+    # the highest-traffic shopping endpoint, the exact bug this branch fixes.
+    short_first = ")]}'" + json.dumps([["di", 198], make_error_frame()])
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        rpc._parse_rpc_response(short_first)
+    assert excinfo.value.grpc_code == 13
+
+    # A non-subscriptable first frame (frame[2] raises TypeError) is handled too.
+    non_sub_first = ")]}'" + json.dumps(["x", make_error_frame()])
+    with pytest.raises(rpc.SwoopUpstreamError):
+        rpc._parse_rpc_response(non_sub_first)
+
+    # And a genuinely malformed-but-not-an-error response still returns None.
+    benign = ")]}'" + json.dumps([["di", 198], ["af.httprm", 198, "-1", 16]])
+    assert rpc._parse_rpc_response(benign) is None
+
+
+def test_public_search_raises_upstream_error_end_to_end(monkeypatch) -> None:
+    # The PR's headline contract lives in the public search() docstring, but
+    # every other test exercises the private _parse_rpc_response directly. Pin
+    # the full path search() -> search_trip_options -> _search_from_legs so a
+    # regression that swallows the error (e.g. an `if result is None` guard
+    # absorbing it) can't slip through unnoticed.
+    class _FakeResponse:
+        text = _SHOPPING_ERROR_RESPONSE
+
+    monkeypatch.setattr(rpc, "_http_post", lambda *args, **kwargs: _FakeResponse())
+
+    with pytest.raises(rpc.SwoopUpstreamError) as excinfo:
+        swoop.search("JFK", "LAX", "2030-01-01", max_stops=0)
+    assert excinfo.value.grpc_code == 13
 
 
 def test_booking_parser_logs_debug_for_partial_drops_and_warning_for_total_drop(caplog) -> None:

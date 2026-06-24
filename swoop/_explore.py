@@ -29,7 +29,7 @@ import urllib.parse
 from typing import Any, Optional
 
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import _safe_get
+from .decoder import _safe_get, raise_if_error_envelope
 from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .models import ExploreDestination, ExploreResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
@@ -108,6 +108,7 @@ def _extract_inner(text: str) -> list[Any]:
         raise _ExploreBlockedError("Explore RPC returned an HTML/consent page (likely blocked)")
 
     candidates: list[Any] = []
+    frames: list[Any] = []
     for raw_line in stripped.splitlines():
         line = raw_line.strip()
         if not line.startswith("[["):
@@ -117,12 +118,17 @@ def _extract_inner(text: str) -> list[Any]:
         except ValueError:
             continue
         for entry in outer if isinstance(outer, list) else []:
-            if (isinstance(entry, list) and entry and entry[0] == "wrb.fr"
-                    and len(entry) > 2 and isinstance(entry[2], str)):
-                try:
-                    candidates.append(json.loads(entry[2]))
-                except ValueError:
-                    continue
+            if isinstance(entry, list) and entry and entry[0] == "wrb.fr":
+                if len(entry) > 2 and isinstance(entry[2], str):
+                    try:
+                        candidates.append(json.loads(entry[2]))
+                    except ValueError:
+                        continue
+                else:
+                    # Only a frame without a string payload can carry the error
+                    # envelope; collect just those so a successful explore (the
+                    # common case) never builds this list.
+                    frames.append(entry)
 
     # Prefer a chunk carrying a non-empty destination list; fall back to the
     # first valid frame so origin metadata still parses.
@@ -132,6 +138,12 @@ def _extract_inner(text: str) -> list[Any]:
             return inner
     if candidates:
         return candidates[0]
+    # No usable payload. If Google rejected the request with a structured
+    # ErrorResponse envelope, surface that as SwoopUpstreamError (consistent
+    # with the shopping path) rather than a generic "missing payload" parse
+    # error — it also bypasses the stale-session retry, which can't heal an
+    # upstream outage.
+    raise_if_error_envelope(frames, endpoint="GetExploreDestinations")
     raise SwoopParseError("Explore response missing inner payload")
 
 

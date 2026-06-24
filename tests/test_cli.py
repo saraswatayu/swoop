@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from swoop.cli import main
 from swoop import PriceResult, SearchResult, TripLeg, TripOption
 from swoop.cli.commands import search_cmd, price_cmd
+from swoop.exceptions import SwoopUpstreamError
 from swoop.cli.utils import format_time, format_duration, format_date_display, format_route, check_past_date, IATACodeType, DateType
 from swoop.decoder import (
     BookingOption,
@@ -873,6 +874,33 @@ class TestPriceCommand:
         assert rows[1][rows[0].index("price")] == "342"
 
     @patch("swoop.check_price")
+    def test_price_output_surfaces_is_estimate(self, mock_check):
+        """An estimate (search-derived, no confirmed fare) must be visible in
+        machine-readable output — JSON and CSV — so consumers can tell it apart
+        from a confirmed bookable fare. The no-booking-options path is exactly
+        the is_estimate=True case."""
+        mock_check.return_value = PriceResult(
+            price=342, currency="USD", is_estimate=True, rpc_calls=0,
+        )
+        runner = CliRunner()
+        json_res = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-o", "json", "-q",
+        ])
+        assert json_res.exit_code == 0
+        import json
+        assert json.loads(json_res.output)["is_estimate"] is True
+
+        csv_res = runner.invoke(main, [
+            "price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-o", "csv", "-q",
+        ])
+        assert csv_res.exit_code == 0
+        import csv as _csv
+        import io as _io
+        rows = list(_csv.reader(_io.StringIO(csv_res.output)))
+        assert "is_estimate" in rows[0]
+        assert rows[1][rows[0].index("is_estimate")] == "true"
+
+    @patch("swoop.check_price")
     def test_price_csv_empty_currency_column_when_none(self, mock_check):
         """currency=None must serialize as an empty string, not 'None'."""
         mock_check.return_value = PriceResult(
@@ -1558,3 +1586,60 @@ class TestPastDateWarningStreamSeparation:
         assert data["price"] == 342
         assert "is in the past" in result.stderr
         assert "is in the past" not in result.stdout
+
+
+class TestUpstreamErrorHandling:
+    """SwoopUpstreamError is a sibling of SwoopHTTPError/SwoopParseError, so the
+    CLI must catch it explicitly — otherwise an upstream outage (which fires
+    often under throttling) crashes the command with a raw traceback."""
+
+    @patch("swoop.cli.commands._run_search")
+    def test_search_reports_upstream_error_cleanly(self, mock_search):
+        mock_search.side_effect = SwoopUpstreamError(
+            13, type_url="type.googleapis.com/travel.frontend.flights.ErrorResponse"
+        )
+        result = CliRunner().invoke(main, ["search", "JFK", "LAX", _FUTURE, "-q"])
+        # Handled, not crashed: clean exit code, no leaked exception/traceback.
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "gRPC 13" in result.output
+
+    @patch("swoop.check_price")
+    def test_price_reports_upstream_error_cleanly(self, mock_price):
+        mock_price.side_effect = SwoopUpstreamError(13)
+        result = CliRunner().invoke(
+            main, ["price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-q"]
+        )
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "upstream error" in result.output.lower()
+
+    @patch("swoop.deals")
+    def test_deals_reports_upstream_error_cleanly(self, mock_deals):
+        mock_deals.side_effect = SwoopUpstreamError(13)
+        result = CliRunner().invoke(main, ["deals", "JFK", "-q"])
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "gRPC 13" in result.output
+
+    @patch("swoop.explore")
+    def test_explore_reports_upstream_error_cleanly(self, mock_explore):
+        mock_explore.side_effect = SwoopUpstreamError(13)
+        result = CliRunner().invoke(main, ["explore", "JFK", "-q"])
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopUpstreamError)
+        assert "gRPC 13" in result.output
+
+    @patch("swoop.check_price")
+    def test_unrecognized_swoop_error_exits_cleanly_not_traceback(self, mock_price):
+        # An unrecognized SwoopError subclass must surface its message and exit
+        # non-zero rather than crashing the CLI with a raw traceback.
+        from swoop.exceptions import SwoopError
+
+        mock_price.side_effect = SwoopError("something unexpected broke")
+        result = CliRunner().invoke(
+            main, ["price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-q"]
+        )
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopError)
+        assert "something unexpected broke" in result.output

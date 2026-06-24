@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import _safe_get
+from .decoder import _safe_get, raise_if_error_envelope
 from .exceptions import SwoopParseError
 from .models import Deal, DealsResult, Passengers, TransportConfig
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
@@ -186,22 +186,37 @@ def _parse_streaming_response(text: str) -> list[Any]:
     try:
         outer = json.loads(text)
         if isinstance(outer, list) and len(outer) > 1:
-            return _extract_deals_from_entries(outer)
+            items = _extract_deals_from_entries(outer)
+            if items:
+                return items
+            # No deals: distinguish a genuine empty result from a rejected
+            # request before falling through. Each entry is a wrb.fr frame.
+            raise_if_error_envelope(outer, endpoint="GetFlightDealsStreaming")
+            return []
     except json.JSONDecodeError:
         pass
 
     # Format 2: length-prefixed lines
     deals: list[Any] = []
+    frames: list[Any] = []
     for line in text.split("\n"):
         line = line.strip()
-        if not line or len(line) < 100:
+        # Collect every frame line for the error-envelope scan regardless of
+        # length — a compact ErrorResponse line can be well under the deal-line
+        # size, and gating on length here used to skip it silently. The 500-char
+        # inner-payload check below still selects deal-bearing lines.
+        if not line.startswith("[["):
             continue
         try:
             chunk = json.loads(line)
         except json.JSONDecodeError:
             continue
         # Each chunk is [["wrb.fr", null, "<inner JSON>", ...]]
-        inner_str = _safe_get(chunk, [0, 2])
+        frame = _safe_get(chunk, [0])
+        if not isinstance(frame, list):
+            continue
+        frames.append(frame)
+        inner_str = frame[2] if len(frame) > 2 else None
         if not isinstance(inner_str, str) or len(inner_str) < 500:
             continue
         try:
@@ -213,6 +228,8 @@ def _parse_streaming_response(text: str) -> list[Any]:
             deals = items
             break
 
+    if not deals:
+        raise_if_error_envelope(frames, endpoint="GetFlightDealsStreaming")
     return deals
 
 

@@ -23,7 +23,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from swoop._booking import _parse_booking_rpc_response
+import pytest
+
+from swoop._booking import _parse_booking_rpc_response, parse_booking_payload
+from swoop.exceptions import SwoopUpstreamError
+from tests.factories import make_error_response
 
 FIXTURES = Path(__file__).parent / "fixtures"
 OTA_FIXTURE = FIXTURES / "corpus" / "booking_intl_economy_ota_response.txt"
@@ -33,6 +37,18 @@ REGISTRY_VERSION = "2026-06-02"
 def _ota_options():
     text = OTA_FIXTURE.read_text()
     return _parse_booking_rpc_response(text, registry_version=REGISTRY_VERSION)
+
+
+def test_booking_payload_raises_on_error_envelope():
+    with pytest.raises(SwoopUpstreamError) as excinfo:
+        parse_booking_payload(make_error_response())
+    assert excinfo.value.grpc_code == 13
+
+
+def test_booking_rpc_response_propagates_upstream_error():
+    # The higher-level parser must propagate it too, not swallow into [].
+    with pytest.raises(SwoopUpstreamError):
+        _parse_booking_rpc_response(make_error_response(), registry_version=REGISTRY_VERSION)
 
 
 def test_ota_fixture_surfaces_full_seller_list() -> None:

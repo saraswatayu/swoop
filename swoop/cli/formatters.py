@@ -561,7 +561,8 @@ def format_price_table(
         _render_resolved_legs(console, result.resolved_legs)
 
     currency = result.currency
-    console.print(f" [bold green]Price: {_format_price(result.price, currency)}[/bold green]")
+    estimate_tag = " [yellow](estimate)[/yellow]" if result.is_estimate else ""
+    console.print(f" [bold green]Price: {_format_price(result.price, currency)}[/bold green]{estimate_tag}")
 
     if result.fare_brand:
         console.print(f" [dim]Fare: {result.fare_brand}[/dim]")
@@ -604,6 +605,7 @@ def format_price_json(
         "currency": currency,
         "fare_brand": result.fare_brand,
         "is_basic_economy": result.is_basic_economy,
+        "is_estimate": result.is_estimate,
         "booking_options": [
             {
                 "brand_label": opt.brand_label,
@@ -671,7 +673,7 @@ def format_price_csv(
     currency = result.currency or ""
     writer = csv.writer(sys.stdout)
     writer.writerow([
-        "price", "currency", "fare_brand", "is_basic_economy",
+        "price", "currency", "fare_brand", "is_basic_economy", "is_estimate",
         "brand_label", "brand_code", "is_basic",
         "fare_family", "rebookability_signal",
         "seller_name", "seller_code", "is_airline_direct",
@@ -684,6 +686,7 @@ def format_price_csv(
                 currency,
                 _s(result.fare_brand),
                 _b(result.is_basic_economy),
+                _b(result.is_estimate),
                 _s(opt.brand_label),
                 _s(opt.brand_code),
                 _b(opt.is_basic),
@@ -703,6 +706,7 @@ def format_price_csv(
             currency,
             _s(result.fare_brand),
             _b(result.is_basic_economy),
+            _b(result.is_estimate),
             "", "", "", "", "", "", "", "", "", "",
         ])
 

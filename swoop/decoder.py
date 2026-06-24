@@ -51,6 +51,7 @@ from typing import Any, List, Optional, Tuple
 
 from ._formatting import fmt_clock, fmt_duration
 from .builders import ItinerarySummary
+from .exceptions import SwoopUpstreamError
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,62 @@ def _safe_get(data: Any, path: list[int], default: Any = None) -> Any:
         return it
     except (TypeError, IndexError, KeyError):
         return default
+
+
+def detect_error_envelope(frame: Any) -> Optional[Tuple[int, Optional[str]]]:
+    """Detect Google's structured ErrorResponse envelope in a ``wrb.fr`` frame.
+
+    A success frame is ``["wrb.fr", null, "<json>"]`` with the result payload at
+    index 2. When Google rejects the request it still answers HTTP 200 but
+    replaces that payload with an error block, e.g.::
+
+        ["wrb.fr", null, null, null, null,
+         [13, null, [["type.googleapis.com/travel.frontend.flights.ErrorResponse", ...]]]]
+
+    The leading int (``13`` here) is a gRPC status code (13 = INTERNAL). Returns
+    ``(grpc_code, type_url)`` when such a block is present, else ``None``.
+
+    Shared by every RPC parser (shopping, booking, deals, explore) so a Google
+    outage surfaces as :class:`~swoop.exceptions.SwoopUpstreamError` on all
+    endpoints instead of a silent empty result on some of them.
+
+    ``bool`` values and gRPC code ``0`` (OK) are deliberately NOT treated as
+    errors: ``bool`` is an ``int`` subclass, and ``0`` means success.
+    """
+    if not isinstance(frame, list):
+        return None
+    for element in frame:
+        if not (isinstance(element, list) and len(element) >= 3):
+            continue
+        code = element[0]
+        # A real gRPC error code is a plain, non-zero int. Exclude bool
+        # (a subclass of int) and 0 (OK) so neither trips a false positive.
+        if type(code) is not int or code == 0:
+            continue
+        type_url = _safe_get(element, [2, 0, 0])
+        if isinstance(type_url, str) and type_url.endswith(".ErrorResponse"):
+            return code, type_url
+    return None
+
+
+def raise_if_error_envelope(frames: list[Any], *, endpoint: str) -> None:
+    """Raise :class:`~swoop.exceptions.SwoopUpstreamError` if any frame is an
+    ErrorResponse envelope.
+
+    Centralizes the detect -> log -> raise reaction shared by every RPC parser
+    (shopping, booking, deals, explore) so a Google outage is reported
+    identically on all endpoints. Non-streaming parsers pass a single-frame
+    list. Returns normally when no frame carries an error envelope.
+    """
+    for frame in frames:
+        error = detect_error_envelope(frame)
+        if error is not None:
+            grpc_code, type_url = error
+            logger.warning(
+                "%s returned an ErrorResponse (gRPC %s, %s)",
+                endpoint, grpc_code, type_url,
+            )
+            raise SwoopUpstreamError(grpc_code, type_url=type_url)
 
 
 def _safe_tuple(val: Any, length: int, defaults: list) -> tuple:

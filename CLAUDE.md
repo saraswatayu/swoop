@@ -133,7 +133,7 @@ swoop/
 | `_regions.py` | `Region` enum + ISO 2-letter country → region static table; `region_for_iata()` bridges via `airportsdata` |
 | `_booking.py` | `parse_booking_payload()` — booking option extraction |
 | `_validate.py` | `validate_iata()` with optional airportsdata |
-| `exceptions.py` | `SwoopError`, `SwoopRPCError`, `SwoopValidationError` |
+| `exceptions.py` | `SwoopError`, `SwoopHTTPError`, `SwoopRateLimitError`, `SwoopParseError`, `SwoopUpstreamError` |
 | `__init__.py` | Public re-exports: `search`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `deals`, `search_deal`, `price_deal`, `explore`, `price_explore`, `price_explore_all`, `watch_deals`, `diff_deals`, all dataclasses, `Region`, etc. Also `_fetch_deals_per_origin`, `_price_cheapest` (internal). |
 | `cli/__init__.py` | Click group + `main()` entry point (uses `swoop.__version__` for `--version`) |
 | `cli/commands.py` | `search_cmd`, `price_cmd`, `deals_cmd`, `explore_cmd`, `_parse_trip_length` (shared deals/explore), `_SearchFormatKwargs` TypedDict for formatter kwargs |
@@ -151,7 +151,7 @@ swoop/
 |-------|------|
 | Protobuf response schema | `.claude/docs/google-flights-protobuf-schema.md` |
 | Booking option parsing notes | `.claude/docs/booking-options-proto-notes.md` |
-| Version-to-version upgrade notes | `MIGRATION.md` (0.3 → 0.4, 0.4 → 0.5) |
+| Version-to-version upgrade notes | `MIGRATION.md` (0.3 → 0.4, 0.4 → 0.5, 0.6 → 0.7) |
 | Security policy and threat model | `SECURITY.md` |
 | Runnable end-user examples | `examples/README.md`, `examples/price_drop_watcher.py`, `examples/multi_city_finder.py`, `examples/deals_watcher.py` |
 | Diagnostic scripts shared helper | `scripts/_booking_helper.py` (fetch_booking_results — reused by the 7 record_*/sweep/validate scripts) |

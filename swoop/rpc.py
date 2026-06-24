@@ -31,8 +31,13 @@ from ._booking import (
     parse_booking_payload,
 )
 from .builders import CABIN_CLASS_MAP, CabinClass
-from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get
-from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
+from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, raise_if_error_envelope
+from .exceptions import (
+    SwoopHTTPError,
+    SwoopParseError,
+    SwoopRateLimitError,
+    SwoopUpstreamError,
+)
 from .models import Passengers, TransportConfig
 
 logger = logging.getLogger(__name__)
@@ -482,6 +487,12 @@ def search_raw(
 
     Args:
         transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope (HTTP 200, no result payload) — an upstream
+            outage, distinct from a genuinely empty result, which returns
+            ``None``. See :func:`swoop.search` for the full transport-error set.
     """
     logger.debug(
         "search_raw %s->%s on %s (cabin=%s, adults=%d)",
@@ -575,6 +586,14 @@ def get_booking_results(
         registry_version: If provided, set as ``registry_version`` on each option.
         required_keys: If provided, warns when any key is missing from parsed options.
         transport: HTTP transport configuration (default ``TransportConfig()``).
+
+    Returns:
+        A list of :class:`BookingOption` (empty when nothing is bookable).
+
+    Raises:
+        SwoopUpstreamError: If Google rejects the request with a structured
+            ErrorResponse envelope (HTTP 200, no result payload) — an upstream
+            outage, distinct from a genuinely empty (no-options) result.
     """
     if isinstance(itinerary_or_token, Itinerary):
         itin = itinerary_or_token
@@ -675,6 +694,13 @@ def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
     Response format: `)]}'` security prefix -> strip -> JSON parse
     -> extract [0][2] -> JSON parse again -> flight data.
     The inner structure matches what decode_result() expects.
+
+    Raises:
+        SwoopUpstreamError: If Google returns a structured ErrorResponse
+            envelope (HTTP 200, but the request was rejected) instead of a
+            result payload. This is distinct from a genuinely empty result,
+            which returns a decoded result with no itineraries.
+        SwoopParseError: If the response is malformed JSON.
     """
     # Strip security prefix
     stripped = text.lstrip(")]}'")
@@ -687,14 +713,26 @@ def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:
         raise SwoopParseError(f"Failed to parse RPC response JSON: {e}") from e
 
     # Extract inner JSON string at [0][2]
-    inner_json = None
     try:
-        inner_json = outer[0][2]
+        frame = outer[0]
+        inner_json = frame[2]
     except (IndexError, TypeError):
+        # outer[0] is missing or too short to index — fall through to the
+        # shared no-payload handling below, which decides between an upstream
+        # ErrorResponse envelope and a genuinely empty result.
         logger.warning("RPC response missing data at [0][2]")
-        return None
+        inner_json = None
 
     if not inner_json:
+        # No usable payload at [0][2]. Before treating this as an (empty)
+        # result, check whether Google rejected the request with a structured
+        # ErrorResponse envelope — surface that as a loud error so callers can
+        # distinguish an upstream outage from "no flights found". Scan every
+        # frame (not just outer[0]) so detection matches deals/explore and an
+        # envelope in a *later* frame (e.g. behind a leading ["di", 198]
+        # metadata frame) can't slip through as a silent None. The isinstance
+        # guard covers the except branch above, where outer may not be a list.
+        raise_if_error_envelope(outer if isinstance(outer, list) else [], endpoint="GetShoppingResults")
         return None
 
     # Inner value is a JSON string that needs to be parsed again

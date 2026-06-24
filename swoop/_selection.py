@@ -12,7 +12,7 @@ from typing import Any, Optional
 from .builders import CabinClass
 from ._validate import parse_flight_number
 from .decoder import Itinerary, RawSearchResult, itinerary_matches_flight
-from .exceptions import SwoopError
+from .exceptions import SwoopError, SwoopUpstreamError
 from .models import Passengers, PriceResult, ResolvedLeg, SearchResult, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_DEPARTURE_TIME,
@@ -326,6 +326,11 @@ def search_trip_options(
     started_at = time.monotonic()
     is_complete = len(first_candidates) <= beam_width
     prefixes = [[itinerary] for itinerary in first_candidates[:beam_width]]
+    # Remember the last staged upstream rejection. A single bad branch degrades
+    # gracefully (below), but if the beam collapses to zero results entirely it
+    # was an outage, not "no such trip" — surface it rather than returning an
+    # empty SearchResult the CLI would render as "No flights found".
+    upstream_error: Optional[SwoopUpstreamError] = None
 
     for _ in range(1, len(request_legs)):
         next_prefixes: list[list[Itinerary]] = []
@@ -343,15 +348,26 @@ def search_trip_options(
                 continue
 
             staged_legs = _with_selected_prefix(request_legs, selected_payloads)
-            stage_result = _search_from_legs(
-                staged_legs,
-                cabin=cabin,
-                passengers=passengers,
-                sort=sort,
-                transport=transport,
-                exclude_basic_economy=exclude_basic,
-                retain_raw=False,
-            )
+            try:
+                stage_result = _search_from_legs(
+                    staged_legs,
+                    cabin=cabin,
+                    passengers=passengers,
+                    sort=sort,
+                    transport=transport,
+                    exclude_basic_economy=exclude_basic,
+                    retain_raw=False,
+                )
+            except SwoopUpstreamError as exc:
+                # A transient upstream rejection on one beam branch must not
+                # sink the whole multi-city search. Before SwoopUpstreamError
+                # existed this path returned None and was absorbed here as an
+                # empty stage; preserve that graceful degradation and just mark
+                # the result incomplete. The first pass (no prefix yet) still
+                # raises, since a rejected first call means no results at all.
+                upstream_error = exc
+                is_complete = False
+                continue
             stage_candidates = _iter_raw_itineraries(stage_result)
             if not stage_candidates:
                 continue
@@ -383,6 +399,10 @@ def search_trip_options(
         )
         for prefix in prefixes[:max_results]
     ]
+    if not options and upstream_error is not None:
+        # Every beam branch was rejected upstream — this is an outage, not an
+        # empty itinerary set. Surface it instead of an empty SearchResult.
+        raise upstream_error
     result = SearchResult(results=options, price_range=None, is_complete=is_complete)
 
     return result
@@ -479,6 +499,12 @@ def price_selected_trip(
                 transport=transport,
             )
             rpc_calls += 1
+        except SwoopUpstreamError:
+            # A Google outage during the bookable-price lookup must surface, not
+            # silently fall back to the unverified search estimate — the price
+            # docstrings promise SwoopUpstreamError. Other booking failures
+            # (parse, transient HTTP) stay best-effort and degrade to base_price.
+            raise
         except SwoopError as exc:
             logger.debug("Trip booking lookup failed: %s", exc)
 
@@ -495,6 +521,7 @@ def price_selected_trip(
                 currency=final_itinerary.currency,
                 fare_brand=best_option.brand_label or best_option.brand_code or None,
                 is_basic_economy=best_option.is_basic,
+                is_estimate=False,  # price came from a real booking option
                 booking_options=booking_options,
                 itinerary=final_itinerary,
                 resolved_legs=resolved_legs,
@@ -504,9 +531,12 @@ def price_selected_trip(
     if base_price is None or base_price <= 0:
         return None
 
+    # No eligible booking option (lookup skipped, degraded, or none in cabin):
+    # the price is the search-derived shopping estimate, not a confirmed fare.
     return PriceResult(
         price=base_price,
         currency=final_itinerary.currency,
+        is_estimate=True,
         booking_options=booking_options,
         itinerary=final_itinerary,
         resolved_legs=resolved_legs,

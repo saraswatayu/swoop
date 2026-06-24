@@ -122,10 +122,14 @@ class TestParse:
         assert d.query_cabin == "economy" and d.query_adults == 1
 
     def test_error_fixture_raises(self):
+        # error_response.txt is Google's structured ErrorResponse envelope
+        # (gRPC 13). It now surfaces as the specific SwoopUpstreamError rather
+        # than the generic "missing inner payload" parse error.
         from swoop._explore import _extract_inner
-        from swoop.exceptions import SwoopParseError
-        with pytest.raises(SwoopParseError):
+        from swoop.exceptions import SwoopUpstreamError
+        with pytest.raises(SwoopUpstreamError) as excinfo:
             _extract_inner((FIX / "error_response.txt").read_text())
+        assert excinfo.value.grpc_code == 13
 
     def test_extract_inner_handles_flat_array_framing(self):
         from swoop._explore import _extract_inner, parse_explore_payload
@@ -581,6 +585,53 @@ class TestPriceExploreAll:
         dests = [_dest(destination="SFO"), _dest(destination="ERR"), _dest(destination="LAX")]
         assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
 
+    def test_partial_upstream_error_leaves_none_not_raises(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopUpstreamError
+
+        # One destination down upstream is a logged None; the others still price.
+        def fake(dest, **kw):
+            if dest.destination == "ERR":
+                raise SwoopUpstreamError(13)
+            return f"price-{dest.destination}"
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="SFO"), _dest(destination="ERR"), _dest(destination="LAX")]
+        assert swoop.price_explore_all(dests) == ["price-SFO", None, "price-LAX"]
+
+    def test_total_upstream_outage_raises(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopUpstreamError
+
+        # Every destination rejected upstream = a total outage, not "nothing
+        # priceable": surface it instead of an all-None list.
+        def fake(dest, **kw):
+            raise SwoopUpstreamError(13)
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="SFO"), _dest(destination="LAX")]
+        with pytest.raises(SwoopUpstreamError) as excinfo:
+            swoop.price_explore_all(dests)
+        assert excinfo.value.grpc_code == 13
+
+    def test_mixed_outage_and_permanent_gap_does_not_raise(self, monkeypatch):
+        import swoop
+        from swoop.exceptions import SwoopUpstreamError
+
+        # One destination is an upstream outage, the other a permanent data gap
+        # (ValueError — missing airport/date that won't heal on retry). The
+        # batch is all-None, but it is NOT a total outage: the contract is
+        # "every destination rejected upstream", so this must return [None, None]
+        # rather than telling the caller to back off the whole batch.
+        def fake(dest, **kw):
+            if dest.destination == "ERR":
+                raise SwoopUpstreamError(13)
+            raise ValueError("missing departure date")
+
+        monkeypatch.setattr(swoop, "price_explore", fake)
+        dests = [_dest(destination="ERR"), _dest(destination="GAP")]
+        assert swoop.price_explore_all(dests) == [None, None]
+
     def test_rate_limit_stops_dispatch_and_propagates(self, monkeypatch):
         import swoop
         from swoop.exceptions import SwoopRateLimitError
@@ -696,3 +747,22 @@ class TestExploreCLI:
         with contextlib.redirect_stdout(buf):
             format_explore_brief(res)
         assert "0m" in buf.getvalue()
+
+
+class TestExploreUpstreamError:
+    """A structured ErrorResponse envelope must surface as SwoopUpstreamError,
+    not the generic 'missing inner payload' parse error (which would otherwise
+    trigger a pointless stale-session retry)."""
+
+    def test_extract_inner_raises_upstream_error_on_envelope(self):
+        from swoop._explore import _extract_inner
+        from swoop.exceptions import SwoopUpstreamError, SwoopParseError
+        from tests.factories import make_error_response
+
+        # _extract_inner strips the )]}' prefix and leading whitespace, so the
+        # factory's prefix-only framing parses the same as a length-prefixed line.
+        with pytest.raises(SwoopUpstreamError) as excinfo:
+            _extract_inner(make_error_response())
+        assert excinfo.value.grpc_code == 13
+        # It's an upstream error, distinct from the generic parse error.
+        assert not isinstance(excinfo.value, SwoopParseError)

@@ -28,6 +28,7 @@ from swoop.exceptions import (
     SwoopHTTPError,
     SwoopParseError,
     SwoopRateLimitError,
+    SwoopUpstreamError,
 )
 
 
@@ -88,6 +89,7 @@ class TestFrozenExports:
         "SwoopHTTPError",
         "SwoopParseError",
         "SwoopRateLimitError",
+        "SwoopUpstreamError",
         # Constants
         "SORT_TOP",
         "SORT_CHEAPEST",
@@ -275,7 +277,7 @@ class TestFrozenDataclassFields:
         assert self._field_names(PriceRange) == expected
 
     def test_price_result_fields(self):
-        expected = {"price", "currency", "fare_brand", "is_basic_economy", "booking_options", "itinerary", "resolved_legs", "rpc_calls"}
+        expected = {"price", "currency", "fare_brand", "is_basic_economy", "is_estimate", "booking_options", "itinerary", "resolved_legs", "rpc_calls"}
         assert self._field_names(PriceResult) == expected
 
     def test_resolved_leg_fields(self):
@@ -490,6 +492,13 @@ class TestExceptionHierarchy:
         assert issubclass(SwoopHTTPError, SwoopError)
         assert issubclass(SwoopParseError, SwoopError)
         assert issubclass(SwoopRateLimitError, SwoopError)
+        assert issubclass(SwoopUpstreamError, SwoopError)
+
+    def test_upstream_error_carries_grpc_code(self):
+        err = SwoopUpstreamError(13, type_url="type.googleapis.com/x.ErrorResponse")
+        assert err.grpc_code == 13
+        assert err.type_url == "type.googleapis.com/x.ErrorResponse"
+        assert "13 INTERNAL" in str(err)
 
     def test_rate_limit_is_http_error(self):
         assert issubclass(SwoopRateLimitError, SwoopHTTPError)
@@ -503,7 +512,7 @@ class TestExceptionHierarchy:
         assert err.status_code == 429
 
     def test_all_inherit_from_exception(self):
-        for cls in (SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError):
+        for cls in (SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError):
             assert issubclass(cls, Exception)
 
 

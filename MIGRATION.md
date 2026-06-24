@@ -2,6 +2,50 @@
 
 Upgrade notes for swoop. Each section shows the old call shape, the new one, and what (if anything) you have to change.
 
+## 0.6 → 0.7
+
+### Upstream outages now raise instead of returning empty
+
+swoop now has a stated error-handling contract (see the module docstring in
+`swoop/exceptions.py`). When Google rejects a request with a structured
+`ErrorResponse` envelope (an HTTP 200 carrying a gRPC status code, e.g. the
+2026-06-11 outage), single-shot calls — `search`, `search_legs`, `check_price`,
+`price_selector`, `price_legs`, `deals`, `explore`, `get_booking_results` — now
+raise `SwoopUpstreamError` instead of silently returning an empty result. A
+genuinely empty result (no flights) still returns empty.
+
+What you need to do: if you have code that treated "empty result" as "maybe an
+outage", switch to catching the exception.
+
+```python
+# 0.6 — outage and "no flights" were indistinguishable
+result = search("SFO", "JFK", "2027-01-01")
+if not result.results:
+    ...  # could be no flights OR Google was down
+
+# 0.7
+from swoop import search, SwoopUpstreamError
+try:
+    result = search("SFO", "JFK", "2027-01-01")
+    if not result.results:
+        ...  # genuinely no flights
+except SwoopUpstreamError as e:
+    ...  # Google rejected the request (e.grpc_code); retry/alert
+```
+
+`transport.retries` still covers HTTP 429 only; upstream errors are surfaced
+(not auto-retried) so you can apply your own retry policy.
+
+### Also new in 0.7 (no migration required)
+
+- **`PriceResult.is_estimate`**: `True` when the price is the search-derived
+  shopping figure rather than a confirmed bookable fare (booking lookup skipped
+  or degraded). Additive field, defaults `False`.
+- **Aggregate calls degrade, not crash**: the multi-city beam (`search` with 3+
+  legs) and `price_explore_all` keep partial results and raise
+  `SwoopUpstreamError` only on a *total* outage (every branch / destination
+  rejected). A partial outage leaves the affected entries out / `None`.
+
 ## 0.4 → 0.5
 
 ### What changed

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-23
+
+### Added
+
+- **`SwoopUpstreamError`** — a new exported exception raised when Google answers a request with a structured `ErrorResponse` envelope (HTTP 200 carrying a gRPC status code, e.g. `13 INTERNAL`) instead of a result payload. Single-shot calls (`search`, `search_raw`, `search_legs`, `check_price`, `price_selector`, `price_legs`, `deals`, `explore`, `get_booking_results`) now raise it so an upstream outage is distinguishable from a genuinely empty result. Carries `grpc_code` and `type_url`. Detection is shared across every RPC parser (shopping, booking, deals, explore).
+- **`PriceResult.is_estimate`** — `True` when the price is the search-derived shopping figure rather than a confirmed bookable fare (booking lookup skipped or degraded). Additive field (defaults `False`); surfaced in the CLI table, JSON, CSV, and `repr`.
+
+### Changed
+
+- **Upstream outages now raise instead of returning empty.** Previously a structured `ErrorResponse` from Google decoded to an empty result, indistinguishable from "no flights found" (issue #30). This is a breaking behavioral change for callers that treated an empty result as a possible outage — see `MIGRATION.md` (0.6 → 0.7). Aggregate calls degrade rather than crash: the multi-city beam (`search` with 3+ legs) and `price_explore_all` keep partial results and raise `SwoopUpstreamError` only on a *total* outage (every branch / destination rejected upstream).
+
 ## [0.6.0] - 2026-06-03
 
 ### Added

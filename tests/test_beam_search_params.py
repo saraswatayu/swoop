@@ -168,21 +168,23 @@ class TestCLIBeamSearchFlags:
 
 
 class TestBeamUpstreamErrorDegradesGracefully:
-    """A transient upstream error on a later beam stage must not abort the whole
-    multi-city search. The first pass returning None used to be absorbed as an
-    empty stage; SwoopUpstreamError must degrade the same way (mark incomplete),
-    not propagate out of search_trip_options."""
+    """A transient upstream error on ONE beam branch must not abort the whole
+    multi-city search (it degrades, marking the result incomplete). But if every
+    branch is rejected the beam collapses to zero results — that's an outage, not
+    "no such trip", so it must surface SwoopUpstreamError rather than an empty
+    SearchResult the CLI would render as "No flights found"."""
 
-    def test_stage_upstream_error_marks_incomplete_not_raises(self, monkeypatch):
-        from swoop.exceptions import SwoopUpstreamError
-        from swoop.models import SearchResult
-        from tests.factories import make_simple_itinerary as _make_itinerary, make_raw_result as _raw_result
-
-        request_legs = [
+    def _legs(self):
+        return [
             {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
             {"origin": "LAX", "destination": "SFO", "date": "2026-04-18"},
             {"origin": "SFO", "destination": "JFK", "date": "2026-04-20"},
         ]
+
+    def test_all_stages_upstream_error_raises(self, monkeypatch):
+        from swoop.exceptions import SwoopUpstreamError
+        from tests.factories import make_simple_itinerary as _make_itinerary, make_raw_result as _raw_result
+
         outbounds = [
             _make_itinerary(
                 origin="JFK", destination="LAX", date="2026-04-15",
@@ -193,17 +195,59 @@ class TestBeamUpstreamErrorDegradesGracefully:
         ]
 
         def fake_search(legs, **_kwargs):
-            # First pass (no prefix selected) succeeds; any staged call rejects.
+            # First pass succeeds; every staged expansion is rejected.
             if legs[0].get("selected_legs") is None:
                 return _raw_result(*outbounds)
             raise SwoopUpstreamError(13)
 
         monkeypatch.setattr(selection, "_search_from_legs", fake_search)
 
-        # Must not raise — the staged rejection is absorbed.
-        result = selection.search_trip_options(request_legs, cabin="economy")
+        # Beam collapses to zero results -> outage surfaces, not empty result.
+        with pytest.raises(SwoopUpstreamError):
+            selection.search_trip_options(self._legs(), cabin="economy")
+
+    def test_partial_stage_upstream_error_keeps_results(self, monkeypatch):
+        from swoop.exceptions import SwoopUpstreamError
+        from swoop.models import SearchResult
+        from tests.factories import make_simple_itinerary as _make_itinerary, make_raw_result as _raw_result
+
+        outbounds = [
+            _make_itinerary(
+                origin="JFK", destination="LAX", date="2026-04-15",
+                airline="DL", flight_number=str(2300 + i), price=249 + i * 10,
+                booking_token=f"token-out-{i}",
+            )
+            for i in range(2)
+        ]
+        onward = _make_itinerary(
+            origin="LAX", destination="SFO", date="2026-04-18",
+            airline="DL", flight_number="1145", price=329, booking_token="token-on",
+        )
+        final = _make_itinerary(
+            origin="SFO", destination="JFK", date="2026-04-20",
+            airline="DL", flight_number="1200", price=399, booking_token="token-final",
+        )
+
+        calls = {"n": 0}
+
+        def fake_search(legs, **_kwargs):
+            if legs[0].get("selected_legs") is None:
+                return _raw_result(*outbounds)
+            calls["n"] += 1
+            # Reject the 2nd staged call (one outbound's expansion); the others
+            # succeed, so at least one full chain still completes.
+            if calls["n"] == 2:
+                raise SwoopUpstreamError(13)
+            if len(legs) >= 2 and legs[1].get("selected_legs") is not None:
+                return _raw_result(final)
+            return _raw_result(onward)
+
+        monkeypatch.setattr(selection, "_search_from_legs", fake_search)
+
+        result = selection.search_trip_options(self._legs(), cabin="economy")
         assert isinstance(result, SearchResult)
-        assert result.is_complete is False
+        assert result.results  # at least one chain survived
+        assert result.is_complete is False  # the rejected branch degraded it
 
     def test_first_pass_upstream_error_still_raises(self, monkeypatch):
         from swoop.exceptions import SwoopUpstreamError

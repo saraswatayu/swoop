@@ -9,7 +9,7 @@ import pytest
 
 import swoop._selection as selection
 from swoop.decoder import BookingOption, Itinerary, RawSearchResult
-from swoop.exceptions import SwoopError, SwoopHTTPError, SwoopParseError
+from swoop.exceptions import SwoopError, SwoopHTTPError, SwoopParseError, SwoopUpstreamError
 from swoop.models import Passengers
 from tests.factories import make_simple_itinerary as _make_itinerary, make_raw_result as _raw_result
 
@@ -485,7 +485,8 @@ class TestExactPricing:
     def test_price_selected_trip_falls_back_to_base_price_when_booking_rpc_raises(
         self, monkeypatch, raised
     ):
-        """One-way booking RPC failures fall back to base_price for any SwoopError subclass."""
+        """Non-upstream booking RPC failures fall back to base_price (an
+        upstream outage propagates instead — see the next test)."""
         request_legs = [
             {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
         ]
@@ -515,6 +516,26 @@ class TestExactPricing:
         assert result.price == 342
         assert result.booking_options == []
         assert result.rpc_calls == 0
+
+    def test_price_selected_trip_propagates_upstream_error(self, monkeypatch):
+        """A Google outage during the bookable-price lookup surfaces as
+        SwoopUpstreamError rather than silently degrading to the unverified
+        search estimate (the price docstrings promise this)."""
+        request_legs = [{"origin": "JFK", "destination": "LAX", "date": "2026-04-15"}]
+        itinerary = _make_itinerary(
+            origin="JFK", destination="LAX", date="2026-04-15",
+            airline="DL", flight_number="2300", price=342, booking_token="token-out",
+        )
+
+        def boom(*args, **kwargs):
+            raise SwoopUpstreamError(13)
+
+        monkeypatch.setattr(selection, "fetch_trip_booking_options", boom)
+
+        with pytest.raises(SwoopUpstreamError):
+            selection.price_selected_trip(
+                request_legs, [itinerary], cabin="economy", include_basic_economy=False
+            )
 
     @pytest.mark.parametrize(
         ("cabin", "options", "expected_price", "expected_brand"),

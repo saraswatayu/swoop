@@ -710,11 +710,12 @@ class TestExploreUpstreamError:
     def test_extract_inner_raises_upstream_error_on_envelope(self):
         from swoop._explore import _extract_inner
         from swoop.exceptions import SwoopUpstreamError, SwoopParseError
-        from tests.factories import make_error_frame
+        from tests.factories import make_error_response
 
-        text = ")]}'\n" + json.dumps([make_error_frame()])
+        # _extract_inner strips the )]}' prefix and leading whitespace, so the
+        # factory's prefix-only framing parses the same as a length-prefixed line.
         with pytest.raises(SwoopUpstreamError) as excinfo:
-            _extract_inner(text)
+            _extract_inner(make_error_response())
         assert excinfo.value.grpc_code == 13
         # It's an upstream error, distinct from the generic parse error.
         assert not isinstance(excinfo.value, SwoopParseError)

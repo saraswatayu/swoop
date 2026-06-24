@@ -119,12 +119,16 @@ def _extract_inner(text: str) -> list[Any]:
             continue
         for entry in outer if isinstance(outer, list) else []:
             if isinstance(entry, list) and entry and entry[0] == "wrb.fr":
-                frames.append(entry)
                 if len(entry) > 2 and isinstance(entry[2], str):
                     try:
                         candidates.append(json.loads(entry[2]))
                     except ValueError:
                         continue
+                else:
+                    # Only a frame without a string payload can carry the error
+                    # envelope; collect just those so a successful explore (the
+                    # common case) never builds this list.
+                    frames.append(entry)
 
     # Prefer a chunk carrying a non-empty destination list; fall back to the
     # first valid frame so origin metadata still parses.

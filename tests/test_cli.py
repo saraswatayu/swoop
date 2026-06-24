@@ -1629,3 +1629,17 @@ class TestUpstreamErrorHandling:
         assert result.exit_code == 3
         assert not isinstance(result.exception, SwoopUpstreamError)
         assert "gRPC 13" in result.output
+
+    @patch("swoop.check_price")
+    def test_unrecognized_swoop_error_exits_cleanly_not_traceback(self, mock_price):
+        # An unrecognized SwoopError subclass must surface its message and exit
+        # non-zero rather than crashing the CLI with a raw traceback.
+        from swoop.exceptions import SwoopError
+
+        mock_price.side_effect = SwoopError("something unexpected broke")
+        result = CliRunner().invoke(
+            main, ["price", "JFK", "LAX", "--depart", _FUTURE, "DL2300", "-q"]
+        )
+        assert result.exit_code == 3
+        assert not isinstance(result.exception, SwoopError)
+        assert "something unexpected broke" in result.output

@@ -4,11 +4,16 @@ import logging
 import re
 import sys
 from datetime import date as _date
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import click
 
 from .._formatting import fmt_duration as format_duration
+
+if TYPE_CHECKING:
+    from rich.console import Console
+
+    from swoop.exceptions import SwoopError
 
 
 def resolve_quiet(quiet_flag: bool) -> bool:
@@ -180,12 +185,13 @@ def check_past_date(date_str: str) -> str | None:
     return None
 
 
-def handle_rpc_error(exc, *, err, ctx) -> None:
+def handle_rpc_error(exc: "SwoopError", *, err: "Console", ctx: click.Context) -> None:
     """Print a clean message and exit for a Swoop RPC/transport error.
 
     Shared by every CLI command so the wording and exit codes stay consistent
-    and a new exception type wires in one place, not four. Unknown ``SwoopError``
-    subclasses are re-raised rather than silently swallowed.
+    and a new exception type wires in one place, not four. An unrecognized
+    ``SwoopError`` subclass prints its message and exits non-zero rather than
+    crashing the CLI with a raw traceback.
     """
     from swoop.exceptions import (
         SwoopHTTPError,
@@ -208,4 +214,7 @@ def handle_rpc_error(exc, *, err, ctx) -> None:
         err.print("[red]Could not parse Google Flights response[/red]")
         ctx.exit(4)
     else:
-        raise exc
+        # An unrecognized SwoopError subclass: surface its message cleanly and
+        # exit non-zero instead of bubbling a traceback up to the user.
+        err.print(f"[red]{exc}[/red]")
+        ctx.exit(3)

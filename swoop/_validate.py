@@ -57,6 +57,21 @@ def validate_iata_code(code: str, field_name: str) -> None:
         )
 
 
+def validate_iata_codes(codes: str | list[str], field_name: str) -> None:
+    """Validate a single IATA code or a non-empty list of IATA codes.
+
+    Raises:
+        ValueError: If any code is invalid or the list is empty.
+    """
+    if isinstance(codes, str):
+        validate_iata_code(codes, field_name)
+        return
+    if not isinstance(codes, list) or len(codes) == 0:
+        raise ValueError(f"{field_name} must be a non-empty IATA code or list of codes")
+    for i, code in enumerate(codes):
+        validate_iata_code(code, f"{field_name}[{i}]")
+
+
 def validate_date(date_str: str, field_name: str) -> None:
     """Validate a date string in YYYY-MM-DD format.
 
@@ -143,8 +158,8 @@ def parse_flight_number(value: str) -> Tuple[Optional[str], str]:
 
 
 def validate_search_params(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     *,
     return_date: Optional[str] = None,
@@ -165,8 +180,8 @@ def validate_search_params(
         ValueError: If any parameter is invalid.
     """
     logger.debug("Validating search params: %s -> %s on %s", origin, destination, date)
-    validate_iata_code(origin, "origin")
-    validate_iata_code(destination, "destination")
+    validate_iata_codes(origin, "origin")
+    validate_iata_codes(destination, "destination")
     validate_date(date, "date")
     if return_date is not None:
         validate_date(return_date, "return_date")

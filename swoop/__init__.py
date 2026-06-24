@@ -84,6 +84,7 @@ from ._validate import (
     validate_cabin,
     validate_date,
     validate_iata_code,
+    validate_iata_codes,
     validate_search_params,
     validate_time_range,
 )
@@ -129,8 +130,8 @@ def _validate_leg_search_inputs(
     validate_adults(passengers.adults)
 
     for idx, leg in enumerate(legs):
-        validate_iata_code(leg.from_airport, f"legs[{idx}].from_airport")
-        validate_iata_code(leg.to_airport, f"legs[{idx}].to_airport")
+        validate_iata_codes(leg.from_airports, f"legs[{idx}].from_airport")
+        validate_iata_codes(leg.to_airports, f"legs[{idx}].to_airport")
         validate_date(leg.date, f"legs[{idx}].date")
 
     if leg_time_windows:
@@ -210,8 +211,8 @@ def search_legs(
 
     request_legs = [
         _normalize_rpc_leg(
-            leg.from_airport,
-            leg.to_airport,
+            leg._from_airports if len(leg._from_airports) > 1 else leg._from_airports[0],
+            leg._to_airports if len(leg._to_airports) > 1 else leg._to_airports[0],
             leg.date,
             max_stops=leg.max_stops,
             airlines=list(leg.airlines) if leg.airlines else None,
@@ -233,8 +234,8 @@ def search_legs(
 
 
 def search(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     *,
     return_date: Optional[str] = None,
@@ -259,8 +260,8 @@ def search(
     """Search Google Flights and return decoded results.
 
     Args:
-        origin: Origin airport IATA code (e.g. ``"JFK"``).
-        destination: Destination airport IATA code (e.g. ``"LAX"``).
+        origin: Origin airport IATA code or list of codes (e.g. ``"JFK"`` or ``["MUC", "NUE"]``).
+        destination: Destination airport IATA code or list of codes (e.g. ``"LAX"`` or ``["BKK", "HKG"]``).
         date: Departure date as ``YYYY-MM-DD``.
         return_date: Return date for roundtrip searches. Omit for one-way.
         cabin: Cabin class — ``"economy"``, ``"premium-economy"``,

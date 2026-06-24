@@ -125,13 +125,13 @@ class TestSearchCommandBranches:
         assert len(captured["search_legs"]) == 2
         first_leg, second_leg = captured["search_legs"]
         assert first_leg.date == "2026-06-15"
-        assert first_leg.from_airport == "JFK"
-        assert first_leg.to_airport == "LAX"
+        assert first_leg.from_airports == ["JFK"]
+        assert first_leg.to_airports == ["LAX"]
         assert first_leg.max_stops == 1
         assert first_leg.airlines == ["DL"]
         assert second_leg.date == "2026-06-18"
-        assert second_leg.from_airport == "LAX"
-        assert second_leg.to_airport == "SFO"
+        assert second_leg.from_airports == ["LAX"]
+        assert second_leg.to_airports == ["SFO"]
         assert second_leg.max_stops == 1
         assert second_leg.airlines == ["DL"]
         assert captured["kwargs"]["cabin"] == "economy"

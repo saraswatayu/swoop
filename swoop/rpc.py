@@ -66,8 +66,8 @@ STOPS_TWO_OR_FEWER = 3
 
 
 def _normalize_rpc_leg(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     *,
     max_stops: Optional[int] = None,
@@ -79,9 +79,41 @@ def _normalize_rpc_leg(
     selected_legs: Optional[list[list[Any]]] = None,
 ) -> dict[str, Any]:
     """Normalize a single search leg for generic request building."""
+    if isinstance(origin, str):
+        if not origin:
+            raise ValueError("origin must not be empty")
+        origin_norm: str | list[str] = origin.upper()
+    elif isinstance(origin, list):
+        for i, code in enumerate(origin):
+            if not isinstance(code, str):
+                raise TypeError(f"origin[{i}] must be str, got {type(code).__name__}")
+            if not code:
+                raise ValueError(f"origin[{i}] must not be empty")
+        origin_norm = list(dict.fromkeys(c.upper() for c in origin))  # dedup, preserve order
+        if not origin_norm:
+            raise ValueError("origin must not be empty")
+    else:
+        raise TypeError(f"origin must be str or list[str], got {type(origin).__name__}")
+
+    if isinstance(destination, str):
+        if not destination:
+            raise ValueError("destination must not be empty")
+        destination_norm: str | list[str] = destination.upper()
+    elif isinstance(destination, list):
+        for i, code in enumerate(destination):
+            if not isinstance(code, str):
+                raise TypeError(f"destination[{i}] must be str, got {type(code).__name__}")
+            if not code:
+                raise ValueError(f"destination[{i}] must not be empty")
+        destination_norm = list(dict.fromkeys(c.upper() for c in destination))
+        if not destination_norm:
+            raise ValueError("destination must not be empty")
+    else:
+        raise TypeError(f"destination must be str or list[str], got {type(destination).__name__}")
+
     return {
-        "origin": origin,
-        "destination": destination,
+        "origin": origin_norm,
+        "destination": destination_norm,
         "date": date,
         "max_stops": max_stops,
         "airlines": sorted(airlines) if airlines else None,
@@ -124,6 +156,11 @@ def _trip_type_from_legs(legs: list[dict[str, Any]]) -> int:
     return 3  # multi-city
 
 
+def _as_list(value: str | list[str]) -> list[str]:
+    """Wrap a str in a list; pass a list through unchanged."""
+    return [value] if isinstance(value, str) else value
+
+
 def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
     """Build a single RPC segment entry from a normalized leg."""
     max_stops = leg.get("max_stops")
@@ -133,8 +170,8 @@ def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
         stops_val = max_stops + 1
 
     return [
-        [[[leg["origin"], 0]]],       # departure airport
-        [[[leg["destination"], 0]]],  # arrival airport
+        [[[code, 0] for code in _as_list(leg["origin"])]],       # departure airports
+        [[[code, 0] for code in _as_list(leg["destination"])]],  # arrival airports
         _build_time_restrictions(
             leg.get("earliest_departure"),
             leg.get("latest_departure"),
@@ -460,8 +497,8 @@ def _http_post(
 
 
 def search_raw(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
@@ -555,8 +592,8 @@ def _build_selected_legs(itinerary: Itinerary) -> list[list[Any]]:
 def get_booking_results(
     itinerary_or_token: Itinerary | str,
     *,
-    origin: str = "",
-    destination: str = "",
+    origin: str | list[str] | None = None,
+    destination: str | list[str] | None = None,
     date: str = "",
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),

@@ -158,14 +158,36 @@ def _clone_leg_itinerary(itinerary: Itinerary) -> Itinerary:
     return replace(itinerary, price_info=None, direct_price=None)
 
 
+def _resolved_airport(itinerary: Itinerary, fallback: Any, *, departure: bool = True) -> str:
+    """Return the actual single airport code from the itinerary's first/last segment.
+
+    When multi-airport input is used, Google picks one airport and we must read
+    it from the resolved itinerary rather than echoing the list back as a string.
+    Falls back to the first element of a list, or str(fallback) for plain strings.
+    """
+    segs = itinerary.segments or []
+    if departure and segs:
+        code = segs[0].departure_airport_code
+        if code:
+            return code
+    elif not departure and segs:
+        code = segs[-1].arrival_airport_code
+        if code:
+            return code
+    # Fallback: use first element if list, otherwise coerce to str
+    if isinstance(fallback, list):
+        return str(fallback[0]) if fallback else ""
+    return str(fallback)
+
+
 def _trip_legs_from_itineraries(
     request_legs: list[dict[str, Any]],
     itineraries: list[Itinerary],
 ) -> list[TripLeg]:
     return [
         TripLeg(
-            origin=str(request_legs[index]["origin"]),
-            destination=str(request_legs[index]["destination"]),
+            origin=_resolved_airport(itinerary, request_legs[index]["origin"]),
+            destination=_resolved_airport(itinerary, request_legs[index]["destination"], departure=False),
             date=str(request_legs[index]["date"]),
             itinerary=_clone_leg_itinerary(itinerary),
         )
@@ -477,8 +499,8 @@ def price_selected_trip(
     resolved_legs = [
         _resolved_leg_from_itinerary(
             itinerary,
-            origin=str(request_legs[index]["origin"]),
-            destination=str(request_legs[index]["destination"]),
+            origin=_resolved_airport(itinerary, request_legs[index]["origin"], departure=True),
+            destination=_resolved_airport(itinerary, request_legs[index]["destination"], departure=False),
             date=str(request_legs[index]["date"]),
             selection=selections[index],
         )

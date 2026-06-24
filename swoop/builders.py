@@ -37,31 +37,69 @@ class SearchLeg:
 
     Args:
         date: Departure date (YYYY-MM-DD).
-        from_airport: Origin IATA code.
-        to_airport: Destination IATA code.
+        from_airport: Origin IATA code or list of IATA codes.
+        to_airport: Destination IATA code or list of IATA codes.
         max_stops: Maximum number of stops. None = any.
         airlines: Filter to these airline IATA codes.
+
+    Attributes:
+        from_airports: Origin airport(s) as a ``list[str]``. Always a list,
+            even for single-airport legs. Read-only.
+        to_airports: Same as ``from_airports`` for the destination.
     """
 
-    __slots__ = ("date", "from_airport", "to_airport", "max_stops", "airlines")
+    __slots__ = ("date", "_from_airports", "_to_airports", "max_stops", "airlines")
 
     def __init__(
         self,
         *,
         date: str,
-        from_airport: str,
-        to_airport: str,
+        from_airport: str | list[str],
+        to_airport: str | list[str],
         max_stops: Optional[int] = None,
         airlines: Optional[List[str]] = None,
     ):
         self.date = date
-        self.from_airport = from_airport.upper()
-        self.to_airport = to_airport.upper()
+
+        if isinstance(from_airport, str):
+            if not from_airport:
+                raise ValueError("from_airport must not be empty")
+            self._from_airports: list[str] = [from_airport.upper()]
+        elif isinstance(from_airport, list):
+            if not from_airport:
+                raise ValueError("from_airport list must not be empty")
+            for i, code in enumerate(from_airport):
+                if not isinstance(code, str):
+                    raise TypeError(f"from_airport[{i}] must be str, got {type(code).__name__}")
+                if not code:
+                    raise ValueError(f"from_airport[{i}] must not be empty")
+            self._from_airports = [a.upper() for a in from_airport]
+        else:
+            raise TypeError(f"from_airport must be str or list[str], got {type(from_airport).__name__}")
+
+        if isinstance(to_airport, str):
+            if not to_airport:
+                raise ValueError("to_airport must not be empty")
+            self._to_airports: list[str] = [to_airport.upper()]
+        elif isinstance(to_airport, list):
+            if not to_airport:
+                raise ValueError("to_airport list must not be empty")
+            for i, code in enumerate(to_airport):
+                if not isinstance(code, str):
+                    raise TypeError(f"to_airport[{i}] must be str, got {type(code).__name__}")
+                if not code:
+                    raise ValueError(f"to_airport[{i}] must not be empty")
+            self._to_airports = [a.upper() for a in to_airport]
+        else:
+            raise TypeError(f"to_airport must be str or list[str], got {type(to_airport).__name__}")
+
         self.max_stops = max_stops
 
         if airlines is not None:
             self.airlines = []
             for airline in airlines:
+                if not isinstance(airline, str):
+                    raise TypeError(f"airline codes must be str, got {type(airline).__name__}")
                 airline = airline.upper()
                 if not (len(airline) == 2 or airline in AIRLINE_ALLIANCES):
                     raise ValueError(
@@ -72,11 +110,62 @@ class SearchLeg:
         else:
             self.airlines = None
 
+    @property
+    def from_airports(self) -> list[str]:
+        """Origin airport(s) as a list. Always a list, even for single-airport legs."""
+        return self._from_airports
+
+    @property
+    def to_airports(self) -> list[str]:
+        """Destination airport(s) as a list. Always a list, even for single-airport legs."""
+        return self._to_airports
+
+    @property
+    def from_airport(self) -> str:
+        """Backward-compatible single-airport accessor.
+
+        Returns the airport code when this is a single-airport leg.
+        Raises ``ValueError`` for multi-airport legs — use ``from_airports`` instead.
+        """
+        if len(self._from_airports) != 1:
+            raise ValueError(
+                f"from_airport is ambiguous for multi-airport leg {self._from_airports!r}; "
+                "use from_airports instead"
+            )
+        return self._from_airports[0]
+
+    @property
+    def to_airport(self) -> str:
+        """Backward-compatible single-airport accessor.
+
+        Returns the airport code when this is a single-airport leg.
+        Raises ``ValueError`` for multi-airport legs — use ``to_airports`` instead.
+        """
+        if len(self._to_airports) != 1:
+            raise ValueError(
+                f"to_airport is ambiguous for multi-airport leg {self._to_airports!r}; "
+                "use to_airports instead"
+            )
+        return self._to_airports[0]
+
     def apply_to(self, info) -> None:
+        """Write this leg into a protobuf Info message.
+
+        The TFS/protobuf path only supports a single airport per leg.
+        Multi-airport lists are supported by the RPC search path
+        (_normalize_rpc_leg / _build_segment_from_leg), not here.
+        Raises ValueError when called with more than one airport.
+        """
+        if len(self._from_airports) > 1 or len(self._to_airports) > 1:
+            raise ValueError(
+                "SearchLeg.apply_to() (TFS/protobuf path) supports only a single "
+                "airport per leg. For multi-airport searches use swoop.search() or "
+                "swoop.search_raw() directly."
+            )
         data = info.data.add()
         data.date = self.date
-        data.from_flight.airport = self.from_airport
-        data.to_flight.airport = self.to_airport
+        data.from_flight.airport = self._from_airports[0]
+        data.to_flight.airport = self._to_airports[0]
         if self.max_stops is not None:
             data.max_stops = self.max_stops
         if self.airlines is not None:

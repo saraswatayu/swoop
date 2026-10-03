@@ -28,6 +28,7 @@ from swoop.exceptions import (
     SwoopHTTPError,
     SwoopParseError,
     SwoopRateLimitError,
+    SwoopTransportError,
     SwoopUpstreamError,
 )
 
@@ -41,6 +42,7 @@ class TestFrozenExports:
         "search_legs",
         "check_price",
         "price_selector",
+        "search_next_leg",
         "price_legs",
         "deals",
         "search_deal",
@@ -89,6 +91,7 @@ class TestFrozenExports:
         "SwoopHTTPError",
         "SwoopParseError",
         "SwoopRateLimitError",
+        "SwoopTransportError",
         "SwoopUpstreamError",
         # Constants
         "SORT_TOP",
@@ -199,7 +202,7 @@ class TestFrozenDataclassFields:
             "departure_date", "arrival_date",
             "departure_time", "arrival_time",
             "travel_time", "seat_pitch_short", "legroom", "co2_grams",
-            "overnight", "has_premium_ife", "amenities", "seat_type",
+            "overnight", "has_premium_ife", "amenities", "seat_type", "cabin_class",
         }
         assert self._field_names(Segment) == expected
 
@@ -214,7 +217,9 @@ class TestFrozenDataclassFields:
         assert self._field_names(Itinerary) == expected
 
     def test_search_result_fields(self):
-        expected = {"results", "price_range", "is_complete"}
+        expected = {"results", "price_range", "is_complete", "result_scope",
+                    "truncation_reasons", "raw_result_count", "decoded_result_count",
+                    "rpc_calls", "unexpanded_prefixes"}
         assert self._field_names(SearchResult) == expected
 
     def test_search_result_currency_property(self):
@@ -225,7 +230,7 @@ class TestFrozenDataclassFields:
         assert sr_with.currency == "USD"
 
     def test_raw_search_result_fields(self):
-        expected = {"_raw", "best", "other", "price_range"}
+        expected = {"_raw", "best", "other", "price_range", "_raw_result_count", "_result_scope"}
         assert self._field_names(RawSearchResult) == expected
 
     def test_booking_option_fields(self):
@@ -297,8 +302,11 @@ class TestFrozenDataclassFields:
         assert self._field_names(Passengers) == expected
 
     def test_trip_option_fields(self):
-        expected = {"selector", "price", "currency", "legs"}
+        expected = {"selector", "price", "currency", "legs", "is_resolved"}
         assert self._field_names(TripOption) == expected
+
+    def test_trip_option_unknown_resolution_fails_closed(self):
+        assert TripOption(selector="unknown").is_resolved is False
 
     def test_deal_fields(self):
         expected = {
@@ -353,7 +361,7 @@ class TestSearchSignature:
             "earliest_arrival", "latest_arrival",
             "return_earliest_departure", "return_latest_departure",
             "transport",
-            "max_results", "beam_width", "time_budget",
+            "max_results", "beam_width", "time_budget", "expand_legs", "exclude_separate_tickets", "show_all_results",
         ]
         assert param_names == expected
 
@@ -369,7 +377,7 @@ class TestSearchSignature:
             "return_date", "return_earliest_departure", "return_latest_departure",
             "selected_outbound_legs",
             "transport",
-            "exclude_basic_economy",
+            "exclude_basic_economy", "exclude_separate_tickets", "show_all_results",
         ]
         assert param_names == expected
 
@@ -381,7 +389,7 @@ class TestSearchSignature:
             "return_flight_number", "return_date",
             "cabin", "passengers",
             "max_stops", "include_basic_economy",
-            "transport",
+            "exclude_separate_tickets", "transport",
         ]
         assert param_names == expected
 
@@ -392,7 +400,7 @@ class TestSearchSignature:
             "legs", "cabin", "passengers",
             "sort",
             "include_basic_economy", "transport",
-            "max_results", "beam_width", "time_budget",
+            "max_results", "beam_width", "time_budget", "expand_legs", "exclude_separate_tickets", "show_all_results",
         ]
         assert param_names == expected
 
@@ -401,15 +409,20 @@ class TestSearchSignature:
         param_names = list(sig.parameters.keys())
         expected = [
             "legs", "cabin", "passengers",
-            "include_basic_economy", "transport",
+            "include_basic_economy", "exclude_separate_tickets", "transport",
         ]
         assert param_names == expected
 
     def test_price_selector_params(self):
         sig = inspect.signature(swoop.price_selector)
         param_names = list(sig.parameters.keys())
-        expected = ["selector", "transport"]
+        expected = ["selector", "transport", "time_budget"]
         assert param_names == expected
+
+    def test_search_next_leg_params(self):
+        assert list(inspect.signature(swoop.search_next_leg).parameters) == [
+            "selector", "transport", "time_budget",
+        ]
 
     def test_deals_params(self):
         sig = inspect.signature(swoop.deals)
@@ -423,7 +436,7 @@ class TestSearchSignature:
             "depart_window", "trip_length", "destinations", "exclude_destinations",
             "region", "max_price", "min_discount_pct",
             # Transport
-            "transport",
+            "exclude_separate_tickets", "transport",
         ]
         assert param_names == expected
 
@@ -492,6 +505,7 @@ class TestExceptionHierarchy:
         assert issubclass(SwoopHTTPError, SwoopError)
         assert issubclass(SwoopParseError, SwoopError)
         assert issubclass(SwoopRateLimitError, SwoopError)
+        assert issubclass(SwoopTransportError, SwoopError)
         assert issubclass(SwoopUpstreamError, SwoopError)
 
     def test_upstream_error_carries_grpc_code(self):
@@ -512,7 +526,7 @@ class TestExceptionHierarchy:
         assert err.status_code == 429
 
     def test_all_inherit_from_exception(self):
-        for cls in (SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopUpstreamError):
+        for cls in (SwoopError, SwoopHTTPError, SwoopParseError, SwoopRateLimitError, SwoopTransportError, SwoopUpstreamError):
             assert issubclass(cls, Exception)
 
 

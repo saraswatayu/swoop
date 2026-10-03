@@ -51,6 +51,7 @@ class Info:
     seat: int
     passengers: List[int]
     trip: int
+    exclude_separate_tickets: bool
     exclude_basic_economy: bool
     def __init__(self) -> None: ...
     def SerializeToString(self) -> bytes: ...

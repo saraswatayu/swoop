@@ -312,7 +312,7 @@ Each segment in `flightData[2]` is a **33-element array**:
 | **[13]** | int | **Seat type indicator** — 1 = standard economy, 2 = basic/budget economy, 3 = extra legroom/premium economy class | No |
 | **[14]** | string | **Seat pitch** (short format) | **Yes** |
 | **[15]** | Array/null | **Codeshare flights** — list of `[airline_code, flight_num, null, airline_name]` | **Yes** |
-| **[16]** | int | **Flag** — always 1 | No |
+| **[16]** | int | **Actual segment cabin** — 1=economy, 2=premium economy, 3=business, 4=first; independent of requested cabin | **Yes** |
 | **[17]** | string | **Aircraft type** | **Yes** |
 | **[18]** | Array/null | **Aircraft configuration flag** — `[true]` or `[null, true]` on some aircraft, null on others. Not consistently correlated with aircraft type or age | No |
 | **[19]** | bool | **Overnight flag** — `false` = same day, `true` = crosses midnight | **Yes** |
@@ -347,7 +347,7 @@ Each segment in `flightData[2]` is a **33-element array**:
 | **[8]** | **Live TV** | `true` = yes, null = no | JetBlue A320. **UI-validated** |
 | **[9]** | **On-demand video** (seatback IFE screens) | `true` = yes, null = no | Delta B767, VS, UA wide-bodies. **UI-validated** |
 | **[10]** | **Stream media to your device** (wireless streaming) | `true` = yes, null = no | AA A321, E175 regional. **UI-validated** |
-| **[11]** | **WiFi availability** | 2 = Free Wi-Fi (**UI-validated**), 3 = Free Wi-Fi (international carriers), null = none | Both 2 and 3 show "Free Wi-Fi" in UI; 3 predominates on international routes |
+| **[11]** | **WiFi availability** | 2/3 = positive availability tiers, null = unknown | Preserve the raw tier. Do not promise free/included service from the tier alone |
 
 **IMPORTANT: The amenity array is cabin-class specific**, not aircraft-level. The same BA B777 shows different amenities in economy vs business class:
 - BA B777 **economy**: `[null, null, null, null, null, true, null, null, null, true, null, 3]` — [5]=true, no [1]

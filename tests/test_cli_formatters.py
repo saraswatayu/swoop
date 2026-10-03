@@ -101,6 +101,7 @@ class TestSearchFormatters:
                 TripOption(
                     selector="selector-1",
                     price=349,
+                    is_resolved=True,
                     legs=[
                         TripLeg(origin="JFK", destination="LAX", date="2026-04-15", itinerary=outbound),
                         TripLeg(origin="LAX", destination="SFO", date="2026-04-18", itinerary=onward),
@@ -122,7 +123,7 @@ class TestSearchFormatters:
         out = capsys.readouterr().out
         assert "JFK -> LAX" in out
         assert "LAX -> SFO" in out
-        assert "Results truncated" in out
+        assert "Results incomplete" in out
         assert "swoop price --selector 'selector-1'" in out
 
 

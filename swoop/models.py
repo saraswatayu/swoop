@@ -2,7 +2,7 @@
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 from ._regions import Region
 from .decoder import BookingOption, Itinerary, PriceRange, _flight_summary_repr
@@ -22,7 +22,7 @@ class Passengers:
 class TransportConfig:
     """HTTP transport configuration for API requests."""
 
-    timeout: int = 90
+    timeout: float = 90
     retries: int = 2
     country: Optional[str] = None
     proxy: Optional[str] = None
@@ -47,16 +47,20 @@ class TripLeg:
 
 @dataclass
 class TripOption:
-    """A complete trip option spanning one or more requested legs.
+    """A shopping candidate or a resolved trip spanning requested legs.
 
     ``price`` is in the currency's major unit (e.g. 250 for $250 USD,
     6725 for ₹6,725 INR). ``currency`` is the ISO 4217 code.
+    ``is_resolved`` is true only when every requested bound has an exact
+    itinerary. Quick roundtrip discovery contains outbound detail and an
+    estimated whole-trip price; its remaining bound is not selected.
     """
 
     selector: str
     price: Optional[int] = None
     currency: Optional[str] = None
     legs: list[TripLeg] = field(default_factory=list)
+    is_resolved: bool = False
 
     def __repr__(self) -> str:
         parts = []
@@ -79,6 +83,14 @@ class SearchResult:
     results: list[TripOption] = field(default_factory=list)
     price_range: Optional[PriceRange] = None
     is_complete: bool = True
+    # Completeness is relative to the requested provider list, never all market
+    # inventory. A shortened or fallback list is explicitly labelled.
+    result_scope: Literal["all", "default", "limited"] = "all"
+    truncation_reasons: list[str] = field(default_factory=list)
+    raw_result_count: int = 0
+    decoded_result_count: int = 0
+    rpc_calls: int = 0
+    unexpanded_prefixes: int = 0
 
     @property
     def currency(self) -> Optional[str]:

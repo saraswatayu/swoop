@@ -7,6 +7,7 @@ Based on reverse-engineering from punitarani/fli.
 """
 
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import logging
 import threading
@@ -33,9 +34,11 @@ from ._booking import (
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, raise_if_error_envelope
 from .exceptions import (
+    SwoopError,
     SwoopHTTPError,
     SwoopParseError,
     SwoopRateLimitError,
+    SwoopTransportError,
     SwoopUpstreamError,
 )
 from .models import Passengers, TransportConfig
@@ -163,6 +166,8 @@ def _build_filters_from_legs(
     passengers: Passengers = Passengers(),
     sort: int = SORT_TOP,
     exclude_basic_economy: bool = False,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> list[Any]:
     """Build the shopping filters payload from normalized leg definitions."""
     seat_type = CABIN_CLASS_MAP.get(cabin, 1)
@@ -190,7 +195,8 @@ def _build_filters_from_legs(
             None,
             None,
             1,                                       # [17] constant
-            None,                                    # [18-27] placeholders
+            1 if exclude_separate_tickets else None, # [18] hide separate/self-transfer
+            # [19-27] placeholders
             None,
             None,
             None,
@@ -203,7 +209,7 @@ def _build_filters_from_legs(
             1 if exclude_basic_economy else None,    # [28] exclude basic economy
         ],
         sort,                                        # sort order
-        0,                                           # constant
+        1 if show_all_results else 0,                 # include "View more flights"
         0,                                           # constant
         2,                                           # constant
     ]
@@ -226,6 +232,8 @@ def _search_from_legs(
     transport: TransportConfig = TransportConfig(),
     exclude_basic_economy: bool = False,
     retain_raw: bool = True,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> Optional[RawSearchResult]:
     """Search Google Flights from normalized leg definitions."""
     encoded_body = _encode_f_req_payload(
@@ -235,6 +243,8 @@ def _search_from_legs(
             passengers=passengers,
             sort=sort,
             exclude_basic_economy=exclude_basic_economy,
+            show_all_results=show_all_results,
+            exclude_separate_tickets=exclude_separate_tickets,
         )
     )
 
@@ -246,6 +256,7 @@ def _search_from_legs(
 
     result = _parse_rpc_response(res.text)
     if isinstance(result, RawSearchResult):
+        result._result_scope = result._result_scope or ("all" if show_all_results else "default")
         if not retain_raw:
             result._raw = []
         logger.info(
@@ -389,6 +400,12 @@ def _apply_country(url: str, country: Optional[str]) -> str:
     return url
 
 
+@dataclass(frozen=True)
+class _HTTPResponse:
+    status_code: int
+    text: str
+
+
 def _post_with_retry(
     client: Any,
     url: str,
@@ -404,6 +421,7 @@ def _post_with_retry(
     session). Lets both share one retry implementation.
 
     Raises:
+        SwoopTransportError: If sending or reading the response fails.
         SwoopRateLimitError: If 429 persists after all retries.
         SwoopHTTPError: If a non-200/non-429 response is received.
     """
@@ -416,11 +434,20 @@ def _post_with_retry(
     # make range() empty, fall off the end, and return None — crashing callers
     # that dereference `res.text`.
     for attempt in range(max(1, 1 + transport.retries)):
-        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
-        if res.status_code == 200:
-            logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))
-            return res
-        if res.status_code == 429 and attempt < transport.retries:
+        try:
+            res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+            status_code = res.status_code
+            # primp can defer reading/decoding until .text is accessed. Cache
+            # the body here so every such failure crosses the typed boundary.
+            text = res.text if status_code == 200 else ""
+        except SwoopError:
+            raise
+        except Exception as exc:
+            raise SwoopTransportError("Google Flights transport failed while sending or reading a response") from exc
+        if status_code == 200:
+            logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(text))
+            return _HTTPResponse(status_code=status_code, text=text)
+        if status_code == 429 and attempt < transport.retries:
             delay = (2 ** attempt) + random.uniform(0, 1)
             logger.info(
                 "HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)",
@@ -428,9 +455,9 @@ def _post_with_retry(
             )
             time.sleep(delay)
             continue
-        if res.status_code == 429:
+        if status_code == 429:
             raise SwoopRateLimitError()
-        raise SwoopHTTPError(res.status_code)
+        raise SwoopHTTPError(status_code)
 
 
 def _http_post(
@@ -478,6 +505,8 @@ def search_raw(
     selected_outbound_legs: Optional[list[list[Any]]] = None,
     transport: TransportConfig = TransportConfig(),
     exclude_basic_economy: bool = False,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> Optional[RawSearchResult]:
     """Search Google Flights via RPC endpoint and return decoded results.
 
@@ -524,6 +553,8 @@ def search_raw(
         legs, cabin=cabin, passengers=passengers,
         sort=sort, transport=transport,
         exclude_basic_economy=exclude_basic_economy,
+        show_all_results=show_all_results,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
 
@@ -569,6 +600,7 @@ def get_booking_results(
     selected_legs: Optional[list[list[Any]]] = None,
     registry_version: str | None = None,
     required_keys: tuple[str, ...] | None = None,
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> list[BookingOption]:
     """Fetch fare options (brand + price) for a specific itinerary.
@@ -632,6 +664,7 @@ def get_booking_results(
     filters = _build_filters_from_legs(
         legs, cabin=cabin, passengers=passengers,
         sort=SORT_DEPARTURE_TIME,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
     filter_block = filters[1]
     encoded_body = _build_booking_f_req(booking_token, filter_block, selected_legs)
@@ -664,6 +697,7 @@ def get_trip_booking_results(
     *,
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> list[BookingOption]:
     """Fetch booking options for an exact multi-leg trip selection."""
@@ -675,6 +709,7 @@ def get_trip_booking_results(
         cabin=cabin,
         passengers=passengers,
         sort=SORT_DEPARTURE_TIME,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
     inner = [[None, booking_token], filters[1], None, 0]
     encoded_body = _encode_f_req_payload(inner)

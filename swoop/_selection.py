@@ -10,9 +10,9 @@ from dataclasses import replace
 from typing import Any, Optional
 
 from .builders import CabinClass
-from ._validate import parse_flight_number
+from ._validate import parse_flight_number, validate_cabin, validate_date, validate_iata_code
 from .decoder import Itinerary, RawSearchResult, itinerary_matches_flight
-from .exceptions import SwoopError, SwoopUpstreamError
+from .exceptions import SwoopError, SwoopTransportError, SwoopUpstreamError
 from .models import Passengers, PriceResult, ResolvedLeg, SearchResult, TransportConfig, TripLeg, TripOption
 from .rpc import (
     SORT_DEPARTURE_TIME,
@@ -78,6 +78,8 @@ def encode_trip_selector(
     passengers: Passengers = Passengers(),
     include_basic_economy: bool,
     sort: int = SORT_DEPARTURE_TIME,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> str:
     payload = {
         "v": 1,
@@ -92,6 +94,8 @@ def encode_trip_selector(
         },
         "include_basic_economy": include_basic_economy,
         "sort": sort,
+        "show_all_results": show_all_results,
+        "exclude_separate_tickets": exclude_separate_tickets,
         "booking_token_hint": itineraries[-1].booking_token or None,
     }
     return f"{SELECTOR_PREFIX}{_encode_payload(payload)}"
@@ -106,11 +110,20 @@ def decode_trip_selector(selector: str) -> dict[str, Any]:
         payload = json.loads(base64.urlsafe_b64decode(f"{encoded}{padding}"))
     except (ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid selector payload") from exc
-    if payload.get("v") != 1:
+    if not isinstance(payload, dict) or payload.get("v") != 1:
         raise ValueError("unsupported selector version")
+    payload.setdefault("exclude_separate_tickets", False)
+    if not isinstance(payload["exclude_separate_tickets"], bool):
+        raise ValueError("invalid selector separate-ticket filter")
+    # Old selectors were created from the shortened provider list.
+    payload.setdefault("show_all_results", False)
+    if not isinstance(payload["show_all_results"], bool):
+        raise ValueError("invalid selector results mode")
     # Reconstruct Passengers with backward compat for old selectors
     if "passengers" in payload:
         pax = payload["passengers"]
+        if not isinstance(pax, dict):
+            raise ValueError("invalid selector passengers")
         payload["passengers"] = Passengers(
             adults=pax.get("adults", 1),
             children=pax.get("children", 0),
@@ -181,6 +194,8 @@ def _build_trip_option(
     passengers: Passengers = Passengers(),
     include_basic_economy: bool,
     sort: int = SORT_DEPARTURE_TIME,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> TripOption:
     return TripOption(
         selector=encode_trip_selector(
@@ -190,10 +205,13 @@ def _build_trip_option(
             passengers=passengers,
             include_basic_economy=include_basic_economy,
             sort=sort,
+            show_all_results=show_all_results,
+            exclude_separate_tickets=exclude_separate_tickets,
         ),
         price=itineraries[-1].price,
         currency=itineraries[-1].currency,
         legs=_trip_legs_from_itineraries(request_legs, itineraries),
+        is_resolved=len(itineraries) == len(request_legs),
     )
 
 
@@ -230,6 +248,7 @@ def fetch_trip_booking_options(
     *,
     cabin: CabinClass,
     passengers: Passengers = Passengers(),
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> list:
     selected_payloads = _selected_payloads_for_itineraries(itineraries)
@@ -245,6 +264,7 @@ def fetch_trip_booking_options(
         cabin=cabin,
         passengers=passengers,
         transport=transport,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
 
@@ -269,6 +289,53 @@ def _eligible_booking_options(
 
 
 
+class _Coverage:
+    """Accumulate coverage across provider calls without retaining raw bodies."""
+
+    def __init__(self, show_all_results: bool):
+        self.result = SearchResult(result_scope="all" if show_all_results else "default")
+        if not show_all_results:
+            self.reason("default_results")
+
+    def reason(self, reason: str) -> None:
+        if reason not in self.result.truncation_reasons:
+            self.result.truncation_reasons.append(reason)
+        self.result.is_complete = False
+
+    def add(self, raw: Optional[RawSearchResult]) -> None:
+        if raw is None:
+            return
+        decoded = len(raw.best) + len(raw.other)
+        count = raw._raw_result_count if raw._raw_result_count is not None else decoded
+        self.result.raw_result_count += count
+        self.result.decoded_result_count += decoded
+        if decoded < count:
+            self.reason("parse_loss")
+        if raw._result_scope == "limited":
+            self.result.result_scope = "limited"
+            self.reason("limited_transport")
+        elif raw._result_scope == "default" and self.result.result_scope != "limited":
+            self.result.result_scope = "default"
+            self.reason("default_results")
+
+
+def _budget_transport(transport: TransportConfig, deadline: Optional[float]) -> TransportConfig:
+    if deadline is None:
+        return transport
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SwoopTransportError("Google Flights request budget exhausted")
+    return replace(transport, timeout=min(transport.timeout, remaining))
+
+
+def _deadline(time_budget: Optional[float]) -> Optional[float]:
+    if time_budget is None:
+        return None
+    if time_budget <= 0:
+        raise ValueError("time_budget must be positive")
+    return time.monotonic() + time_budget
+
+
 def search_trip_options(
     request_legs: list[dict[str, Any]],
     *,
@@ -279,133 +346,104 @@ def search_trip_options(
     transport: TransportConfig = TransportConfig(),
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
-    time_budget: Optional[int] = None,
+    time_budget: Optional[float] = None,
+    expand_legs: bool = False,
+    first_flight_filter: Optional[tuple[Optional[str], str]] = None,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> SearchResult:
+    coverage = _Coverage(show_all_results)
     if not request_legs:
-        return SearchResult()
-
+        return coverage.result
     max_results = max_results if max_results is not None else TARGET_RESULTS
     beam_width = beam_width if beam_width is not None else BEAM_WIDTH
     time_budget = time_budget if time_budget is not None else TIME_BUDGET_SECONDS
-
+    staged_search = expand_legs and len(request_legs) > 1
+    if max_results <= 0 or beam_width <= 0:
+        raise ValueError("max_results and beam_width must be positive")
+    deadline = _deadline(time_budget)
     exclude_basic = cabin == "economy" and not include_basic_economy
-    first_pass = _search_from_legs(
-        request_legs,
-        cabin=cabin,
-        passengers=passengers,
-        sort=sort,
-        transport=transport,
-        exclude_basic_economy=exclude_basic,
-        retain_raw=False,
-    )
-    if first_pass is None:
-        return SearchResult()
 
+    def fetch(legs: list[dict[str, Any]]) -> Optional[RawSearchResult]:
+        bounded = _budget_transport(transport, deadline)
+        coverage.result.rpc_calls += 1
+        raw = _search_from_legs(legs, cabin=cabin, passengers=passengers, sort=sort,
+            transport=bounded, exclude_basic_economy=exclude_basic,
+            retain_raw=False, show_all_results=show_all_results,
+            exclude_separate_tickets=exclude_separate_tickets)
+        coverage.add(raw)
+        return raw
+
+    first_pass = fetch(request_legs)
     first_candidates = _iter_raw_itineraries(first_pass)
-    if len(request_legs) <= 2:
-        # One-way and roundtrip: first pass already returns full prices.
-        # For roundtrip, Google prices both legs in one call — the itinerary
-        # price is the roundtrip total.  Beam search is only needed for
-        # 3+ leg multi-city trips.
-        return SearchResult(
-            results=[
-                _build_trip_option(
-                    request_legs,
-                    [itinerary],
-                    cabin=cabin,
-                    passengers=passengers,
-                    include_basic_economy=include_basic_economy,
-                    sort=sort,
-                )
-                for itinerary in first_candidates
-            ],
-            price_range=first_pass.price_range,
-            is_complete=True,
-        )
+    if first_flight_filter is not None:
+        carrier, number = first_flight_filter
+        first_candidates = [itinerary for itinerary in first_candidates
+                            if itinerary_matches_flight(itinerary, carrier, number)]
 
-    started_at = time.monotonic()
-    is_complete = len(first_candidates) <= beam_width
+    def option(prefix: list[Itinerary]) -> TripOption:
+        return _build_trip_option(request_legs, prefix, cabin=cabin, passengers=passengers,
+            include_basic_economy=include_basic_economy, sort=sort,
+            show_all_results=show_all_results,
+            exclude_separate_tickets=exclude_separate_tickets)
+
+    if not staged_search:
+        coverage.result.results = [option([itinerary]) for itinerary in first_candidates]
+        coverage.result.price_range = first_pass.price_range if first_pass else None
+        return coverage.result
+
+    if len(first_candidates) > beam_width:
+        coverage.reason("beam_limit")
+        coverage.result.unexpanded_prefixes += len(first_candidates) - beam_width
     prefixes = [[itinerary] for itinerary in first_candidates[:beam_width]]
-    # Remember the last staged upstream rejection. A single bad branch degrades
-    # gracefully (below), but if the beam collapses to zero results entirely it
-    # was an outage, not "no such trip" — surface it rather than returning an
-    # empty SearchResult the CLI would render as "No flights found".
-    upstream_error: Optional[SwoopUpstreamError] = None
-
-    for _ in range(1, len(request_legs)):
-        next_prefixes: list[list[Itinerary]] = []
-        if not prefixes:
-            break
-
-        for prefix_index, prefix in enumerate(prefixes):
-            if time.monotonic() - started_at >= time_budget:
-                is_complete = False
+    stage_error: Optional[SwoopError] = None
+    for stage in range(1, len(request_legs)):
+        branches: list[list[list[Itinerary]]] = []
+        for index, prefix in enumerate(prefixes):
+            if deadline is not None and time.monotonic() >= deadline:
+                coverage.reason("time_budget")
+                coverage.result.unexpanded_prefixes += len(prefixes) - index
                 break
-
-            selected_payloads = _selected_payloads_for_itineraries(prefix)
-            if selected_payloads is None:
-                is_complete = False
+            selected = _selected_payloads_for_itineraries(prefix)
+            if selected is None:
+                coverage.reason("invalid_selection")
+                coverage.result.unexpanded_prefixes += 1
                 continue
-
-            staged_legs = _with_selected_prefix(request_legs, selected_payloads)
             try:
-                stage_result = _search_from_legs(
-                    staged_legs,
-                    cabin=cabin,
-                    passengers=passengers,
-                    sort=sort,
-                    transport=transport,
-                    exclude_basic_economy=exclude_basic,
-                    retain_raw=False,
-                )
-            except SwoopUpstreamError as exc:
-                # A transient upstream rejection on one beam branch must not
-                # sink the whole multi-city search. Before SwoopUpstreamError
-                # existed this path returned None and was absorbed here as an
-                # empty stage; preserve that graceful degradation and just mark
-                # the result incomplete. The first pass (no prefix yet) still
-                # raises, since a rejected first call means no results at all.
-                upstream_error = exc
-                is_complete = False
+                raw = fetch(_with_selected_prefix(request_legs, selected))
+            except (SwoopUpstreamError, SwoopTransportError) as exc:
+                if deadline is not None and time.monotonic() >= deadline:
+                    coverage.reason("time_budget")
+                    coverage.result.unexpanded_prefixes += len(prefixes) - index
+                    break
+                stage_error = exc
+                coverage.reason("upstream_error" if isinstance(exc, SwoopUpstreamError) else "transport_error")
+                coverage.result.unexpanded_prefixes += 1
                 continue
-            stage_candidates = _iter_raw_itineraries(stage_result)
-            if not stage_candidates:
-                continue
-
-            remaining = beam_width - len(next_prefixes)
-            if len(stage_candidates) > remaining:
-                is_complete = False
-            for candidate in stage_candidates[:remaining]:
-                next_prefixes.append(prefix + [candidate])
-
-            if len(next_prefixes) >= beam_width:
-                if prefix_index < len(prefixes) - 1 or len(stage_candidates) > remaining:
-                    is_complete = False
+            children = _iter_raw_itineraries(raw)
+            if children:
+                branches.append([prefix + [child] for child in children])
+        size = sum(len(branch) for branch in branches)
+        if size > beam_width:
+            coverage.reason("beam_limit")
+            if stage < len(request_legs) - 1:
+                coverage.result.unexpanded_prefixes += size - beam_width
+        prefixes = []
+        for index in range(max((len(branch) for branch in branches), default=0)):
+            for branch in branches:
+                if index < len(branch):
+                    prefixes.append(branch[index])
+                    if len(prefixes) == beam_width:
+                        break
+            if len(prefixes) == beam_width:
                 break
-
-        prefixes = next_prefixes
-
     if len(prefixes) > max_results:
-        is_complete = False
-
-    options = [
-        _build_trip_option(
-            request_legs,
-            prefix,
-            cabin=cabin,
-            passengers=passengers,
-            include_basic_economy=include_basic_economy,
-            sort=sort,
-        )
-        for prefix in prefixes[:max_results]
-    ]
-    if not options and upstream_error is not None:
-        # Every beam branch was rejected upstream — this is an outage, not an
-        # empty itinerary set. Surface it instead of an empty SearchResult.
-        raise upstream_error
-    result = SearchResult(results=options, price_range=None, is_complete=is_complete)
-
-    return result
+        coverage.reason("result_limit")
+    coverage.result.results = [option(prefix) for prefix in prefixes[:max_results]
+                               if len(prefix) == len(request_legs)]
+    if not coverage.result.results and stage_error is not None:
+        raise stage_error
+    return coverage.result
 
 
 def _match_itinerary_by_selected_segments(
@@ -422,39 +460,114 @@ def resolve_trip_selector(
     selector: str,
     *,
     transport: TransportConfig = TransportConfig(),
+    deadline: Optional[float] = None,
+    allow_partial: bool = False,
+    coverage: Optional[_Coverage] = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[Itinerary], int]:
     payload = decode_trip_selector(selector)
-    request_legs = [_copy_request_leg(leg) for leg in payload["query_legs"]]
-    selected_legs = payload["selected_legs"]
+    query_legs = payload.get("query_legs")
+    selected_legs = payload.get("selected_legs")
+    if not isinstance(query_legs, list) or not query_legs or len(query_legs) > 6 or not all(isinstance(leg, dict) for leg in query_legs):
+        raise ValueError("invalid selector query legs")
+    request_legs = [_copy_request_leg(leg) for leg in query_legs]
+    if not isinstance(selected_legs, list) or not selected_legs or not all(isinstance(leg, list) and leg for leg in selected_legs):
+        raise ValueError("incomplete selector: every requested leg must be selected")
+    if (len(selected_legs) > len(request_legs)
+            or (not allow_partial and len(selected_legs) != len(request_legs))):
+        raise ValueError("incomplete selector: every requested leg must be selected")
+    if allow_partial and len(selected_legs) == len(request_legs):
+        raise ValueError("continuation requires an unselected leg")
+    try:
+        validate_cabin(payload["cabin"])
+        for index, leg in enumerate(request_legs):
+            validate_iata_code(leg["origin"], "origin")
+            validate_iata_code(leg["destination"], "destination")
+            validate_date(leg["date"], "date")
+            if index < len(selected_legs):
+                flights = selected_legs[index]
+                if not all(isinstance(flight, list) and len(flight) == 6 for flight in flights):
+                    raise ValueError("invalid selected segments")
+                if flights[0][0] != leg["origin"] or flights[-1][2] != leg["destination"] or flights[0][1] != leg["date"]:
+                    raise ValueError("selected segments do not match requested bounds")
+                for flight_index, flight in enumerate(flights):
+                    validate_iata_code(flight[0], "selected origin")
+                    validate_iata_code(flight[2], "selected destination")
+                    validate_date(flight[1], "selected date")
+                    parse_flight_number(f"{flight[4]}{flight[5]}")
+                    if flight_index and flights[flight_index - 1][2] != flight[0]:
+                        raise ValueError("selected segments are disconnected")
+        if not isinstance(payload["include_basic_economy"], bool):
+            raise ValueError("invalid selector fare filter")
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError("invalid selector context") from exc
     resolved: list[Itinerary] = []
     rpc_calls = 0
 
     replay_sort = payload.get("sort", SORT_DEPARTURE_TIME)
     exclude_basic = payload["cabin"] == "economy" and not payload["include_basic_economy"]
 
-    for index in range(len(request_legs)):
+    for index in range(len(selected_legs)):
         staged_legs = _with_selected_prefix(request_legs, selected_legs[:index])
+        bounded = _budget_transport(transport, deadline)
+        if coverage is not None:
+            coverage.result.rpc_calls += 1
         stage_result = _search_from_legs(
             staged_legs,
             cabin=payload["cabin"],
             passengers=payload["passengers"],
             sort=replay_sort,
-            transport=transport,
+            transport=bounded,
             exclude_basic_economy=exclude_basic,
             retain_raw=False,
+            show_all_results=payload["show_all_results"],
+            exclude_separate_tickets=payload["exclude_separate_tickets"],
         )
+        if coverage is not None:
+            coverage.add(stage_result)
         rpc_calls += 1
         candidates = _iter_raw_itineraries(stage_result)
-        if index < len(selected_legs):
-            itinerary = _match_itinerary_by_selected_segments(candidates, selected_legs[index])
-        else:
-            # Auto-select first candidate (e.g. return leg from roundtrip fast path)
-            itinerary = candidates[0] if candidates else None
+        itinerary = _match_itinerary_by_selected_segments(candidates, selected_legs[index])
         if itinerary is None:
             raise ValueError("selector itinerary no longer available")
         resolved.append(itinerary)
 
     return payload, request_legs, resolved, rpc_calls
+
+
+def search_next_leg(
+    selector: str, *, transport: TransportConfig = TransportConfig(),
+    time_budget: Optional[float] = None,
+) -> SearchResult:
+    """Replay a selected prefix and return every choice for its next bound.
+
+    This is a progressive search, with no beam or trip-result cap. Each result
+    preserves the selected prefix and the original search constraints. Only a
+    final-bound result has ``is_resolved=True`` and can be exactly priced.
+    """
+    deadline = _deadline(time_budget if time_budget is not None else TIME_BUDGET_SECONDS)
+    payload = decode_trip_selector(selector)
+    coverage = _Coverage(payload["show_all_results"])
+    payload, legs, prefix, _ = resolve_trip_selector(selector, transport=transport,
+        deadline=deadline, allow_partial=True, coverage=coverage)
+    selected = _selected_payloads_for_itineraries(prefix)
+    if selected is None:
+        raise ValueError("invalid selected prefix")
+    bounded = _budget_transport(transport, deadline)
+    coverage.result.rpc_calls += 1
+    raw = _search_from_legs(_with_selected_prefix(legs, selected), cabin=payload["cabin"],
+        passengers=payload["passengers"], sort=payload.get("sort", SORT_DEPARTURE_TIME),
+        exclude_basic_economy=payload["cabin"] == "economy" and not payload["include_basic_economy"],
+        transport=bounded, retain_raw=False, show_all_results=payload["show_all_results"],
+        exclude_separate_tickets=payload["exclude_separate_tickets"])
+    coverage.add(raw)
+    coverage.result.results = [_build_trip_option(legs, [*prefix, candidate],
+        cabin=payload["cabin"], passengers=payload["passengers"],
+        include_basic_economy=payload["include_basic_economy"],
+        sort=payload.get("sort", SORT_DEPARTURE_TIME), show_all_results=payload["show_all_results"],
+        exclude_separate_tickets=payload["exclude_separate_tickets"])
+        for candidate in _iter_raw_itineraries(raw)]
+    coverage.result.price_range = raw.price_range if raw else None
+    return coverage.result
 
 
 def price_selected_trip(
@@ -464,9 +577,11 @@ def price_selected_trip(
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
     rpc_calls: int = 0,
     selections: Optional[list[str]] = None,
+    deadline: Optional[float] = None,
 ) -> Optional[PriceResult]:
     if not itineraries:
         return None
@@ -490,13 +605,15 @@ def price_selected_trip(
     booking_options = []
     selected_payloads = _selected_payloads_for_itineraries(itineraries)
     if selected_payloads is not None and final_itinerary.booking_token:
+        bounded = _budget_transport(transport, deadline)
         try:
             booking_options = fetch_trip_booking_options(
                 request_legs,
                 itineraries,
                 cabin=cabin,
                 passengers=passengers,
-                transport=transport,
+                transport=bounded,
+                exclude_separate_tickets=exclude_separate_tickets,
             )
             rpc_calls += 1
         except SwoopUpstreamError:
@@ -550,6 +667,7 @@ def resolve_selected_trip(
     *,
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
     exclude_basic_economy: bool = False,
 ) -> tuple[list[Itinerary], list[str], int]:
@@ -570,6 +688,7 @@ def resolve_selected_trip(
             transport=transport,
             exclude_basic_economy=exclude_basic_economy,
             retain_raw=False,
+            exclude_separate_tickets=exclude_separate_tickets,
         )
         rpc_calls += 1
         candidates = _iter_raw_itineraries(stage_result)
@@ -600,11 +719,14 @@ def price_trip_selector(
     selector: str,
     *,
     transport: TransportConfig = TransportConfig(),
+    time_budget: Optional[float] = None,
 ) -> Optional[PriceResult]:
+    deadline = _deadline(time_budget)
     try:
         payload, request_legs, itineraries, rpc_calls = resolve_trip_selector(
             selector,
             transport=transport,
+            deadline=deadline,
         )
     except ValueError:
         return None
@@ -616,6 +738,8 @@ def price_trip_selector(
         include_basic_economy=payload["include_basic_economy"],
         transport=transport,
         rpc_calls=rpc_calls,
+        deadline=deadline,
+        exclude_separate_tickets=payload["exclude_separate_tickets"],
     )
 
 

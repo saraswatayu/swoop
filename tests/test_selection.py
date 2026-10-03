@@ -148,6 +148,7 @@ class TestStagedTripSearch:
         assert result.results[0].legs[0].itinerary is not None
         assert result.results[0].legs[0].itinerary.segments[0].flight_number == "2300"
         assert result.is_complete is True
+        assert result.results[0].is_resolved is False
 
     def test_search_trip_options_stages_selected_prefixes(self, monkeypatch):
         """3+ leg search uses staged beam search."""
@@ -195,7 +196,7 @@ class TestStagedTripSearch:
 
         monkeypatch.setattr(selection, "_search_from_legs", fake_search_from_legs)
 
-        result = selection.search_trip_options(request_legs, cabin="economy")
+        result = selection.search_trip_options(request_legs, cabin="economy", expand_legs=True)
 
         assert len(calls) == 3
         assert calls[1][0]["selected_legs"] == selection._build_selected_legs(outbound)
@@ -238,7 +239,7 @@ class TestStagedTripSearch:
 
         monkeypatch.setattr(selection, "_search_from_legs", fake_search)
 
-        result = selection.search_trip_options(request_legs, cabin="economy")
+        result = selection.search_trip_options(request_legs, cabin="economy", expand_legs=True)
 
         assert result.is_complete is False
         assert len(result.results) == 1
@@ -285,7 +286,7 @@ class TestStagedTripSearch:
 
         monkeypatch.setattr(selection, "_search_from_legs", fake_search)
 
-        result = selection.search_trip_options(request_legs, cabin="economy")
+        result = selection.search_trip_options(request_legs, cabin="economy", expand_legs=True)
 
         assert result.is_complete is False
 

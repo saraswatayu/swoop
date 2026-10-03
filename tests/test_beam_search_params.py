@@ -19,7 +19,7 @@ class TestSearchTripOptionsBeamParams:
     def _setup_multi_leg(self, monkeypatch, *, num_outbound=3):
         """Set up a 3-leg search with controllable outbound candidates.
 
-        Uses 3 legs so beam search is exercised (roundtrip 2-leg uses fast path).
+        Expansion is explicitly requested; discovery itself does not use a beam.
         """
         request_legs = [
             {"origin": "JFK", "destination": "LAX", "date": "2026-04-15"},
@@ -71,7 +71,7 @@ class TestSearchTripOptionsBeamParams:
         request_legs = self._setup_multi_leg(monkeypatch, num_outbound=5)
 
         result = selection.search_trip_options(
-            request_legs, cabin="economy", beam_width=2,
+            request_legs, cabin="economy", expand_legs=True, beam_width=2,
         )
 
         # beam_width=2 limits to 2 prefixes, so at most 2 results
@@ -82,7 +82,7 @@ class TestSearchTripOptionsBeamParams:
         request_legs = self._setup_multi_leg(monkeypatch, num_outbound=5)
 
         result = selection.search_trip_options(
-            request_legs, cabin="economy", beam_width=5, max_results=2,
+            request_legs, cabin="economy", expand_legs=True, beam_width=5, max_results=2,
         )
 
         assert len(result.results) <= 2
@@ -101,7 +101,7 @@ class TestSearchTripOptionsBeamParams:
         monkeypatch.setattr(selection.time, "monotonic", fake_monotonic)
 
         result = selection.search_trip_options(
-            request_legs, cabin="economy", beam_width=5, time_budget=1,
+            request_legs, cabin="economy", expand_legs=True, beam_width=5, time_budget=1,
         )
 
         assert result.is_complete is False
@@ -111,7 +111,7 @@ class TestSearchTripOptionsBeamParams:
         request_legs = self._setup_multi_leg(monkeypatch, num_outbound=2)
 
         # With defaults (beam_width=15, max_results=10), 2 outbound fits fine
-        result = selection.search_trip_options(request_legs, cabin="economy")
+        result = selection.search_trip_options(request_legs, cabin="economy", expand_legs=True)
 
         assert len(result.results) == 2
         assert result.is_complete is True
@@ -204,7 +204,7 @@ class TestBeamUpstreamErrorDegradesGracefully:
 
         # Beam collapses to zero results -> outage surfaces, not empty result.
         with pytest.raises(SwoopUpstreamError):
-            selection.search_trip_options(self._legs(), cabin="economy")
+            selection.search_trip_options(self._legs(), cabin="economy", expand_legs=True)
 
     def test_partial_stage_upstream_error_keeps_results(self, monkeypatch):
         from swoop.exceptions import SwoopUpstreamError
@@ -244,7 +244,7 @@ class TestBeamUpstreamErrorDegradesGracefully:
 
         monkeypatch.setattr(selection, "_search_from_legs", fake_search)
 
-        result = selection.search_trip_options(self._legs(), cabin="economy")
+        result = selection.search_trip_options(self._legs(), cabin="economy", expand_legs=True)
         assert isinstance(result, SearchResult)
         assert result.results  # at least one chain survived
         assert result.is_complete is False  # the rejected branch degraded it
@@ -265,4 +265,4 @@ class TestBeamUpstreamErrorDegradesGracefully:
 
         # A rejected first call means no results at all — surface it.
         with pytest.raises(SwoopUpstreamError):
-            selection.search_trip_options(request_legs, cabin="economy")
+            selection.search_trip_options(request_legs, cabin="economy", expand_legs=True)

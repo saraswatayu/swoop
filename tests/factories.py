@@ -36,6 +36,7 @@ def make_flight_segment(
     premium_ife=None,
     amenities=None,
     seat_type=None,
+    cabin_class=None,
     overnight=None,
     legroom=None,
     co2_grams=None,
@@ -44,7 +45,7 @@ def make_flight_segment(
     # Indices: [0]=?, [1]=?, [2]=operator, [3]=dep_airport, [4]=dep_name,
     # [5]=arr_name, [6]=arr_airport, [7]=?, [8]=dep_time, [9]=premium_ife,
     # [10]=arr_time, [11]=travel_time, [12]=amenities, [13]=seat_type,
-    # [14]=seat_pitch, [15]=codeshares, [16]=?, [17]=aircraft, [18]=?,
+    # [14]=seat_pitch, [15]=codeshares, [16]=cabin_class, [17]=aircraft, [18]=?,
     # [19]=overnight, [20]=dep_date, [21]=arr_date,
     # [22]=[airline_code, flight_number, ?, airline_name],
     # ...[30]=legroom, [31]=co2_grams
@@ -62,6 +63,7 @@ def make_flight_segment(
     segment[13] = seat_type
     segment[14] = "32 in"
     segment[15] = codeshares or []
+    segment[16] = cabin_class
     segment[17] = aircraft
     segment[19] = overnight
     segment[20] = list(dep_date)

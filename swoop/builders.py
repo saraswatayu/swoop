@@ -128,6 +128,7 @@ class TFSData:
         passengers: _PBPassengers,
         max_stops: Optional[int] = None,
         exclude_basic_economy: bool = False,
+        exclude_separate_tickets: bool = False,
     ):
         self.flight_data = flight_data
         self.seat = seat
@@ -135,6 +136,7 @@ class TFSData:
         self.passengers = passengers
         self.max_stops = max_stops
         self.exclude_basic_economy = exclude_basic_economy
+        self.exclude_separate_tickets = exclude_separate_tickets
 
     def pb(self):
         info = PB.Info()
@@ -148,6 +150,9 @@ class TFSData:
         if self.max_stops is not None:
             for flight in info.data:
                 flight.max_stops = self.max_stops
+
+        if self.exclude_separate_tickets:
+            info.exclude_separate_tickets = True
 
         if self.exclude_basic_economy:
             info.exclude_basic_economy = True
@@ -169,6 +174,7 @@ class TFSData:
         seat: Literal["economy", "premium-economy", "business", "first"],
         max_stops: Optional[int] = None,
         exclude_basic_economy: bool = False,
+        exclude_separate_tickets: bool = False,
     ) -> "TFSData":
         trip_t = {
             "round-trip": PB.Trip.ROUND_TRIP,
@@ -188,6 +194,7 @@ class TFSData:
             passengers=passengers,
             max_stops=max_stops,
             exclude_basic_economy=exclude_basic_economy,
+            exclude_separate_tickets=exclude_separate_tickets,
         )
 
 

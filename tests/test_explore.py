@@ -534,7 +534,11 @@ class TestPriceExplore:
             self._fake_option(250, "sel-cheapest"),
         ])
         captured: dict = {}
-        monkeypatch.setattr(swoop, "search", lambda **kw: fake_result)
+        def fake_search(**kwargs):
+            assert kwargs["expand_legs"] is True
+            return fake_result
+
+        monkeypatch.setattr(swoop, "search", fake_search)
         monkeypatch.setattr(swoop, "price_selector", lambda sel, **kw: captured.setdefault("sel", sel))
         swoop.price_explore(_dest())
         assert captured["sel"] == "sel-cheapest"

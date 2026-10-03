@@ -397,3 +397,31 @@ class TestDecodeResultFromFixtures:
         from dataclasses import asdict
         result2 = decode_result(result._raw)
         assert asdict(result) == asdict(result2)
+
+
+class TestActualSegmentCabin:
+    @pytest.mark.parametrize("name", [
+        "shopping_oneway_business.json", "shopping_roundtrip_business.json",
+        "shopping_roundtrip_first.json", "shopping_oneway_premium_economy.json",
+    ])
+    def test_cabin_from_captured_wire_not_requested_cabin_or_seat_quality(self, name):
+        segments = _extract_raw_segments(_load_fixture(name))
+        assert segments
+        for raw in segments:
+            decoded = _decode_segment(raw)
+            assert decoded is not None
+            assert decoded.cabin_class == raw[16]
+            assert decoded.seat_type == raw[13]
+
+    def test_business_cabin_with_standard_seat_is_not_misclassified(self):
+        segments = _extract_raw_segments(_load_fixture("shopping_oneway_gb.json"))
+        business = [s for raw in segments if (s := _decode_segment(raw)) and s.cabin_class == 3]
+        assert business
+        assert any(s.seat_type == 1 for s in business)
+
+    @pytest.mark.parametrize("value", [None, True, False, 0, 5, "3", 3.0, [], {}])
+    def test_unknown_cabin_is_not_guessed(self, value):
+        from tests.factories import make_flight_segment
+        decoded = _decode_segment(make_flight_segment(cabin_class=value))
+        assert decoded is not None
+        assert decoded.cabin_class is None

@@ -39,6 +39,8 @@ message Info {
   repeated FlightData data = 3;
   Seat seat = 9;
   repeated Passenger passengers = 8;
+  // Google UI: Hide separate & self-transfer tickets.
+  optional bool exclude_separate_tickets = 17;
   Trip trip = 19;
   optional bool exclude_basic_economy = 25;
 }

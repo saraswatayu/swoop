@@ -119,6 +119,7 @@ def _make_trip_option(itinerary: Itinerary, *, index: int, currency: str = "USD"
         selector=f"selector-{index}",
         price=itinerary.price,
         currency=currency,
+        is_resolved=True,
         legs=[
             TripLeg(
                 origin=itinerary.departure_airport_code,

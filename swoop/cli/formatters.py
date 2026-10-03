@@ -170,10 +170,12 @@ def _co2_text(option) -> Text:
     return Text("\u2014", style="dim")
 
 
-def _render_search_price_hint(console, price_commands: Optional[list[str]]) -> None:
+def _render_search_price_hint(console, price_commands: Optional[list[str]], *, unresolved: bool = False) -> None:
     """Render the human pricing guidance for search output."""
     console.print(" [dim]Prices shown are shopping totals.[/dim]")
-    if price_commands:
+    if unresolved:
+        console.print(" [dim]Return bounds are unresolved; prices are trip estimates. Use --expand-legs for exact combinations.[/dim]")
+    elif price_commands:
         console.print(" [dim]Bookable fare commands for shown rows:[/dim]")
         for index, command in enumerate(price_commands, 1):
             console.print(f" [bold cyan]{index}. {command}[/bold cyan]")
@@ -290,9 +292,9 @@ def format_search_table(
             console.print(f" [dim]{shown} of {total} results shown[/dim]")
 
     if not result.is_complete:
-        console.print(" [dim]Results truncated. Use --max-results or --time-budget to expand (multi-city only).[/dim]")
+        console.print(" [dim]Results incomplete. Adjust --max-results, --beam-width or --time-budget to explore more trips.[/dim]")
 
-    _render_search_price_hint(console, price_commands)
+    _render_search_price_hint(console, price_commands, unresolved=any(not option.is_resolved for option in display_options))
     console.print()
 
 
@@ -397,12 +399,19 @@ def format_search_json(
         "price_range": price_range,
         "total_results": len(result.results),
         "is_complete": result.is_complete,
+        "result_scope": result.result_scope,
+        "truncation_reasons": result.truncation_reasons,
+        "raw_result_count": result.raw_result_count,
+        "decoded_result_count": result.decoded_result_count,
+        "rpc_calls": result.rpc_calls,
+        "unexpanded_prefixes": result.unexpanded_prefixes,
         "results": [
             {
                 "index": index + 1,
                 "selector": option.selector,
                 "price": option.price,
                 "currency": option.currency or currency,
+                "is_resolved": option.is_resolved,
                 "legs": [
                     {
                         "origin": leg.origin,
@@ -436,6 +445,7 @@ def format_search_csv(
         "index", "selector", "price", "currency", "leg_count",
         "duration_minutes", "stops", "departure_time", "arrival_time",
         "airlines", "summary",
+        "is_resolved",
     ])
     for i, option in enumerate(all_options, 1):
         first_itin = option.legs[0].itinerary if option.legs else None
@@ -461,6 +471,7 @@ def format_search_csv(
             arr_time,
             airlines,
             _trip_summary(option),
+            option.is_resolved,
         ])
 
 
@@ -490,7 +501,7 @@ def format_search_brief(
 
     if all_options:
         console = _stdout_console()
-        _render_search_price_hint(console, price_commands)
+        _render_search_price_hint(console, price_commands, unresolved=any(not option.is_resolved for option in all_options))
 
 
 # ---------------------------------------------------------------------------

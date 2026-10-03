@@ -43,6 +43,7 @@ from .exceptions import (
     SwoopHTTPError,
     SwoopParseError,
     SwoopRateLimitError,
+    SwoopTransportError,
     SwoopUpstreamError,
 )
 from .builders import CabinClass, SearchLeg
@@ -70,6 +71,7 @@ from .rpc import (
 import logging
 import os
 from typing import Iterable, Optional
+from dataclasses import replace
 
 from ._selection import (
     build_request_legs_from_selected,
@@ -77,6 +79,7 @@ from ._selection import (
     price_trip_selector,
     resolve_selected_trip,
     search_trip_options,
+    search_next_leg,
 )
 from ._validate import (
     parse_flight_number,
@@ -107,11 +110,7 @@ def _filter_trip_options_by_flight_number(
             continue
         if itinerary_matches_flight(itinerary, carrier, number):
             filtered.append(option)
-    return SearchResult(
-        results=filtered,
-        price_range=result.price_range,
-        is_complete=result.is_complete,
-    )
+    return replace(result, results=filtered)
 
 
 def _validate_leg_search_inputs(
@@ -151,7 +150,11 @@ def _search_with_normalized_legs(
     transport: TransportConfig = TransportConfig(),
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
-    time_budget: Optional[int] = None,
+    time_budget: Optional[float] = None,
+    expand_legs: bool = False,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
+    first_flight_filter: Optional[tuple[Optional[str], str]] = None,
 ) -> SearchResult:
     """Execute a staged trip search from normalized leg definitions."""
     return search_trip_options(
@@ -164,6 +167,10 @@ def _search_with_normalized_legs(
         max_results=max_results,
         beam_width=beam_width,
         time_budget=time_budget,
+        expand_legs=expand_legs,
+        show_all_results=show_all_results,
+        first_flight_filter=first_flight_filter,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
 
@@ -177,7 +184,10 @@ def search_legs(
     transport: TransportConfig = TransportConfig(),
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
-    time_budget: Optional[int] = None,
+    time_budget: Optional[float] = None,
+    expand_legs: bool = False,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> SearchResult:
     """Search Google Flights using explicit leg definitions.
 
@@ -191,12 +201,17 @@ def search_legs(
         sort: Sort order constant (default ``SORT_DEPARTURE_TIME``).
         include_basic_economy: Include basic economy fares (default ``False``).
         transport: HTTP transport configuration (default ``TransportConfig()``).
-        max_results: Maximum trip combinations the beam search targets
-            (default 10).  Only affects multi-leg (3+ city) searches.
+        max_results: Maximum expanded trip combinations (default 10).
         beam_width: Number of candidate prefixes carried between stages
-            (default 15).  Only affects multi-leg searches.
-        time_budget: Seconds before the beam search stops exploring
-            (default 90).  Only affects multi-leg searches.
+            (default 15). A fair allocation preserves different prefixes.
+        time_budget: Exploration budget in seconds including the first RPC
+            (default 90). Each request timeout is capped to remaining time;
+            retries can extend the elapsed time.
+        expand_legs: Resolve every requested bound (default ``False``).
+            Discovery otherwise returns the first bound with
+            ``TripOption.is_resolved=False``. Use ``search_next_leg(option.selector)`` to choose each subsequent
+            bound without truncating other outbound choices. Expansion may
+            require multiple sequential RPCs.
 
     Returns:
         A trip-level :class:`SearchResult` with shopping totals.
@@ -229,6 +244,9 @@ def search_legs(
         max_results=max_results,
         beam_width=beam_width,
         time_budget=time_budget,
+        expand_legs=expand_legs,
+        show_all_results=show_all_results,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
 
@@ -254,7 +272,10 @@ def search(
     transport: TransportConfig = TransportConfig(),
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
-    time_budget: Optional[int] = None,
+    time_budget: Optional[float] = None,
+    expand_legs: bool = False,
+    exclude_separate_tickets: bool = False,
+    show_all_results: bool = True,
 ) -> SearchResult:
     """Search Google Flights and return decoded results.
 
@@ -284,12 +305,18 @@ def search(
         return_earliest_departure: Earliest return departure hour (0–23).
         return_latest_departure: Latest return departure hour (1–24).
         transport: HTTP transport configuration (default ``TransportConfig()``).
-        max_results: Maximum trip combinations the beam search targets
-            (default 10).  Only affects multi-leg (3+ city) searches.
+        max_results: Maximum expanded trip combinations (default 10).
         beam_width: Number of candidate prefixes carried between stages
-            (default 15).  Only affects multi-leg searches.
-        time_budget: Seconds before the beam search stops exploring
-            (default 90).  Only affects multi-leg searches.
+            (default 15). A fair allocation preserves different prefixes.
+        time_budget: Exploration budget in seconds including the first RPC
+            (default 90). Each request timeout is capped to remaining time;
+            retries can extend the elapsed time.
+        show_all_results: Request the wider Google list (default ``True``).
+        expand_legs: Resolve exact outbound and return combinations (default
+            ``False``). Quick roundtrip discovery needs one RPC and marks
+            candidates ``is_resolved=False``; its price is an estimated
+            whole-trip total, with no return selected. Expansion requires
+            follow-up RPCs and may return a truncated set.
 
     Returns:
         A trip-level :class:`SearchResult` with shopping totals.
@@ -380,6 +407,10 @@ def search(
         max_results=max_results,
         beam_width=beam_width,
         time_budget=time_budget,
+        expand_legs=expand_legs,
+        show_all_results=show_all_results,
+        first_flight_filter=(parsed_carrier, parsed_number) if parsed_number is not None else None,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
     if parsed_number is not None:
@@ -398,6 +429,7 @@ def price_legs(
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> Optional[PriceResult]:
     """Look up the current bookable fare using explicit leg definitions.
@@ -442,6 +474,7 @@ def price_legs(
             and len(legs) == 1
             and not include_basic_economy
         ),
+        exclude_separate_tickets=exclude_separate_tickets,
     )
     if not resolved:
         return None
@@ -455,6 +488,7 @@ def price_legs(
         transport=transport,
         rpc_calls=rpc_calls,
         selections=selections,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
 
@@ -462,6 +496,7 @@ def price_selector(
     selector: str,
     *,
     transport: TransportConfig = TransportConfig(),
+    time_budget: Optional[float] = None,
 ) -> Optional[PriceResult]:
     """Look up the current bookable fare for an itinerary selector.
 
@@ -474,14 +509,15 @@ def price_selector(
 
     Returns:
         A :class:`PriceResult`, or ``None`` if the selected itinerary no
-        longer exists.
+        longer exists or the selector does not select every requested bound.
+        Use ``search_next_leg()`` until resolved, or search with ``expand_legs=True``.
 
     Raises:
         SwoopUpstreamError: If Google rejects the request with a structured
             ErrorResponse envelope — an upstream outage, distinct from an empty
             result. See :func:`search` for the full transport-error set.
     """
-    return price_trip_selector(selector, transport=transport)
+    return price_trip_selector(selector, transport=transport, time_budget=time_budget)
 
 
 def check_price(
@@ -496,6 +532,7 @@ def check_price(
     passengers: Passengers = Passengers(),
     max_stops: Optional[int] = None,
     include_basic_economy: bool = False,
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> Optional[PriceResult]:
     """Look up the current bookable fare for a specific flight.
@@ -587,6 +624,7 @@ def check_price(
             and return_date is None
             and not include_basic_economy
         ),
+        exclude_separate_tickets=exclude_separate_tickets,
     )
     if not resolved:
         return None
@@ -600,6 +638,7 @@ def check_price(
         transport=transport,
         rpc_calls=rpc_calls,
         selections=selections,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
 
 
@@ -616,6 +655,7 @@ def _fetch_deals_per_origin(
     airlines: Optional[list[str]],
     passengers: Passengers,
     include_basic_economy: bool,
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig,
 ) -> DealsResult:
     """Fetch deals for each origin in parallel, merge and dedupe by fingerprint."""
@@ -645,6 +685,7 @@ def _fetch_deals_per_origin(
             include_basic_economy=include_basic_economy,
             transport=transport,
             _client=worker_client,
+            exclude_separate_tickets=exclude_separate_tickets,
         )
 
     # Modest concurrency to avoid triggering upstream rate-limits when the
@@ -767,7 +808,7 @@ def price_deal(
 ) -> Optional[PriceResult]:
     """Get the current bookable price for a :class:`Deal`.
 
-    Runs :func:`search_deal` and prices the cheapest matching itinerary
+    Expands matching trip itineraries and prices the cheapest complete choice
     via :func:`price_selector`. Returns ``None`` if no itineraries match
     (the deal may have expired or its carriers may no longer operate
     the route on those dates).
@@ -784,7 +825,8 @@ def price_deal(
             ErrorResponse envelope — an upstream outage, distinct from an empty
             result. See :func:`search` for the full transport-error set.
     """
-    return _price_cheapest(search_deal(deal, transport=transport), transport)
+    result = search(expand_legs=True, transport=transport, **deal.to_search_kwargs())
+    return _price_cheapest(result, transport)
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +947,7 @@ def price_explore(
             ErrorResponse envelope — an upstream outage, distinct from an empty
             result. See :func:`search` for the full transport-error set.
     """
-    result = search(transport=transport, **destination.to_search_kwargs())
+    result = search(expand_legs=True, transport=transport, **destination.to_search_kwargs())
     return _price_cheapest(result, transport)
 
 
@@ -1032,6 +1074,7 @@ def deals(
     max_price: Optional[int] = None,
     min_discount_pct: Optional[int] = None,
     # Transport
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
 ) -> DealsResult:
     """Discover the best flight deals from an origin airport.
@@ -1132,6 +1175,7 @@ def deals(
             passengers=passengers,
             include_basic_economy=include_basic_economy,
             transport=transport,
+            exclude_separate_tickets=exclude_separate_tickets,
         )
     else:
         # Single string OR list as one RPC call (slot-0 native multi-origin).
@@ -1143,6 +1187,7 @@ def deals(
             passengers=passengers,
             include_basic_economy=include_basic_economy,
             transport=transport,
+            exclude_separate_tickets=exclude_separate_tickets,
         )
 
     # Apply client-side filters if any are set.
@@ -1171,6 +1216,7 @@ __all__ = [
     # Functions
     "search",
     "search_legs",
+    "search_next_leg",
     "check_price",
     "price_selector",
     "price_legs",
@@ -1221,6 +1267,7 @@ __all__ = [
     "SwoopHTTPError",
     "SwoopParseError",
     "SwoopRateLimitError",
+    "SwoopTransportError",
     "SwoopUpstreamError",
     # Constants
     "SORT_TOP",

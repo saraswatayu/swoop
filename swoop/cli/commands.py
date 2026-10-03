@@ -81,6 +81,8 @@ def _run_search(
     timeout, retries,
     country, proxy,
     max_results, beam_width, time_budget,
+    expand_legs=False,
+    show_all_results=True,
 ):
     """Run swoop.search() with the given parameters. Returns the result."""
     import swoop
@@ -128,6 +130,8 @@ def _run_search(
         max_results=max_results,
         beam_width=beam_width,
         time_budget=time_budget,
+        expand_legs=expand_legs,
+        show_all_results=show_all_results,
     )
 
 
@@ -151,6 +155,8 @@ def _run_search_legs(
     max_results,
     beam_width,
     time_budget,
+    expand_legs=False,
+    show_all_results=True,
 ):
     """Run swoop.search_legs() with global CLI filters applied to each leg."""
     import swoop
@@ -196,6 +202,8 @@ def _run_search_legs(
         max_results=max_results,
         beam_width=beam_width,
         time_budget=time_budget,
+        expand_legs=expand_legs,
+        show_all_results=show_all_results,
     )
 
 
@@ -252,9 +260,11 @@ def _search_options(f):
         click.option("--return-depart-after", type=click.IntRange(0, 23), default=None, help="Return departure window start."),
         click.option("--return-depart-before", type=click.IntRange(1, 24), default=None, help="Return departure window end."),
         # Advanced
-        click.option("--max-results", type=int, default=None, help="Max trip combinations for beam search (multi-city)."),
-        click.option("--beam-width", type=int, default=None, help="Beam search width (multi-city)."),
-        click.option("--time-budget", type=int, default=None, help="Beam search time budget in seconds (multi-city)."),
+        click.option("--max-results", type=int, default=None, help="Max expanded trip combinations."),
+        click.option("--beam-width", type=int, default=None, help="Expanded search beam width."),
+        click.option("--time-budget", type=int, default=None, help="Expanded search budget in seconds, including discovery."),
+        click.option("--show-all-results/--default-results", default=True, help="Request the wider Google Flights list (default)."),
+        click.option("--expand-legs", is_flag=True, default=False, help="Resolve exact itineraries for every trip bound before returning."),
         click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds."),
         click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit."),
         click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL."),
@@ -302,7 +312,7 @@ def search_cmd(
     depart_after, depart_before, arrive_after, arrive_before,
     return_depart_after, return_depart_before,
     country, proxy,
-    timeout, retries, max_results, beam_width, time_budget,
+    timeout, retries, max_results, beam_width, time_budget, expand_legs, show_all_results,
     limit, show_price_commands,
     output_format, no_color, quiet, verbose,
 ):
@@ -385,7 +395,7 @@ def search_cmd(
                     timeout=timeout, retries=retries,
                     country=country, proxy=proxy,
                     max_results=max_results, beam_width=beam_width,
-                    time_budget=time_budget,
+                    time_budget=time_budget, expand_legs=expand_legs, show_all_results=show_all_results,
                 )
             else:
                 result = _run_search(
@@ -403,7 +413,7 @@ def search_cmd(
                     timeout=timeout, retries=retries,
                     country=country, proxy=proxy,
                     max_results=max_results, beam_width=beam_width,
-                    time_budget=time_budget,
+                    time_budget=time_budget, expand_legs=expand_legs, show_all_results=show_all_results,
                 )
         except ValueError as e:
             err.print(f"[red]Error: {e}[/red]")
@@ -437,6 +447,9 @@ def search_cmd(
     display_options = list(result.results[:limit]) if limit else list(result.results)
     price_commands = None
     if show_price_commands:
+        if any(not option.is_resolved for option in display_options):
+            err.print("[yellow]Use --expand-legs to resolve all bounds before requesting exact fare commands.[/yellow]")
+            ctx.exit(2)
         price_commands = [
             _build_price_selector_command(option.selector)
             for option in display_options
@@ -975,3 +988,34 @@ def explore_cmd(
         format_explore_csv(result, limit=limit)
     elif output_format == "brief":
         format_explore_brief(result, limit=limit)
+
+
+@click.command("next")
+@click.option("--selector", required=True, help="An unresolved search result selector.")
+@click.option("--timeout", type=click.FloatRange(min=0, min_open=True), default=90)
+@click.option("--time-budget", type=click.FloatRange(min=0, min_open=True), default=90)
+@click.option("--retries", type=click.IntRange(min=0), default=0)
+@click.option("--country", default="US")
+@click.option("--proxy", default=None)
+@click.pass_context
+def next_cmd(ctx, selector, timeout, time_budget, retries, country, proxy):
+    """Return every compatible choice for the next unselected bound as JSON."""
+    import swoop
+    from swoop._selection import decode_trip_selector
+    from swoop.exceptions import SwoopError
+    from .formatters import format_search_json
+
+    try:
+        payload = decode_trip_selector(selector)
+        result = swoop.search_next_leg(selector, time_budget=time_budget,
+            transport=swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy))
+        legs = payload["query_legs"]
+        format_search_json(result, origin=legs[0]["origin"],
+            destination=legs[-1]["destination"], date=legs[0]["date"],
+            legs=[(leg["origin"], leg["destination"], leg["date"]) for leg in legs],
+            cabin=payload["cabin"], adults=payload["passengers"].adults)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="selector") from exc
+    except SwoopError as exc:
+        from rich.console import Console
+        handle_rpc_error(exc, err=Console(stderr=True), ctx=ctx)

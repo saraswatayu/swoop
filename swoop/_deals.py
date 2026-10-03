@@ -57,6 +57,7 @@ def _build_deals_payload(
     max_stops: Optional[int] = None,
     airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
+    exclude_separate_tickets: bool = False,
     include_basic_economy: bool = False,
 ) -> str:
     """Build and encode the deals request payload.
@@ -122,7 +123,8 @@ def _build_deals_payload(
             [outbound_segment, return_segment],     # [13] segments
             None, None, None,                        # [14]-[16]
             1,                                       # [17] roundtrip flag
-            None, None, None, None, None, None, None,  # [18]-[24]
+            1 if exclude_separate_tickets else None,  # [18] hide separate/self-transfer
+            None, None, None, None, None, None,       # [19]-[24]
             None, None, None,                                       # [25]-[27]
             None if include_basic_economy else 1,                   # [28] exclude basic economy (probed)
             None,                                                   # [29]
@@ -368,6 +370,7 @@ def fetch_deals(
     airlines: Optional[list[str]] = None,
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
+    exclude_separate_tickets: bool = False,
     transport: TransportConfig = TransportConfig(),
     _client: Any = None,
 ) -> DealsResult:
@@ -393,6 +396,7 @@ def fetch_deals(
         origin, cabin=cabin, max_stops=max_stops, airlines=airlines,
         passengers=passengers,
         include_basic_economy=include_basic_economy,
+        exclude_separate_tickets=exclude_separate_tickets,
     )
     url = _apply_country(DEALS_RPC_URL, transport.country)
     body = f"f.req={encoded_payload}".encode()

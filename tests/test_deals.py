@@ -689,6 +689,7 @@ class TestDealBridges:
         )
 
         def fake_search(**kwargs):
+            assert kwargs["expand_legs"] is True
             return swoop.SearchResult(results=[expensive, cheap], is_complete=True)
 
         captured = {}

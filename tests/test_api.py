@@ -86,6 +86,7 @@ def test_search_delegates_to_leg_search_core(monkeypatch):
         earliest_departure=8,
         latest_departure=16,
         transport=transport,
+        expand_legs=True,
     )
 
     assert captured["legs"][0]["origin"] == "SFO"
@@ -103,6 +104,7 @@ def test_search_delegates_to_leg_search_core(monkeypatch):
     assert captured["sort"] == swoop.SORT_CHEAPEST
     assert captured["transport"].timeout == 60
     assert captured["transport"].retries == 3
+    assert captured["expand_legs"] is True
 
 
 def test_search_legs_uses_per_leg_filters(monkeypatch):
@@ -130,7 +132,7 @@ def test_search_legs_uses_per_leg_filters(monkeypatch):
             max_stops=1,
             airlines=["JL"],
         ),
-    ], cabin="business", passengers=swoop.Passengers(adults=2))
+    ], cabin="business", passengers=swoop.Passengers(adults=2), expand_legs=True)
 
     assert captured["legs"][0]["origin"] == "SFO"
     assert captured["legs"][0]["max_stops"] == 0
@@ -138,6 +140,7 @@ def test_search_legs_uses_per_leg_filters(monkeypatch):
     assert captured["legs"][1]["origin"] == "NRT"
     assert captured["legs"][1]["max_stops"] == 1
     assert captured["legs"][1]["airlines"] == ["JL"]
+    assert captured["expand_legs"] is True
 
 
 def test_search_legs_accepts_more_than_two_legs(monkeypatch):

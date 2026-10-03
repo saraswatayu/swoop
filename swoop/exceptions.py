@@ -14,10 +14,12 @@ line.** The specifics:
    ``deals``, ``explore``, ``get_booking_results`` — raises
    :class:`SwoopUpstreamError`. A genuinely
    empty result (no flights) is *not* an error: it returns an empty result.
+   POST send/body failures raise :class:`SwoopTransportError`, with the original
+   provider exception preserved as their cause.
 
 2. Aggregate / fan-out calls degrade, but not silently. The multi-city beam in
    ``search`` keeps the chains it found and raises only if *every* branch was
-   rejected upstream. ``price_explore_all`` prices what it can and raises only
+   rejected upstream or failed in transport. ``price_explore_all`` prices what it can and raises only
    if *every* destination was rejected upstream; a partial outage leaves the
    affected slots ``None`` (logged).
 
@@ -38,6 +40,14 @@ the known codes.
 
 class SwoopError(Exception):
     """Base exception for all swoop errors."""
+
+
+class SwoopTransportError(SwoopError):
+    """Raised when sending a request or reading its response body fails.
+
+    The original transport exception is preserved as ``__cause__``. Transport
+    failures are not retried automatically.
+    """
 
 
 class SwoopHTTPError(SwoopError):

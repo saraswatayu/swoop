@@ -295,6 +295,7 @@ class TestShoppingContract:
         # roundtrip total price; the return leg is resolved only at booking
         # time, so assert against the outbound query leg only.
         _assert_trip_option(result.results[0], query_legs[:1])
+        assert result.results[0].is_resolved is False
 
         report = _trip_report("shopping_roundtrip_jfk_lax", query_legs, result, len(rpc_captures))
         _record_shopping_artifacts("shopping_roundtrip_jfk_lax", rpc_captures, report)

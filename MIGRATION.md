@@ -2,6 +2,89 @@
 
 Upgrade notes for swoop. Each section shows the old call shape, the new one, and what (if anything) you have to change.
 
+## Unreleased — trip discovery and exact selectors
+
+Roundtrip and two-bound open-jaw searches still default to quick discovery: one
+search call returns outbound flight details and an estimated **whole-trip**
+price. That price does not identify a chosen return. Such `TripOption` rows now
+have `is_resolved=False`. One-way rows and fully expanded trip rows have
+`is_resolved=True`.
+Manually constructed `TripOption` instances default to unresolved; the search
+builder explicitly sets resolution from the number of selected/requested bounds.
+
+Pass `expand_legs=True` to `search()` or `search_legs()` when you need exact
+complete flight combinations. Each outbound is sent back to Google as a selected
+prefix to discover valid remaining bounds. The final stage supplies the trip
+total and booking token; prices from individual stages are never added together.
+All trip shapes now default to discovery. Three or more bounds no longer expand
+automatically; use `expand_legs=True` to retain the previous behavior.
+
+```python
+from swoop import search, price_selector
+
+quick = search("JFK", "LHR", "2030-04-15", return_date="2030-04-22")
+assert all(not option.is_resolved for option in quick.results)
+
+complete = search(
+    "JFK", "LHR", "2030-04-15", return_date="2030-04-22",
+    expand_legs=True, max_results=20, beam_width=20, time_budget=30,
+)
+for option in complete.results:
+    assert option.is_resolved
+    price = price_selector(option.selector)
+```
+
+**Behavioral migration:** `price_selector()` now returns `None` for any selector
+that leaves a requested bound unselected, including old outbound-only roundtrip
+selectors. It no longer silently selects Google's first return. Search again
+with `expand_legs=True` to obtain an exact selector, or use `check_price()` /
+`price_legs()` to explicitly supply the desired flights. `price_deal()` and
+`price_explore()` request complete expansion internally.
+
+`SearchResult.is_complete` continues to describe search coverage, independently
+of per-trip `is_resolved`. A fast discovery result can be complete while its
+trips remain unresolved. Expanded searches share the beam fairly across chosen
+prefixes, but still expose a bounded subset: `max_results` (default 10),
+`beam_width` (default 15), and `time_budget` (default 90 seconds) apply. Truncation,
+budget exhaustion, and partial upstream rejections set `is_complete=False`.
+Expansion includes the initial call in its time budget and caps each request's
+timeout to remaining time; retries can extend total elapsed time.
+
+`SwoopTransportError` now wraps failures while sending a POST or reading its
+response body, including lazy body timeouts. Catch it (or `SwoopError`) instead
+of a provider-specific exception. Expanded searches retain completed choices
+from other prefixes with `is_complete=False`; a failed initial call or an empty
+beam after transport failure raises. HTTP 429 retry policy remains unchanged.
+
+The CLI adds `--expand-legs`; search JSON and CSV expose `is_resolved`.
+`--show-price-commands` requires resolved rows and explains the expansion flag
+when a quick roundtrip would produce an incomplete selector.
+
+### Wider inventory and chosen-prefix continuation
+
+Searches request Google's wider result list by default (`show_all_results=True`).
+Set it to `False` (CLI `--default-results`) to use the shortened list. The flag is
+stored in every selector and replayed during continuation and pricing. Existing
+selectors without the flag retain their original shortened mode.
+
+`search_next_leg(selector, time_budget=30)` returns every next-bound choice for
+that exact selected prefix without a beam or result cap. It replays selected
+flights, preserving all query bounds, cabin, party and filters; disappeared
+flights raise `ValueError`. Repeat until `is_resolved=True`, then call
+`price_selector(selector, time_budget=30)`. A completed selector cannot continue.
+The CLI equivalent is `swoop next --selector SEL --time-budget 30` (JSON).
+
+`SearchResult` now exposes `result_scope` (`all`, `default`, `limited`),
+`truncation_reasons`, `raw_result_count`, `decoded_result_count`, `rpc_calls`,
+and `unexpanded_prefixes`. Counts include every search RPC, including replay;
+`unexpanded_prefixes` counts branches skipped before completion, not discarded
+complete choices. Reasons distinguish default results, limited transport,
+parse loss, beam/result limits, time budget and failed branches. `is_complete`
+means complete relative to the requested Google response, never all market
+inventory. `price_selector` shares its optional budget across replay and lookup.
+Transport retries may still extend elapsed time; use `retries=0` for a strict
+per-request budget. No return or next bound is chosen automatically.
+
 ## 0.6 → 0.7
 
 ### Upstream outages now raise instead of returning empty
@@ -224,3 +307,10 @@ These are additive and don't require code changes, but they're worth knowing:
 - **CO₂ and amenities**: `Segment.legroom`, `Segment.has_premium_ife`, `Segment.amenities`, `Segment.seat_type`, `Itinerary.stop_count`, `Itinerary.is_budget_carrier`, `Itinerary.quality_signals` are now decoded.
 - **Booking fare metadata**: `BookingOption.fare_family` and `BookingOption.rebookability_signal`.
 - **CLI flags**: `--country`, `--proxy`, `--children`, `--infants-in-seat`, `--infants-on-lap`, `--max-results`, `--beam-width`, `--time-budget`.
+
+### Additive separate-ticket exclusion
+
+`exclude_separate_tickets=False` is a new keyword on flight search/pricing and
+deals entry points. Set it to `True` to request exclusion of separate tickets
+and self-transfer. Existing selectors without the field retain their original
+unrestricted behavior; new selectors carry the exact boolean through replay.

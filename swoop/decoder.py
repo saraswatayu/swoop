@@ -199,7 +199,7 @@ class AmenityFlags:
     has_live_tv: bool = False       # [8] = true
     has_on_demand_video: bool = False  # [9] = true (seatback IFE)
     has_stream_media: bool = False  # [10] = true (wireless streaming)
-    wifi: Optional[int] = None     # [11] = 2 (free) or 3 (free intl), None = no wifi
+    wifi: Optional[int] = None     # [11]: raw availability tier; absent does not prove no Wi-Fi
 
 
 @dataclass
@@ -232,7 +232,8 @@ class Segment:
     overnight: bool = False  # Whether flight crosses midnight
     has_premium_ife: bool = False  # segment[9]: premium IFE system
     amenities: Optional[AmenityFlags] = None  # segment[12]: cabin-class amenities
-    seat_type: Optional[int] = None  # segment[13]: 1=avg, 2=below-avg, 3=above-avg, 4+=business
+    seat_type: Optional[int] = None  # segment[13]: seat quality/product, independent of cabin
+    cabin_class: Optional[int] = None  # segment[16]: 1=economy, 2=premium, 3=business, 4=first
 
     def __repr__(self) -> str:
         parts = []
@@ -343,6 +344,8 @@ class RawSearchResult:
     best: List[Itinerary] = field(default_factory=list)
     other: List[Itinerary] = field(default_factory=list)
     price_range: Optional[PriceRange] = None  # Price range from response
+    _raw_result_count: Optional[int] = None
+    _result_scope: Optional[str] = None
 
     def __repr__(self) -> str:
         return f"RawSearchResult(best={len(self.best)}, other={len(self.other)})"
@@ -460,9 +463,11 @@ def _decode_segment(el: list) -> Optional[Segment]:
         # Amenity flags at index 12
         amenities = _decode_amenities(el)
 
-        # Seat type at index 13 (1=avg, 2=below-avg, 3=above-avg, 4+=business)
+        # Seat product and actual segment cabin are independent, especially on mixed-cabin trips.
         seat_type_raw = _safe_get(el, [13])
-        seat_type = seat_type_raw if isinstance(seat_type_raw, int) else None
+        seat_type = seat_type_raw if type(seat_type_raw) is int else None
+        cabin_raw = _safe_get(el, [16])
+        cabin_class = cabin_raw if type(cabin_raw) is int and cabin_raw in (1, 2, 3, 4) else None
 
         return Segment(
             operator=str(_safe_get(el, [2], "") or ""),
@@ -487,6 +492,7 @@ def _decode_segment(el: list) -> Optional[Segment]:
             has_premium_ife=has_premium_ife,
             amenities=amenities,
             seat_type=seat_type,
+            cabin_class=cabin_class,
         )
     except Exception as e:
         logger.warning("Failed to decode segment: %s", e)
@@ -714,4 +720,6 @@ def decode_result(data: list) -> RawSearchResult:
     # Price range at [7, 0]
     price_range = _decode_price_range(data)
 
-    return RawSearchResult(_raw=data, best=best, other=other, price_range=price_range)
+    raw_count = sum(len(rows) for rows in (best_raw, other_raw) if isinstance(rows, list))
+    return RawSearchResult(_raw=data, best=best, other=other, price_range=price_range,
+                           _raw_result_count=raw_count)

@@ -154,6 +154,21 @@ print(results.is_complete)
 
 `search()` and `search_legs()` return shopping totals. Use `check_price()`, `price_legs()`, or `price_selector()` when you need the bookable fare for one chosen itinerary.
 
+Quick discovery for any multi-bound trip contains first-bound details and an estimated whole-trip
+price, with `option.is_resolved=False`. Use `expand_legs=True` (CLI
+`--expand-legs`) for exact outbound/return or open-jaw combinations before calling
+`price_selector()`. Expansion requires follow-up requests and returns a bounded
+set controlled by `max_results`, `beam_width`, and `time_budget`;
+`result.is_complete=False` indicates incomplete exploration;
+`result.truncation_reasons` explains which limit or failure reduced coverage.
+Searches request the wider Google list by default (`show_all_results=True`).
+Use `search_next_leg(option.selector)` to choose any discovered flight and retrieve
+all compatible next-bound choices without expanding other outbounds. Repeat
+until `is_resolved=True`, then price that exact selector. The CLI supports
+`swoop next --selector SEL`. Wider coverage does not guarantee every airline or
+flight is listed by Google. The discovery
+price is never an outbound-only fare and must not be added to a return price.
+
 Each price-check call costs ~2 RPCs (one search, one booking lookup) — including one-way trips, so `PriceResult.booking_options` is populated and `booking_url` is available. For high-volume scoring of many fares, expect rate-limit pressure to scale accordingly; increase `retries` or pace your calls.
 
 <details>
@@ -504,11 +519,11 @@ Set the default proxy URL for all subsequent requests. Pass `None` to clear.
 - **`SelectedLeg`** — `flight_number: str`, `origin: str`, `destination: str`, `date: str`
 - **`SearchLeg`** — `date: str`, `from_airport: str`, `to_airport: str`, `max_stops: int | None`, `airlines: list[str] | None`
 - **`SearchResult`** — `results: list[TripOption]`, `price_range: PriceRange | None`, `is_complete: bool`, `currency: str | None`
-- **`TripOption`** — `selector: str`, `price: int | None`, `currency: str | None`, `legs: list[TripLeg]`
+- **`TripOption`** — `selector: str`, `price: int | None`, `currency: str | None`, `legs: list[TripLeg]`, `is_resolved: bool`
 - **`TripLeg`** — `origin: str`, `destination: str`, `date: str`, `itinerary: Itinerary | None`
 - **`RawSearchResult`** — low-level `best: list[Itinerary]`, `other: list[Itinerary]`, `price_range: PriceRange | None`
 - **`Itinerary`** — Full itinerary with `price`, `flights`, `layovers`, `travel_time`, `booking_token`, `carbon_emissions`
-- **`Segment`** — Segment details: `airline`, `flight_number`, `aircraft`, `legroom`, `co2_grams`, `amenities`
+- **`Segment`** — Segment details: `airline`, `flight_number`, `aircraft`, `legroom`, `co2_grams`, `amenities`, `seat_type`, `cabin_class`
 - **`Layover`** — Stop info: `minutes`, airports, `is_overnight`
 - **`CarbonEmissions`** — `this_flight_grams`, `typical_for_route_grams`, `difference_percent`
 
@@ -524,7 +539,7 @@ Set the default proxy URL for all subsequent requests. Pass `None` to clear.
 
 ### Error Handling
 
-All exceptions inherit from `SwoopError`. Catch `SwoopRateLimitError` for HTTP 429, `SwoopHTTPError` for other HTTP failures, `SwoopParseError` for response decoding issues, and `SwoopUpstreamError` for a structured upstream rejection (Google answers HTTP 200 with a gRPC `ErrorResponse` envelope) — distinct from a genuinely empty result, which returns empty rather than raising. On a priced result, `PriceResult.is_estimate` is `True` when the price is a search-derived shopping estimate rather than a confirmed bookable fare.
+All exceptions inherit from `SwoopError`. Catch `SwoopTransportError` for request-send or response-body failures, `SwoopRateLimitError` for HTTP 429, `SwoopHTTPError` for other HTTP failures, `SwoopParseError` for response decoding issues, and `SwoopUpstreamError` for a structured upstream rejection (Google answers HTTP 200 with a gRPC `ErrorResponse` envelope) — distinct from a genuinely empty result, which returns empty rather than raising. On a priced result, `PriceResult.is_estimate` is `True` when the price is a search-derived shopping estimate rather than a confirmed bookable fare.
 
 </details>
 
@@ -548,3 +563,26 @@ Testing notes:
 ## License
 
 MIT
+
+### Separate tickets and self-transfer
+
+Pass `exclude_separate_tickets=True` to `search`, `search_legs`, `search_raw`,
+`check_price`, `price_legs`, or `deals` to request Google Flights’ “Hide separate
+& self-transfer tickets” filter. The default remains `False` for compatibility.
+Trip selectors preserve this setting through `search_next_leg` and
+`price_selector`, including exact booking-option lookups. The same option on
+`TFSData` encodes the filter for search-page URLs. This does not exclude ordinary
+interline or codeshare itineraries sold on one ticket.
+
+### Segment cabin and amenity scope
+
+`Segment.cabin_class` preserves the actual cabin at Google shopping segment index 16:
+1 = economy, 2 = premium economy, 3 = business, 4 = first. Missing or unrecognized
+values remain `None`. A business search can include economy connecting segments;
+never apply the requested cabin to every segment. `seat_type` is a separate raw
+seat-product/quality indicator, not a cabin code.
+
+Amenity flags are scoped to that segment's cabin. An absent Wi-Fi tier means
+unknown availability; it does not establish that Wi-Fi is unavailable or included
+in a fare. The raw tier should not be used to promise a free service without
+checking the applicable carrier/fare terms.

@@ -66,8 +66,8 @@ STOPS_TWO_OR_FEWER = 3
 
 
 def _normalize_rpc_leg(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     *,
     max_stops: Optional[int] = None,
@@ -132,9 +132,11 @@ def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
     else:
         stops_val = max_stops + 1
 
+    origins = leg["origin"] if isinstance(leg["origin"], list) else [leg["origin"]]
+    destinations = leg["destination"] if isinstance(leg["destination"], list) else [leg["destination"]]
     return [
-        [[[leg["origin"], 0]]],       # departure airport
-        [[[leg["destination"], 0]]],  # arrival airport
+        [[[code, 0] for code in origins]],       # alternative departure airports
+        [[[code, 0] for code in destinations]],  # alternative arrival airports
         _build_time_restrictions(
             leg.get("earliest_departure"),
             leg.get("latest_departure"),
@@ -459,9 +461,24 @@ def _http_post(
     return _post_with_retry(client, url, content, headers, transport=transport)
 
 
+def _normalize_raw_airports(value: str | list[str], name: str) -> str | list[str]:
+    """Validate explicit airport alternatives without changing legacy strings."""
+    if isinstance(value, str):
+        return value
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{name} must be an airport string or a nonempty list of IATA codes")
+    from ._validate import validate_iata_code
+
+    for code in value:
+        validate_iata_code(code, name)
+    if len(set(value)) != len(value):
+        raise ValueError(f"{name} airport alternatives must not contain duplicates")
+    return list(value)
+
+
 def search_raw(
-    origin: str,
-    destination: str,
+    origin: str | list[str],
+    destination: str | list[str],
     date: str,
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
@@ -486,6 +503,12 @@ def search_raw(
     is the roundtrip total.
 
     Args:
+        origin: Airport string, or nonempty list of alternative IATA airports.
+        destination: Airport string, or nonempty list of alternative IATA airports.
+            Alternatives are sent together in one native Google shopping pass;
+            they do not represent separate journeys. Each decoded itinerary
+            retains its actual segment airports. Broad alternatives can change
+            Google's result selection, so callers should check needed coverage.
         transport: HTTP transport configuration (default ``TransportConfig()``).
 
     Raises:
@@ -494,6 +517,8 @@ def search_raw(
             outage, distinct from a genuinely empty result, which returns
             ``None``. See :func:`swoop.search` for the full transport-error set.
     """
+    origin = _normalize_raw_airports(origin, "origin")
+    destination = _normalize_raw_airports(destination, "destination")
     logger.debug(
         "search_raw %s->%s on %s (cabin=%s, adults=%d)",
         origin, destination, date, cabin, passengers.adults,

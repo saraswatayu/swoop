@@ -13,6 +13,7 @@ import swoop
 from swoop import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
 from swoop.decoder import (
     BookingOption,
+    BookingSegmentDetails,
     CarbonEmissions,
     Codeshare,
     Segment,
@@ -78,6 +79,7 @@ class TestFrozenExports:
         "Itinerary",
         "Segment",
         "BookingOption",
+        "BookingSegmentDetails",
         "Codeshare",
         "Layover",
         "CarbonEmissions",
@@ -234,6 +236,7 @@ class TestFrozenDataclassFields:
             "is_basic", "fare_family", "rebookability_signal",
             "seller_name", "seller_code", "booking_url", "logo_url",
             "is_airline_direct",
+            "segment_details",
         }
         actual = {
             field.name
@@ -241,6 +244,14 @@ class TestFrozenDataclassFields:
             if not field.name.startswith("_")
         }
         assert actual == expected
+
+    def test_booking_segment_details_fields(self):
+        expected = {
+            "origin_iata", "destination_iata", "departure_local_iso",
+            "arrival_local_iso", "carrier_code", "flight_number", "aircraft_code",
+            "cabin_class", "amenities", "seat_type", "seat_pitch_short", "legroom",
+        }
+        assert self._field_names(BookingSegmentDetails) == expected
 
     def test_codeshare_fields(self):
         expected = {"airline_code", "flight_number", "airline_name"}

@@ -8,11 +8,13 @@ cohesion — this module handles response parsing, not request building.
 import base64
 import json
 import logging
+import re
 import urllib.parse
+from datetime import datetime
 from typing import Any
 
 from .builders import CABIN_CLASS_MAP, ItinerarySummary
-from .decoder import BookingOption, _safe_get, raise_if_error_envelope
+from .decoder import AmenityFlags, BookingOption, BookingSegmentDetails, _safe_get, raise_if_error_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +251,110 @@ def _extract_segment_identity_from_context(context_segment_token_b64: str) -> di
         return {}
 
     return fields
+
+
+def _context_fields(data: bytes) -> list[tuple[int, int, bytes | int]]:
+    """Read bounded protobuf fields, rejecting truncated or unsupported values."""
+    fields: list[tuple[int, int, bytes | int]] = []
+    pos = 0
+    while pos < len(data):
+        tag, pos = _read_varint(data, pos)
+        number, wire_type = tag >> 3, tag & 7
+        if number == 0:
+            raise ValueError("invalid protobuf field number")
+        if wire_type == 0:
+            value, pos = _read_varint(data, pos)
+            fields.append((number, wire_type, value))
+        elif wire_type == 2:
+            length, pos = _read_varint(data, pos)
+            end = pos + length
+            if end > len(data):
+                raise ValueError("truncated protobuf field")
+            fields.append((number, wire_type, data[pos:end]))
+            pos = end
+        else:
+            end = _skip_wire_value(data, pos, wire_type)
+            if end > len(data):
+                raise ValueError("truncated protobuf field")
+            pos = end
+    return fields
+
+
+def _extract_ordered_segment_identities(token: str) -> list[dict[str, str]]:
+    """Keep every repeated field-1 descriptor in order, or none if ambiguous."""
+    names = {
+        1: "origin_iata", 2: "departure_local_iso", 3: "destination_iata",
+        4: "arrival_local_iso", 5: "carrier_code", 6: "flight_number",
+        10: "aircraft_code",
+    }
+    identities: list[dict[str, str]] = []
+    try:
+        raw = base64.b64decode(token, validate=True)
+        for number, wire_type, value in _context_fields(raw):
+            if number != 1:
+                continue
+            if wire_type != 2 or not isinstance(value, bytes):
+                return []
+            identity: dict[str, str] = {}
+            for nested_number, nested_wire, nested_value in _context_fields(value):
+                if nested_number not in names:
+                    continue
+                name = names[nested_number]
+                if nested_wire != 2 or not isinstance(nested_value, bytes) or name in identity:
+                    return []
+                identity[name] = nested_value.decode("utf-8")
+            if not all(identity.get(name) for name in names.values() if name != "aircraft_code"):
+                return []
+            if not all(re.fullmatch(r"[A-Z]{3}", identity[name]) for name in ("origin_iata", "destination_iata")):
+                return []
+            if not re.fullmatch(r"[A-Z0-9]{2,3}", identity["carrier_code"]):
+                return []
+            if not re.fullmatch(r"[0-9]{1,4}[A-Z]?", identity["flight_number"]):
+                return []
+            for name in ("departure_local_iso", "arrival_local_iso"):
+                if not re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", identity[name]):
+                    return []
+                if datetime.fromisoformat(identity[name]).utcoffset() is None:
+                    return []
+            identities.append(identity)
+    except (ValueError, UnicodeError):
+        return []
+    return identities
+
+
+def _extract_booking_segment_details(brand: list[Any], token: str) -> list[BookingSegmentDetails]:
+    """Join ordered facts to exact descriptors only when their counts match."""
+    facts = _safe_get(brand, [6])
+    identities = _extract_ordered_segment_identities(token)
+    if not isinstance(facts, list) or not identities or len(facts) != len(identities):
+        return []
+    details: list[BookingSegmentDetails] = []
+    for identity, row in zip(identities, facts):
+        if not isinstance(row, list) or not row:
+            return []
+        cabin = _safe_get(row, [0])
+        seat_type = _safe_get(row, [2])
+        flags = _safe_get(row, [1])
+        amenities = None
+        if isinstance(flags, list) and flags:
+            wifi = _safe_get(flags, [11])
+            amenities = AmenityFlags(
+                has_power=_safe_get(flags, [1]) is True,
+                has_live_tv=_safe_get(flags, [8]) is True,
+                has_on_demand_video=_safe_get(flags, [9]) is True,
+                has_stream_media=_safe_get(flags, [10]) is True,
+                wifi=wifi if type(wifi) is int else None,
+            )
+        pitch, legroom = _safe_get(row, [4]), _safe_get(row, [5])
+        details.append(BookingSegmentDetails(
+            **identity,
+            cabin_class=cabin if type(cabin) is int and cabin in (1, 2, 3, 4) else None,
+            amenities=amenities,
+            seat_type=seat_type if type(seat_type) is int else None,
+            seat_pitch_short=pitch if isinstance(pitch, str) else "",
+            legroom=legroom if isinstance(legroom, str) else "",
+        ))
+    return details
 
 
 _GSTATIC_LOGO_BASE = "https://www.gstatic.com/flights/partner_logos/70px"
@@ -537,6 +643,7 @@ def _parse_booking_rpc_response(
             booking_url=booking_url,
             logo_url=logo_url,
             is_airline_direct=is_airline_direct,
+            segment_details=_extract_booking_segment_details(brand_block, context_token1),
             _is_basic_by_flags=is_basic_by_flags,
             _is_basic_by_text=is_basic_by_text,
             _option_index=option_index,

@@ -28,7 +28,8 @@ Per booking option list:
     - `price.currency = "USD"`
 - `option[19]` = JSON string with two base64 protobuf tokens:
   - token 0 contains display currency + display price context
-  - token 1 contains segment descriptor (origin/date/destination/carrier/flight/aircraft)
+  - token 1 contains **repeated field-1 segment descriptors**, in itinerary order
+    (origin/departure offset ISO/destination/arrival offset ISO/carrier/flight/aircraft)
 - `option[21]` = brand block:
   - `option[21][0][1]` = brand code
   - `option[21][1]` = attribute vector
@@ -37,6 +38,12 @@ Per booking option list:
   - `option[21][6][0][0]` = **cabin class** (Seat enum: 1=economy, 2=premium-economy, 3=business, 4=first)
   - `option[21][6][0][1]` = amenity flags array (same format as `segment[12]`)
   - `option[21][6][0][2]` = seat type indicator (similar to `segment[13]`)
+  - `brand[6]` has one row per connecting flight, with cabin at `[0]`, amenity
+    flags at `[1]`, seat type at `[2]`, short pitch at `[4]`, and legroom at `[5]`.
+    Resolve the brand block through the adaptive extractor; its enclosing option
+    index can move. Join rows to repeated descriptors only when counts match and
+    every descriptor contains a complete exact identity. Do not zip a shortened
+    or partially decoded descriptor list to facts.
 - `option[24]` = additional boolean tail flag used with `option[21]` flags.
 
 ## Parser outputs (current)
@@ -50,6 +57,10 @@ Each parsed `BookingOption` dataclass includes:
 - `is_basic`
 - `fare_family` (`basic|standard|enhanced|premium|unknown`)
 - `rebookability_signal` (`restricted|standard_rebookable|upgraded_rebookable|unknown`)
+- `segment_details: list[BookingSegmentDetails]` — all exact ordered segment
+  identities with actual cabin, amenities, seat type, pitch, and legroom.
+  Cabin belongs to each segment, not to the fare label. Empty on ambiguous or
+  malformed identity/counts. Wi-Fi codes describe availability, not inclusion.
 
 **Internal fields (`_`-prefixed, not public API):**
 - `_is_basic_by_flags`, `_is_basic_by_text`

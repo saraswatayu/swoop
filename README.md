@@ -460,6 +460,14 @@ Price a selected trip row by opaque selector and return `PriceResult | None`.
 
 Low-level single-pass search escape hatch. Returns `RawSearchResult` with raw `best` and `other` itinerary buckets from one RPC pass.
 
+`origin` and `destination` also accept nonempty lists of distinct IATA airport
+codes, for example `search_raw("JFK", ["ORD", "DFW", "AUS"], "2026-10-26",
+max_stops=0, airlines=["AA"])`. Alternatives share one native shopping request;
+each result's segments retain their actual departure and arrival airports.
+Google may select fewer results for a broad query, so verify the flights you
+need are present. This low-level feature does not change the high-level
+`search()` / `search_legs()` trip or selector API.
+
 ### `check_price(flight_number, *, origin, destination, date, **kwargs)`
 
 Look up the current bookable fare for a specific flight. Optimized for the "what does flight X cost?" use case.
@@ -488,6 +496,17 @@ Returns `PriceResult | None`. `PriceResult` has `price`, `currency`, `fare_brand
 ### `get_booking_results(itinerary_or_token, **kwargs)`
 
 Get fare options for a specific itinerary. Pass an `Itinerary` object directly, or a booking token string with explicit `origin`, `destination`, `date`, and `selected_legs`. Returns `list[BookingOption]` with `price`, `brand_label`, `brand_code`, `is_basic`, `fare_family`, `rebookability_signal`, plus seller fields `seller_name`, `seller_code`, `booking_url`, `logo_url`, and `is_airline_direct` for routing users to the actual booking page.
+
+Each option's `segment_details` contains ordered `BookingSegmentDetails` for all
+connecting flights when Google supplies matching segment descriptors and facts.
+Details include exact airports, offset local departure/arrival ISO datetimes,
+carrier/flight number, aircraft code, actual `cabin_class` (1=economy, 2=premium
+economy, 3=business, 4=first), `amenities`, `seat_type`, `seat_pitch_short`, and
+`legroom`. Mixed-cabin fares retain each segment's actual cabin. Missing facts
+stay `None` or empty; ambiguous identities or mismatched counts yield an empty
+list. Amenities expose Google's Wi-Fi code without claiming that access is free
+or included in the fare. The existing internal singular `_context_*` fields
+keep their previous behavior.
 
 ### `set_country(country_code)`
 

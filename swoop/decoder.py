@@ -199,7 +199,7 @@ class AmenityFlags:
     has_live_tv: bool = False       # [8] = true
     has_on_demand_video: bool = False  # [9] = true (seatback IFE)
     has_stream_media: bool = False  # [10] = true (wireless streaming)
-    wifi: Optional[int] = None     # [11] = 2 (free) or 3 (free intl), None = no wifi
+    wifi: Optional[int] = None     # [11]: raw availability code; not fare inclusion, None = unknown
 
 
 @dataclass
@@ -349,6 +349,30 @@ class RawSearchResult:
 
 
 @dataclass
+class BookingSegmentDetails:
+    """Cabin-specific facts for one exact segment of a booking option.
+
+    Local ISO datetimes include the offsets supplied by Google. ``cabin_class``
+    is the segment's actual Seat enum (1=economy, 2=premium economy,
+    3=business, 4=first), which may differ within a mixed-cabin fare.
+    Missing facts remain empty/``None``; Wi-Fi codes do not establish whether
+    access is included in the fare.
+    """
+    origin_iata: str = ""
+    destination_iata: str = ""
+    departure_local_iso: str = ""
+    arrival_local_iso: str = ""
+    carrier_code: str = ""
+    flight_number: str = ""
+    aircraft_code: str = ""
+    cabin_class: Optional[int] = None
+    amenities: Optional[AmenityFlags] = None
+    seat_type: Optional[int] = None
+    seat_pitch_short: str = ""
+    legroom: str = ""
+
+
+@dataclass
 class BookingOption:
     """A single fare option from GetBookingResults.
 
@@ -377,6 +401,7 @@ class BookingOption:
     booking_url: str = ""
     logo_url: str = ""
     is_airline_direct: bool = False
+    segment_details: List[BookingSegmentDetails] = field(default_factory=list)
     _is_basic_by_flags: bool = False
     _is_basic_by_text: bool = False
     _option_index: Optional[int] = None

@@ -38,16 +38,22 @@ class Airport:
     airport: str
     def __init__(self) -> None: ...
 
+class _RepeatedAirports(List[Airport]):
+    def add(self) -> Airport: ...
+
 class FlightData:
     date: str
-    from_flight: Airport
-    to_flight: Airport
+    from_flight: _RepeatedAirports
+    to_flight: _RepeatedAirports
     max_stops: int
     airlines: List[str]
     def __init__(self) -> None: ...
 
+class _RepeatedFlightData(List[FlightData]):
+    def add(self) -> FlightData: ...
+
 class Info:
-    data: List[FlightData]
+    data: _RepeatedFlightData
     seat: int
     passengers: List[int]
     trip: int

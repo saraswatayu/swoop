@@ -137,8 +137,8 @@ class TestTFSDataRoundtrip:
         info = PB.Info()
         info.ParseFromString(serialized)
         assert len(info.data) == 1
-        assert info.data[0].from_flight.airport == "JFK"
-        assert info.data[0].to_flight.airport == "LAX"
+        assert info.data[0].from_flight[0].airport == "JFK"
+        assert info.data[0].to_flight[0].airport == "LAX"
         assert info.data[0].date == "2026-06-15"
 
     def test_roundtrip_two_legs(self):
@@ -156,8 +156,8 @@ class TestTFSDataRoundtrip:
         info = PB.Info()
         info.ParseFromString(tfs.to_string())
         assert len(info.data) == 2
-        assert info.data[0].from_flight.airport == "JFK"
-        assert info.data[1].from_flight.airport == "LAX"
+        assert info.data[0].from_flight[0].airport == "JFK"
+        assert info.data[1].from_flight[0].airport == "LAX"
 
     def test_business_class(self):
         leg = SearchLeg(date="2026-06-15", from_airport="SFO", to_airport="NRT")

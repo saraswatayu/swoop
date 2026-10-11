@@ -29,6 +29,44 @@ CABIN_CLASS_MAP: dict[CabinClass, int] = {
 }
 
 
+def _normalize_airlines(airlines: Optional[List[str]]) -> Optional[List[str]]:
+    if airlines is None:
+        return None
+    normalized = []
+    for airline in airlines:
+        airline = airline.upper()
+        if not (len(airline) == 2 or airline in AIRLINE_ALLIANCES):
+            raise ValueError(
+                f"Invalid airline code: {airline}. "
+                f"Must be 2-char IATA code or alliance: {AIRLINE_ALLIANCES}"
+            )
+        normalized.append(airline)
+    return normalized
+
+
+def _apply_tfs_leg(
+    info: PB.Info, *, date: str, origin: str | list[str],
+    destination: str | list[str], max_stops: Optional[int] = None,
+    airlines: Optional[List[str]] = None,
+) -> None:
+    """Encode native endpoint alternatives in one TFS leg.
+
+    Google repeats Airport messages at fields 13/14; a single message retains
+    the original singleton wire bytes. Airport-list validation belongs to the
+    raw search boundary; the public SearchLeg remains a single-airport leg.
+    """
+    data = info.data.add()
+    data.date = date
+    for codes, endpoint in ((origin, data.from_flight), (destination, data.to_flight)):
+        for code in ([codes] if isinstance(codes, str) else codes):
+            endpoint.add().airport = code.upper()
+    if max_stops is not None:
+        data.max_stops = max_stops
+    normalized_airlines = _normalize_airlines(airlines)
+    if normalized_airlines is not None:
+        data.airlines.extend(normalized_airlines)
+
+
 class SearchLeg:
     """A search leg defining origin, destination, date, and optional filters.
 
@@ -59,28 +97,13 @@ class SearchLeg:
         self.to_airport = to_airport.upper()
         self.max_stops = max_stops
 
-        if airlines is not None:
-            self.airlines = []
-            for airline in airlines:
-                airline = airline.upper()
-                if not (len(airline) == 2 or airline in AIRLINE_ALLIANCES):
-                    raise ValueError(
-                        f"Invalid airline code: {airline}. "
-                        f"Must be 2-char IATA code or alliance: {AIRLINE_ALLIANCES}"
-                    )
-                self.airlines.append(airline)
-        else:
-            self.airlines = None
+        self.airlines = _normalize_airlines(airlines)
 
-    def apply_to(self, info) -> None:
-        data = info.data.add()
-        data.date = self.date
-        data.from_flight.airport = self.from_airport
-        data.to_flight.airport = self.to_airport
-        if self.max_stops is not None:
-            data.max_stops = self.max_stops
-        if self.airlines is not None:
-            data.airlines.extend(self.airlines)
+    def apply_to(self, info: PB.Info) -> None:
+        _apply_tfs_leg(
+            info, date=self.date, origin=self.from_airport, destination=self.to_airport,
+            max_stops=self.max_stops, airlines=self.airlines,
+        )
 
 
 class _PBPassengers:

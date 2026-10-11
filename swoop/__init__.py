@@ -38,6 +38,7 @@ from .decoder import (
     itinerary_matches_flight,
 )
 from ._regions import Region
+from .response_observer import ResponseBody
 from .exceptions import (
     SwoopError,
     SwoopHTTPError,
@@ -1199,6 +1200,7 @@ __all__ = [
     "Region",
     "Passengers",
     "TransportConfig",
+    "ResponseBody",
     "PriceResult",
     "RawSearchResult",
     "SearchResult",

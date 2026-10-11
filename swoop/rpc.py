@@ -7,6 +7,7 @@ Based on reverse-engineering from punitarani/fli.
 """
 
 from copy import deepcopy
+from dataclasses import dataclass, field
 import json
 import logging
 import threading
@@ -39,6 +40,7 @@ from .exceptions import (
     SwoopUpstreamError,
 )
 from .models import Passengers, TransportConfig
+from .response_observer import read_response_body, response_operation
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +391,14 @@ def _apply_country(url: str, country: Optional[str]) -> str:
     return url
 
 
+@dataclass(frozen=True)
+class _ObservedResponse:
+    """Keep one decoded body read for existing internal status/text consumers."""
+
+    status_code: int
+    text: str = field(repr=False)
+
+
 def _post_with_retry(
     client: Any,
     url: str,
@@ -418,8 +428,16 @@ def _post_with_retry(
     for attempt in range(max(1, 1 + transport.retries)):
         res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
         if res.status_code == 200:
+            if transport.response_observer is not None:
+                text = read_response_body(res, transport, operation=response_operation(url),
+                    phase="rpc", method="POST", retry_index=attempt)
+                logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(text))
+                return _ObservedResponse(res.status_code, text)
             logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))
             return res
+        if transport.response_observer is not None:
+            read_response_body(res, transport, operation=response_operation(url),
+                phase="rpc", method="POST", retry_index=attempt, required=False)
         if res.status_code == 429 and attempt < transport.retries:
             delay = (2 ** attempt) + random.uniform(0, 1)
             logger.info(

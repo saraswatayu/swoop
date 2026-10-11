@@ -67,6 +67,7 @@ class TestFrozenExports:
         "Region",
         "Passengers",
         "TransportConfig",
+        "ResponseBody",
         "PriceResult",
         "RawSearchResult",
         "SearchResult",
@@ -453,10 +454,11 @@ class TestFrozenDefaults:
         assert tc.country is None
         assert tc.proxy is None
         assert tc.impersonate is None
+        assert tc.response_observer is None
 
     def test_transport_config_fields(self):
         from dataclasses import fields as dc_fields
-        expected = {"timeout", "retries", "country", "proxy", "impersonate"}
+        expected = {"timeout", "retries", "country", "proxy", "impersonate", "response_observer"}
         actual = {f.name for f in dc_fields(TransportConfig)}
         assert actual == expected
 
@@ -541,3 +543,8 @@ class TestConstants:
             "business": 3,
             "first": 4,
         }
+
+
+def test_response_body_public_fields():
+    assert {f.name for f in fields(swoop.ResponseBody)} == {
+        "operation", "transport", "method", "retry_index", "status_code", "body", "body_unavailable"}

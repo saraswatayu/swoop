@@ -548,3 +548,34 @@ Testing notes:
 ## License
 
 MIT
+
+
+### Optional raw response observation
+
+`TransportConfig(response_observer=callback)` calls a caller-owned callback with
+`ResponseBody` before decoding each actual flight RPC response. The deals and
+explore session bootstrap pages are observed too. Events include a finite
+operation/transport label, HTTP status, retry index and decoded response text,
+without request URLs or headers in their metadata. Unknown response fields,
+malformed bodies and HTTP rejections remain available without another request.
+A failed body read produces `body=None, body_unavailable=True`; callback failures
+cannot change provider outcomes. HTTP rejection bodies and the otherwise ignored
+deals session body are read only when observation is enabled.
+
+The SDK does not retain events or attach raw bodies to public results, exceptions
+or caches. Text is the HTTP client's decoded response body, rather than compressed
+wire bytes. Raw bodies may contain private data; callers must bound retention,
+redact at their storage boundary and avoid public/log/error exposure. Callbacks
+run synchronously in the calling worker, including parallel searches, so keep
+them fast and make any shared storage thread-safe.
+
+```python
+from swoop import ResponseBody, TransportConfig, search_raw
+
+def observe(response: ResponseBody) -> None:
+    # Inspect non-sensitive metadata; retain bodies only in a bounded private sink.
+    print(response.operation, response.status_code)
+
+result = search_raw("JFK", "LAX", "2026-11-15",
+                    transport=TransportConfig(response_observer=observe))
+```

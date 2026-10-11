@@ -15,6 +15,7 @@ from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get, raise_if_error_envelope
 from .exceptions import SwoopParseError
 from .models import Deal, DealsResult, Passengers, TransportConfig
+from .response_observer import read_response_body
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,13 @@ def _establish_session(
     """GET the deals page to establish session cookies on the client."""
     url = _apply_country(DEALS_PAGE_URL, transport.country)
     logger.debug("Establishing deals session via GET %s", url)
-    client.get(
+    page = client.get(
         url,
         headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
         timeout=transport.timeout,
     )
+    if transport.response_observer is not None:
+        read_response_body(page, transport, operation="deals", phase="page", method="GET", required=False)
 
 
 # ---------------------------------------------------------------------------

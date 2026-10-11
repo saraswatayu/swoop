@@ -32,6 +32,7 @@ from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get, raise_if_error_envelope
 from .exceptions import SwoopHTTPError, SwoopParseError, SwoopRateLimitError
 from .models import ExploreDestination, ExploreResult, Passengers, TransportConfig
+from .response_observer import read_response_body
 from .rpc import _apply_country, _encode_f_req_payload, _get_client, _post_with_retry
 
 logger = logging.getLogger(__name__)
@@ -313,7 +314,8 @@ def _get_browser_params(
             headers={"accept": "text/html", "accept-language": "en-US,en;q=0.9"},
             timeout=transport.timeout,
         )
-        params = _browser_params(page.text)
+        text = read_response_body(page, transport, operation="explore", phase="page", method="GET")
+        params = _browser_params(text)
         if _params_complete(params):
             with _browser_params_lock:
                 _browser_params_cache[key] = params

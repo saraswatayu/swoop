@@ -2,9 +2,10 @@
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Callable, Optional
 
 from ._regions import Region
+from .response_observer import ResponseBody
 from .decoder import BookingOption, Itinerary, PriceRange, _flight_summary_repr
 
 
@@ -27,6 +28,7 @@ class TransportConfig:
     country: Optional[str] = None
     proxy: Optional[str] = None
     impersonate: Optional[str] = None
+    response_observer: Optional[Callable[[ResponseBody], None]] = field(default=None, repr=False, compare=False)
 
 
 @dataclass

@@ -320,6 +320,7 @@ def search_trip_options(
                 for itinerary in first_candidates
             ],
             price_range=first_pass.price_range,
+            price_insights=first_pass.price_insights,
             is_complete=True,
         )
 
@@ -403,7 +404,7 @@ def search_trip_options(
         # Every beam branch was rejected upstream — this is an outage, not an
         # empty itinerary set. Surface it instead of an empty SearchResult.
         raise upstream_error
-    result = SearchResult(results=options, price_range=None, is_complete=is_complete)
+    result = SearchResult(results=options, price_range=None, price_insights=None, is_complete=is_complete)
 
     return result
 

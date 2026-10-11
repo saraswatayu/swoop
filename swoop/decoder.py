@@ -338,11 +338,57 @@ class PriceRange:
 
 
 @dataclass
+class PriceInsightPoint:
+    """One day of the price-history series in Google Flights' insights panel."""
+    timestamp_ms: int = 0  # Unix epoch milliseconds
+    price: int = 0         # Fare in the response currency's major unit
+
+
+@dataclass
+class PriceInsights:
+    """Google Flights' price-insights panel (``data[5]``).
+
+    Prices are in the response currency's major unit. This block is ``null``
+    from the shopping RPC and only rides the HTML/SSR page payload, so it is
+    populated whenever a caller decodes such a payload and absent otherwise.
+
+    Observed live 2026-10-11 (JFK->LAX 2026-11-15, economy/business/first):
+
+    * The block is **per search cabin**: economy and business returned the same
+      ~61 daily points but different values on every field, and premium economy
+      returned no block at all on that route. Read it for the cabin you asked
+      for, not as a route-wide statistic.
+    * ``history`` is one point per day ending today (61 points over the trailing
+      60 days), directly plottable.
+    * ``typical_price`` tracks the **current cheapest fare**, not a historical
+      average: it equalled both the page's cheapest row and the last history
+      point (229 economy, 805 business).
+    * ``lowest_seen`` / ``highest_seen`` are **not** the history's min/max; they
+      reflect a longer tracking window than the graph (economy 90/270 against a
+      178-249 series), so the band can sit outside the plotted range.
+
+    ``price_level`` is Google's raw indicator, exposed uninterpreted: 1, 3, 4 and
+    5 were all observed, and the scale and its breakpoints are not pinned, so do
+    not read it as a stable enum. ``data[5][6]`` is the cabin code
+    (1 economy / 3 business / 4 first observed) and is intentionally not exposed.
+    """
+    price_level: Optional[int] = None       # [0] raw level indicator (1/3/4/5 observed; scale unpinned)
+    typical_price: Optional[int] = None     # [1][1] current cheapest fare (tracks the live best price)
+    low_price: Optional[int] = None         # [2][1] usual/low fare for the route
+    price_difference: Optional[int] = None  # [3][1] delta vs the usual band (negative = cheaper)
+    lowest_seen: Optional[int] = None       # [4][1] lowest over the tracking window (may predate the 60-day graph)
+    highest_seen: Optional[int] = None      # [5][1] highest over the tracking window (may predate the 60-day graph)
+    destination_city: Optional[str] = None  # [12] destination city name
+    history: List[PriceInsightPoint] = field(default_factory=list)  # [10][0] [[ts_ms, price], ...], one point/day
+
+
+@dataclass
 class RawSearchResult:
     _raw: list = field(default_factory=list)
     best: List[Itinerary] = field(default_factory=list)
     other: List[Itinerary] = field(default_factory=list)
     price_range: Optional[PriceRange] = None  # Price range from response
+    price_insights: Optional[PriceInsights] = None  # data[5]; override when a payload carries it
 
     def __repr__(self) -> str:
         return f"RawSearchResult(best={len(self.best)}, other={len(self.other)})"
@@ -660,6 +706,65 @@ def _decode_price_range(data: list) -> Optional[PriceRange]:
     return None
 
 
+def _decode_price_insights(data: list) -> Optional[PriceInsights]:
+    """Extract Google Flights' price-insights block from ``data[5]``.
+
+    Structure::
+
+        [0]     price-level indicator (raw; 1/3/4/5 observed, scale unpinned)
+        [1]     [null, current/cheapest fare]
+        [2]     [null, usual low fare]
+        [3]     [null, difference from the usual band]
+        [4]     [null, lowest seen over the tracking window]
+        [5]     [null, highest seen over the tracking window]
+        [6]     cabin code (not exposed)
+        [10][0] [[timestamp_ms, price], ...]  (~60-point daily history)
+        [12]    destination city name
+
+    Returns ``None`` when the block is absent (the shopping RPC sends null) or
+    carries nothing usable. Tolerant of malformed input — never raises.
+    """
+    block = _safe_get(data, [5])
+    if not isinstance(block, list):
+        return None
+
+    def _number(value: Any) -> Optional[int]:
+        # bool is an int subclass; a flag is not a price.
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return int(value)
+        return None
+
+    def _pair_price(index: int) -> Optional[int]:
+        return _number(_safe_get(block, [index, 1]))
+
+    history: List[PriceInsightPoint] = []
+    raw_history = _safe_get(block, [10, 0])
+    if isinstance(raw_history, list):
+        for point in raw_history:
+            ts = _number(_safe_get(point, [0]))
+            price = _number(_safe_get(point, [1]))
+            if ts is not None and price is not None:
+                history.append(PriceInsightPoint(timestamp_ms=ts, price=price))
+
+    city = _safe_get(block, [12])
+    insights = PriceInsights(
+        price_level=_number(_safe_get(block, [0])),
+        typical_price=_pair_price(1),
+        low_price=_pair_price(2),
+        price_difference=_pair_price(3),
+        lowest_seen=_pair_price(4),
+        highest_seen=_pair_price(5),
+        destination_city=city if isinstance(city, str) else None,
+        history=history,
+    )
+    if (insights.price_level is None and insights.typical_price is None
+            and insights.low_price is None and insights.price_difference is None
+            and insights.lowest_seen is None and insights.highest_seen is None
+            and insights.destination_city is None and not insights.history):
+        return None
+    return insights
+
+
 def itinerary_matches_flight(
     itinerary: Itinerary, carrier: Optional[str], number: str
 ) -> bool:
@@ -714,4 +819,8 @@ def decode_result(data: list) -> RawSearchResult:
     # Price range at [7, 0]
     price_range = _decode_price_range(data)
 
-    return RawSearchResult(_raw=data, best=best, other=other, price_range=price_range)
+    # Price insights at [5] — present only when the payload carries it.
+    price_insights = _decode_price_insights(data)
+
+    return RawSearchResult(_raw=data, best=best, other=other, price_range=price_range,
+                           price_insights=price_insights)

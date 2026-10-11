@@ -19,6 +19,8 @@ from swoop.decoder import (
     Itinerary,
     Layover,
     PriceRange,
+    PriceInsightPoint,
+    PriceInsights,
     QualitySignals,
     RawSearchResult,
     AmenityFlags,
@@ -82,6 +84,8 @@ class TestFrozenExports:
         "Layover",
         "CarbonEmissions",
         "PriceRange",
+        "PriceInsightPoint",
+        "PriceInsights",
         "AmenityFlags",
         "QualitySignals",
         # Exceptions
@@ -214,7 +218,7 @@ class TestFrozenDataclassFields:
         assert self._field_names(Itinerary) == expected
 
     def test_search_result_fields(self):
-        expected = {"results", "price_range", "is_complete"}
+        expected = {"results", "price_range", "price_insights", "is_complete"}
         assert self._field_names(SearchResult) == expected
 
     def test_search_result_currency_property(self):
@@ -225,7 +229,7 @@ class TestFrozenDataclassFields:
         assert sr_with.currency == "USD"
 
     def test_raw_search_result_fields(self):
-        expected = {"_raw", "best", "other", "price_range"}
+        expected = {"_raw", "best", "other", "price_range", "price_insights"}
         assert self._field_names(RawSearchResult) == expected
 
     def test_booking_option_fields(self):
@@ -275,6 +279,17 @@ class TestFrozenDataclassFields:
     def test_price_range_fields(self):
         expected = {"low", "high"}
         assert self._field_names(PriceRange) == expected
+
+    def test_price_insight_point_fields(self):
+        expected = {"timestamp_ms", "price"}
+        assert self._field_names(PriceInsightPoint) == expected
+
+    def test_price_insights_fields(self):
+        expected = {
+            "price_level", "typical_price", "low_price", "price_difference",
+            "lowest_seen", "highest_seen", "destination_city", "history",
+        }
+        assert self._field_names(PriceInsights) == expected
 
     def test_price_result_fields(self):
         expected = {"price", "currency", "fare_brand", "is_basic_economy", "is_estimate", "booking_options", "itinerary", "resolved_legs", "rpc_calls"}

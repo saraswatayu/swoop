@@ -24,6 +24,8 @@ from __future__ import annotations
 
 __version__ = "0.7.0"
 
+from .diagnostics import DiagnosticsRecorder, HTTPAttempt, QueryBounds, QueryDiagnostics, TransportDiagnostics
+
 from .decoder import (
     AmenityFlags,
     BookingOption,
@@ -1168,6 +1170,7 @@ def deals(
 
 
 __all__ = [
+    "DiagnosticsRecorder", "HTTPAttempt", "QueryBounds", "QueryDiagnostics", "TransportDiagnostics",
     # Functions
     "search",
     "search_legs",

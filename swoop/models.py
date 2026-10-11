@@ -6,6 +6,7 @@ from typing import Optional
 
 from ._regions import Region
 from .decoder import BookingOption, Itinerary, PriceRange, _flight_summary_repr
+from .diagnostics import DiagnosticsRecorder
 
 
 @dataclass
@@ -27,6 +28,8 @@ class TransportConfig:
     country: Optional[str] = None
     proxy: Optional[str] = None
     impersonate: Optional[str] = None
+    diagnostics: Optional[DiagnosticsRecorder] = field(default=None, repr=False, compare=False)
+    _diagnostics_query_id: Optional[int] = field(default=None, repr=False, compare=False)
 
 
 @dataclass

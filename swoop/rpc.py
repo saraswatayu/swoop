@@ -39,6 +39,7 @@ from .exceptions import (
     SwoopUpstreamError,
 )
 from .models import Passengers, TransportConfig
+from .diagnostics import measure_decode, measure_http, measure_retry_wait, observe_query, rpc_operation
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,7 @@ def _encode_f_req_payload(payload: list[Any]) -> str:
     return urllib.parse.quote(wrapped)
 
 
+@observe_query("shopping")
 def _search_from_legs(
     legs: list[dict[str, Any]],
     *,
@@ -244,7 +246,8 @@ def _search_from_legs(
         transport=transport,
     )
 
-    result = _parse_rpc_response(res.text)
+    with measure_decode(transport):
+        result = _parse_rpc_response(res.text)
     if isinstance(result, RawSearchResult):
         if not retain_raw:
             result._raw = []
@@ -416,9 +419,15 @@ def _post_with_retry(
     # make range() empty, fall off the end, and return None — crashing callers
     # that dereference `res.text`.
     for attempt in range(max(1, 1 + transport.retries)):
-        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+        operation = rpc_operation(url)
+        with measure_http(transport, operation, "rpc", "POST", attempt) as measurement:
+            res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+            measurement.status_code = res.status_code
+            if res.status_code == 200:
+                text = res.text
+                measurement.body(text)
         if res.status_code == 200:
-            logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))
+            logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(text))
             return res
         if res.status_code == 429 and attempt < transport.retries:
             delay = (2 ** attempt) + random.uniform(0, 1)
@@ -426,7 +435,7 @@ def _post_with_retry(
                 "HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)",
                 short_url, delay, attempt + 1, transport.retries,
             )
-            time.sleep(delay)
+            measure_retry_wait(transport, lambda: time.sleep(delay))
             continue
         if res.status_code == 429:
             raise SwoopRateLimitError()
@@ -552,6 +561,7 @@ def _build_selected_legs(itinerary: Itinerary) -> list[list[Any]]:
     return selected
 
 
+@observe_query("booking")
 def get_booking_results(
     itinerary_or_token: Itinerary | str,
     *,
@@ -644,11 +654,12 @@ def get_booking_results(
         transport=transport,
     )
 
-    options = _parse_booking_rpc_response(
-        res.text,
-        registry_version=registry_version,
-        required_keys=required_keys,
-    )
+    with measure_decode(transport):
+        options = _parse_booking_rpc_response(
+            res.text,
+            registry_version=registry_version,
+            required_keys=required_keys,
+        )
     if not options:
         logger.warning(
             "get_booking_results %s->%s on %s returned 0 options "
@@ -658,6 +669,7 @@ def get_booking_results(
     return options
 
 
+@observe_query("booking")
 def get_trip_booking_results(
     booking_token: str,
     legs: list[dict[str, Any]],
@@ -685,7 +697,8 @@ def get_trip_booking_results(
         transport=transport,
     )
 
-    return _parse_booking_rpc_response(res.text)
+    with measure_decode(transport):
+        return _parse_booking_rpc_response(res.text)
 
 
 def _parse_rpc_response(text: str) -> Optional[RawSearchResult]:

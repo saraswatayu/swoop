@@ -339,7 +339,13 @@ shows up as a `PriceChange` rather than a new+gone pair.
 </details>
 
 > [!TIP]
-> Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience.
+> Google rate-limits aggressively. All RPC functions default to `retries=2` with exponential backoff and jitter. Increase to `retries=3` for extra resilience within the configured timeout.
+
+`TransportConfig.timeout` is one budget for a POST operation, including client
+setup, response reading, and retry waits. Each retry gets only the remaining
+time. If its required delay leaves no dispatch time, Swoop returns HTTP 429
+immediately. Expired work dispatches no new request, and late successful
+responses raise `SwoopError`. Existing provider exceptions remain unchanged.
 
 ### Destination Discovery (explore)
 
@@ -434,7 +440,7 @@ Search Google Flights and return a `SearchResult`.
 | `airlines` | `list[str] \| None` | `None` | Filter by airline codes |
 | `flight_number` | `str \| None` | `None` | Filter to a specific flight number; carrier is also added to the first-leg airline filter |
 | `include_basic_economy` | `bool` | `False` | Include basic economy fares (excluded by default so prices reflect Main Cabin) |
-| `timeout` | `int` | `90` | HTTP timeout in seconds |
+| `timeout` | `float` | `90` | Total POST timeout in seconds, including retry waits |
 | `retries` | `int` | `2` | Retries on HTTP 429 with exponential backoff + jitter |
 | `country` | `str \| None` | `None` | Two-letter country code for point of sale (e.g. `"GB"`). Controls currency and available fares |
 | `proxy` | `str \| None` | `None` | Proxy URL for routing requests |
@@ -478,7 +484,7 @@ Look up the current bookable fare for a specific flight. Optimized for the "what
 | `infants_in_seat` | `int` | `0` | Number of infants in seat |
 | `infants_on_lap` | `int` | `0` | Number of infants on lap |
 | `include_basic_economy` | `bool` | `False` | Include basic economy fares |
-| `timeout` | `int` | `90` | HTTP timeout in seconds |
+| `timeout` | `float` | `90` | Total POST timeout in seconds, including retry waits |
 | `retries` | `int` | `2` | Retries on HTTP 429 |
 | `country` | `str \| None` | `None` | Two-letter country code for point of sale |
 | `proxy` | `str \| None` | `None` | Proxy URL for routing requests |

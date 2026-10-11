@@ -39,6 +39,7 @@ from .exceptions import (
     SwoopUpstreamError,
 )
 from .models import Passengers, TransportConfig
+from ._transport_budget import remaining_timeout, transport_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -396,6 +397,7 @@ def _post_with_retry(
     headers: dict[str, str],
     *,
     transport: TransportConfig = TransportConfig(),
+    _deadline: Optional[float] = None,
 ) -> Any:
     """POST with exponential-backoff retry on HTTP 429.
 
@@ -404,6 +406,7 @@ def _post_with_retry(
     session). Lets both share one retry implementation.
 
     Raises:
+        SwoopError: If the total HTTP timeout expires.
         SwoopRateLimitError: If 429 persists after all retries.
         SwoopHTTPError: If a non-200/non-429 response is received.
     """
@@ -411,22 +414,33 @@ def _post_with_retry(
     import time
 
     short_url = url.split("/")[-1]
+    deadline = transport_deadline(transport.timeout, _deadline)
     # Always make at least one attempt: a negative `retries` (e.g. a stray
     # `--retries -1` from the CLI, which has no lower bound) would otherwise
     # make range() empty, fall off the end, and return None — crashing callers
     # that dereference `res.text`.
     for attempt in range(max(1, 1 + transport.retries)):
-        res = client.post(url, content=body, headers=headers, timeout=transport.timeout)
+        timeout = remaining_timeout(deadline)
+        res = client.post(url, content=body, headers=headers, timeout=timeout)
         if res.status_code == 200:
             logger.debug("HTTP 200 from %s (%d bytes)", short_url, len(res.text))
+            remaining_timeout(deadline)
             return res
         if res.status_code == 429 and attempt < transport.retries:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SwoopRateLimitError()
             delay = (2 ** attempt) + random.uniform(0, 1)
+            if delay >= remaining:
+                # A wait that leaves no dispatch time cannot buy another try.
+                raise SwoopRateLimitError()
             logger.info(
                 "HTTP 429 from %s, retrying in %.1fs (attempt %d/%d)",
                 short_url, delay, attempt + 1, transport.retries,
             )
             time.sleep(delay)
+            if time.monotonic() >= deadline:
+                raise SwoopRateLimitError()
             continue
         if res.status_code == 429:
             raise SwoopRateLimitError()
@@ -438,6 +452,7 @@ def _http_post(
     content: bytes,
     *,
     transport: TransportConfig = TransportConfig(),
+    _deadline: Optional[float] = None,
 ) -> Any:
     """POST with optional retry on 429 and timeout.
 
@@ -453,10 +468,12 @@ def _http_post(
         SwoopRateLimitError: If 429 persists after all retries.
         SwoopHTTPError: If a non-200/non-429 response is received.
     """
+    deadline = transport_deadline(transport.timeout, _deadline)
+    remaining_timeout(deadline)
     url = _apply_country(url, transport.country)
     client = _get_client(transport.proxy, transport.impersonate)
     headers = {"content-type": "application/x-www-form-urlencoded;charset=UTF-8"}
-    return _post_with_retry(client, url, content, headers, transport=transport)
+    return _post_with_retry(client, url, content, headers, transport=transport, _deadline=deadline)
 
 
 def search_raw(

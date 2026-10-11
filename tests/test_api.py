@@ -404,7 +404,7 @@ def test_http_post_no_retry_on_non_429(monkeypatch):
 
 
 def test_http_post_passes_timeout(monkeypatch):
-    """timeout is passed through to primp."""
+    """primp receives a positive timeout within the total HTTP budget."""
     captured_kwargs = {}
 
     class FakeClient:
@@ -419,4 +419,4 @@ def test_http_post_passes_timeout(monkeypatch):
 
     from swoop.models import TransportConfig
     rpc._http_post("http://test", b"body", transport=TransportConfig(timeout=45))
-    assert captured_kwargs["timeout"] == 45
+    assert 0 < captured_kwargs["timeout"] <= 45

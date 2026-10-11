@@ -20,7 +20,11 @@ class Passengers:
 
 @dataclass
 class TransportConfig:
-    """HTTP transport configuration for API requests."""
+    """HTTP transport configuration for API requests.
+
+    ``timeout`` bounds one POST operation, including setup, HTTP attempts,
+    response reads, and HTTP 429 backoff. Retries receive only remaining time.
+    """
 
     timeout: int = 90
     retries: int = 2

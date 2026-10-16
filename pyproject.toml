@@ -29,7 +29,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-validation = ["airportsdata>=1.3.0"]
+validation = [
+    # Last Python 3.10 release; pin because YYYY.M.D sorts below older YYYYMMDD versions.
+    "airportsdata==2026.6.24; python_version < '3.11'",
+    "airportsdata>=1.3.0; python_version >= '3.11'",
+]
 cli = ["click>=8.2", "rich>=13.0", "babel>=2.14"]
 
 [project.scripts]

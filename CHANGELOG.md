@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The validation extra on Python 3.10 selects airportsdata 2026.6.24, its last
+  compatible release, instead of the older 20260315 release that sorts higher
+  because of the version-format change. Python 3.11+ retains the existing range.
+
 ## [0.7.0] - 2026-06-23
 
 ### Added

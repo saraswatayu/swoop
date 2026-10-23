@@ -30,6 +30,7 @@ from ._booking import (
     _skip_wire_value,
     parse_booking_payload,
 )
+from ._pricing import _validate_pricing, _validate_routing
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, raise_if_error_envelope
 from .exceptions import (
@@ -77,9 +78,32 @@ def _normalize_rpc_leg(
     earliest_arrival: Optional[int] = None,
     latest_arrival: Optional[int] = None,
     selected_legs: Optional[list[list[Any]]] = None,
+    max_duration: Optional[int] = None,
+    connecting_airports: Optional[list[str]] = None,
+    exclude_connecting_airports: Optional[list[str]] = None,
+    min_layover_duration: Optional[int] = None,
+    max_layover_duration: Optional[int] = None,
 ) -> dict[str, Any]:
     """Normalize a single search leg for generic request building."""
+    _validate_routing(
+        max_duration,
+        connecting_airports,
+        exclude_connecting_airports,
+        min_layover_duration,
+        max_layover_duration,
+    )
     return {
+        "max_duration": max_duration,
+        "connecting_airports": sorted(c.upper() for c in connecting_airports)
+        if connecting_airports
+        else None,
+        "exclude_connecting_airports": sorted(
+            c.upper() for c in exclude_connecting_airports
+        )
+        if exclude_connecting_airports
+        else None,
+        "min_layover_duration": min_layover_duration,
+        "max_layover_duration": max_layover_duration,
         "origin": origin,
         "destination": destination,
         "date": date,
@@ -126,6 +150,13 @@ def _trip_type_from_legs(legs: list[dict[str, Any]]) -> int:
 
 def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
     """Build a single RPC segment entry from a normalized leg."""
+    _validate_routing(
+        leg.get("max_duration"),
+        leg.get("connecting_airports"),
+        leg.get("exclude_connecting_airports"),
+        leg.get("min_layover_duration"),
+        leg.get("max_layover_duration"),
+    )
     max_stops = leg.get("max_stops")
     if max_stops is None:
         stops_val = STOPS_ANY
@@ -133,7 +164,7 @@ def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
         stops_val = max_stops + 1
 
     return [
-        [[[leg["origin"], 0]]],       # departure airport
+        [[[leg["origin"], 0]]],  # departure airport
         [[[leg["destination"], 0]]],  # arrival airport
         _build_time_restrictions(
             leg.get("earliest_departure"),
@@ -141,18 +172,20 @@ def _build_segment_from_leg(leg: dict[str, Any]) -> list[Any]:
             leg.get("earliest_arrival"),
             leg.get("latest_arrival"),
         ),
-        stops_val,                    # max stops
-        leg.get("airlines"),          # airlines filter
-        None,                         # placeholder
-        leg["date"],                  # travel date (YYYY-MM-DD)
-        None,                         # max duration
-        leg.get("selected_legs"),     # selected flight for expansion
-        None,                         # layover airports
-        None,                         # placeholder
-        None,                         # placeholder
-        None,                         # layover duration
-        None,                         # emissions
-        3,                            # constant
+        stops_val,  # max stops
+        leg.get("airlines"),  # airlines filter
+        None,  # placeholder
+        leg["date"],  # travel date (YYYY-MM-DD)
+        [leg["max_duration"]]
+        if leg.get("max_duration") is not None
+        else None,  # max duration
+        leg.get("selected_legs"),  # selected flight for expansion
+        leg.get("connecting_airports"),  # [9] include connecting airports
+        leg.get("exclude_connecting_airports"),  # [10] exclude connections
+        leg.get("min_layover_duration"),  # [11] minimum layover minutes
+        leg.get("max_layover_duration"),  # [12] maximum layover minutes
+        None,  # [13] emissions
+        3,  # constant
     ]
 
 
@@ -163,49 +196,60 @@ def _build_filters_from_legs(
     passengers: Passengers = Passengers(),
     sort: int = SORT_TOP,
     exclude_basic_economy: bool = False,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
 ) -> list[Any]:
     """Build the shopping filters payload from normalized leg definitions."""
+    _validate_pricing(carry_on_bags, checked_bags, max_price)
     seat_type = CABIN_CLASS_MAP.get(cabin, 1)
     segments = [_build_segment_from_leg(leg) for leg in legs]
     trip_type = _trip_type_from_legs(legs)
 
     filters = [
-        [],                                          # empty array
+        [],  # empty array
         [
-            None,                                    # [0] placeholder
-            None,                                    # [1] placeholder
-            trip_type,                               # [2] trip type
-            None,                                    # [3] placeholder
-            [],                                      # [4] empty array
-            seat_type,                               # [5] seat type
-            [passengers.adults, passengers.children, passengers.infants_in_seat, passengers.infants_on_lap],  # [6] passengers
-            None,                                    # [7] price limit
-            None,                                    # [8-12] placeholders
+            None,  # [0] placeholder
+            None,  # [1] placeholder
+            trip_type,  # [2] trip type
+            None,  # [3] placeholder
+            [],  # [4] empty array
+            seat_type,  # [5] seat type
+            [
+                passengers.adults,
+                passengers.children,
+                passengers.infants_in_seat,
+                passengers.infants_on_lap,
+            ],  # [6] passengers
+            [None, max_price] if max_price is not None else None,  # [7] price ceiling
+            None,  # [8-9] placeholders
+            None,
+            [carry_on_bags, checked_bags]
+            if carry_on_bags or checked_bags
+            else None,  # [10] baggage
+            None,
+            None,
+            segments,  # [13] flight segments
+            None,  # [14-16] placeholders
+            None,
+            None,
+            1,  # [17] constant
+            None,  # [18-27] placeholders
             None,
             None,
             None,
             None,
-            segments,                                # [13] flight segments
-            None,                                    # [14-16] placeholders
-            None,
-            None,
-            1,                                       # [17] constant
-            None,                                    # [18-27] placeholders
             None,
             None,
             None,
             None,
             None,
-            None,
-            None,
-            None,
-            None,
-            1 if exclude_basic_economy else None,    # [28] exclude basic economy
+            1 if exclude_basic_economy else None,  # [28] exclude basic economy
         ],
-        sort,                                        # sort order
-        0,                                           # constant
-        0,                                           # constant
-        2,                                           # constant
+        sort,  # sort order
+        0,  # constant
+        0,  # constant
+        2,  # constant
     ]
     return filters
 
@@ -226,11 +270,17 @@ def _search_from_legs(
     transport: TransportConfig = TransportConfig(),
     exclude_basic_economy: bool = False,
     retain_raw: bool = True,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
 ) -> Optional[RawSearchResult]:
     """Search Google Flights from normalized leg definitions."""
     encoded_body = _encode_f_req_payload(
         _build_filters_from_legs(
             legs,
+            carry_on_bags=carry_on_bags,
+            checked_bags=checked_bags,
+            max_price=max_price,
             cabin=cabin,
             passengers=passengers,
             sort=sort,
@@ -478,6 +528,14 @@ def search_raw(
     selected_outbound_legs: Optional[list[list[Any]]] = None,
     transport: TransportConfig = TransportConfig(),
     exclude_basic_economy: bool = False,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    connecting_airports: Optional[list[str]] = None,
+    exclude_connecting_airports: Optional[list[str]] = None,
+    min_layover_duration: Optional[int] = None,
+    max_layover_duration: Optional[int] = None,
 ) -> Optional[RawSearchResult]:
     """Search Google Flights via RPC endpoint and return decoded results.
 
@@ -493,6 +551,10 @@ def search_raw(
             ErrorResponse envelope (HTTP 200, no result payload) — an upstream
             outage, distinct from a genuinely empty result, which returns
             ``None``. See :func:`swoop.search` for the full transport-error set.
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
     """
     logger.debug(
         "search_raw %s->%s on %s (cabin=%s, adults=%d)",
@@ -501,8 +563,16 @@ def search_raw(
 
     legs = [
         _normalize_rpc_leg(
-            origin, destination, date,
-            max_stops=max_stops, airlines=airlines,
+            origin,
+            destination,
+            date,
+            max_duration=max_duration,
+            connecting_airports=connecting_airports,
+            exclude_connecting_airports=exclude_connecting_airports,
+            min_layover_duration=min_layover_duration,
+            max_layover_duration=max_layover_duration,
+            max_stops=max_stops,
+            airlines=airlines,
             earliest_departure=earliest_departure,
             latest_departure=latest_departure,
             earliest_arrival=earliest_arrival,
@@ -513,16 +583,30 @@ def search_raw(
     if return_date:
         legs.append(
             _normalize_rpc_leg(
-                destination, origin, return_date,
-                max_stops=max_stops, airlines=airlines,
+                destination,
+                origin,
+                return_date,
+                max_duration=max_duration,
+                connecting_airports=connecting_airports,
+                exclude_connecting_airports=exclude_connecting_airports,
+                min_layover_duration=min_layover_duration,
+                max_layover_duration=max_layover_duration,
+                max_stops=max_stops,
+                airlines=airlines,
                 earliest_departure=return_earliest_departure,
                 latest_departure=return_latest_departure,
             )
         )
 
     return _search_from_legs(
-        legs, cabin=cabin, passengers=passengers,
-        sort=sort, transport=transport,
+        legs,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
+        cabin=cabin,
+        passengers=passengers,
+        sort=sort,
+        transport=transport,
         exclude_basic_economy=exclude_basic_economy,
     )
 
@@ -570,6 +654,14 @@ def get_booking_results(
     registry_version: str | None = None,
     required_keys: tuple[str, ...] | None = None,
     transport: TransportConfig = TransportConfig(),
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    connecting_airports: Optional[list[str]] = None,
+    exclude_connecting_airports: Optional[list[str]] = None,
+    min_layover_duration: Optional[int] = None,
+    max_layover_duration: Optional[int] = None,
 ) -> list[BookingOption]:
     """Fetch fare options (brand + price) for a specific itinerary.
 
@@ -594,6 +686,10 @@ def get_booking_results(
         SwoopUpstreamError: If Google rejects the request with a structured
             ErrorResponse envelope (HTTP 200, no result payload) — an upstream
             outage, distinct from a genuinely empty (no-options) result.
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
     """
     if isinstance(itinerary_or_token, Itinerary):
         itin = itinerary_or_token
@@ -621,8 +717,16 @@ def get_booking_results(
 
     legs = [
         _normalize_rpc_leg(
-            origin, destination, date,
-            max_stops=max_stops, airlines=airlines,
+            origin,
+            destination,
+            date,
+            max_duration=max_duration,
+            connecting_airports=connecting_airports,
+            exclude_connecting_airports=exclude_connecting_airports,
+            min_layover_duration=min_layover_duration,
+            max_layover_duration=max_layover_duration,
+            max_stops=max_stops,
+            airlines=airlines,
             earliest_departure=earliest_departure,
             latest_departure=latest_departure,
             earliest_arrival=earliest_arrival,
@@ -630,7 +734,12 @@ def get_booking_results(
         )
     ]
     filters = _build_filters_from_legs(
-        legs, cabin=cabin, passengers=passengers,
+        legs,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
+        cabin=cabin,
+        passengers=passengers,
         sort=SORT_DEPARTURE_TIME,
     )
     filter_block = filters[1]
@@ -665,13 +774,24 @@ def get_trip_booking_results(
     cabin: CabinClass = "economy",
     passengers: Passengers = Passengers(),
     transport: TransportConfig = TransportConfig(),
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
 ) -> list[BookingOption]:
-    """Fetch booking options for an exact multi-leg trip selection."""
+    """Fetch booking options for an exact multi-leg trip selection.
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
+    """
     if not booking_token or not legs:
         return []
 
     filters = _build_filters_from_legs(
         legs,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         sort=SORT_DEPARTURE_TIME,

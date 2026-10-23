@@ -15,6 +15,7 @@ from typing import List, Literal, Optional
 # for, so a typo like PB.Passneger.ADULT is caught at type-check time
 # instead of becoming a runtime AttributeError.
 from . import flights_pb2 as PB
+from ._pricing import _validate_routing, _validate_pricing
 
 AIRLINE_ALLIANCES = ["SKYTEAM", "STAR_ALLIANCE", "ONEWORLD"]
 
@@ -41,9 +42,25 @@ class SearchLeg:
         to_airport: Destination IATA code.
         max_stops: Maximum number of stops. None = any.
         airlines: Filter to these airline IATA codes.
+        max_duration: Maximum flight duration in minutes.
+        connecting_airports: Allowed connecting airports; nonstops remain eligible.
+        exclude_connecting_airports: Excluded connecting airports.
+        min_layover_duration: Minimum layover in minutes.
+        max_layover_duration: Maximum layover in minutes.
     """
 
-    __slots__ = ("date", "from_airport", "to_airport", "max_stops", "airlines")
+    __slots__ = (
+        "date",
+        "from_airport",
+        "to_airport",
+        "max_stops",
+        "airlines",
+        "max_duration",
+        "connecting_airports",
+        "exclude_connecting_airports",
+        "min_layover_duration",
+        "max_layover_duration",
+    )
 
     def __init__(
         self,
@@ -53,7 +70,24 @@ class SearchLeg:
         to_airport: str,
         max_stops: Optional[int] = None,
         airlines: Optional[List[str]] = None,
+        max_duration: Optional[int] = None,
+        connecting_airports: Optional[list[str]] = None,
+        exclude_connecting_airports: Optional[list[str]] = None,
+        min_layover_duration: Optional[int] = None,
+        max_layover_duration: Optional[int] = None,
     ):
+        _validate_routing(
+            max_duration,
+            connecting_airports,
+            exclude_connecting_airports,
+            min_layover_duration,
+            max_layover_duration,
+        )
+        self.max_duration = max_duration
+        self.connecting_airports = connecting_airports
+        self.exclude_connecting_airports = exclude_connecting_airports
+        self.min_layover_duration = min_layover_duration
+        self.max_layover_duration = max_layover_duration
         self.date = date
         self.from_airport = from_airport.upper()
         self.to_airport = to_airport.upper()
@@ -81,6 +115,19 @@ class SearchLeg:
             data.max_stops = self.max_stops
         if self.airlines is not None:
             data.airlines.extend(self.airlines)
+
+        if self.max_duration is not None:
+            data.max_duration = self.max_duration
+        if self.connecting_airports:
+            data.connecting_airports.extend(c.upper() for c in self.connecting_airports)
+        if self.exclude_connecting_airports:
+            data.exclude_connecting_airports.extend(
+                c.upper() for c in self.exclude_connecting_airports
+            )
+        if self.min_layover_duration is not None:
+            data.min_layover_duration = self.min_layover_duration
+        if self.max_layover_duration is not None:
+            data.max_layover_duration = self.max_layover_duration
 
 
 class _PBPassengers:
@@ -128,7 +175,14 @@ class TFSData:
         passengers: _PBPassengers,
         max_stops: Optional[int] = None,
         exclude_basic_economy: bool = False,
+        carry_on_bags: int = 0,
+        checked_bags: int = 0,
+        max_price: Optional[int] = None,
     ):
+        _validate_pricing(carry_on_bags, checked_bags, max_price)
+        self.carry_on_bags = carry_on_bags
+        self.checked_bags = checked_bags
+        self.max_price = max_price
         self.flight_data = flight_data
         self.seat = seat
         self.trip = trip
@@ -152,6 +206,12 @@ class TFSData:
         if self.exclude_basic_economy:
             info.exclude_basic_economy = True
 
+        if self.max_price is not None:
+            info.max_price = self.max_price
+        if self.carry_on_bags or self.checked_bags:
+            info.baggage.carry_on_bags = self.carry_on_bags
+            info.baggage.checked_bags = self.checked_bags
+
         return info
 
     def to_string(self) -> bytes:
@@ -169,6 +229,9 @@ class TFSData:
         seat: Literal["economy", "premium-economy", "business", "first"],
         max_stops: Optional[int] = None,
         exclude_basic_economy: bool = False,
+        carry_on_bags: int = 0,
+        checked_bags: int = 0,
+        max_price: Optional[int] = None,
     ) -> "TFSData":
         trip_t = {
             "round-trip": PB.Trip.ROUND_TRIP,
@@ -188,6 +251,9 @@ class TFSData:
             passengers=passengers,
             max_stops=max_stops,
             exclude_basic_economy=exclude_basic_economy,
+            carry_on_bags=carry_on_bags,
+            checked_bags=checked_bags,
+            max_price=max_price,
         )
 
 

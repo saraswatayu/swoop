@@ -1,0 +1,83 @@
+{
+  "carry": {
+    "filter_slots": {
+      "10": [
+        1,
+        0
+      ]
+    },
+    "segment_slots": {}
+  },
+  "checked": {
+    "filter_slots": {
+      "10": [
+        1,
+        1
+      ]
+    },
+    "segment_slots": {},
+    "tfs": "CBwQAhoeEgoyMDI2LTEyLTAzagcIARIDSkZLcgcIARIDTEFYQAFIAWoEEAEYAXABggELCP___________wGYAQI"
+  },
+  "Duration": {
+    "filter_slots": {},
+    "segment_slots": {
+      "7": [
+        1320
+      ]
+    },
+    "tfs": "CBwQAhohEgoyMDI2LTEyLTAzYKgKagcIARIDSkZLcgcIARIDTEFYQAFIAXABggELCP___________wGYAQI"
+  },
+  "Price": {
+    "filter_slots": {
+      "7": [
+        null,
+        1650
+      ]
+    },
+    "segment_slots": {
+      "7": [
+        1320
+      ]
+    },
+    "tfs": "CBwQAhohEgoyMDI2LTEyLTAzYKgKagcIARIDSkZLcgcIARIDTEFYQAFIAWDyDHABggELCP___________wGYAQI"
+  },
+  "exclude": {
+    "filter_slots": {},
+    "segment_slots": {
+      "10": [
+        "DEN"
+      ]
+    },
+    "tfs": "CBwQAhokEgoyMDI2LTEyLTAzagcIARIDSkZLcgcIARIDTEFYggEDREVOQAFIAXABggELCP___________wGYAQI"
+  },
+  "include": {
+    "filter_slots": {},
+    "segment_slots": {
+      "9": [
+        "ATL"
+      ]
+    },
+    "tfs": "CBwQAhojEgoyMDI2LTEyLTAzagcIARIDSkZLcgcIARIDTEFYegNBVExAAUgBcAGCAQsI____________AZgBAg"
+  },
+  "minlayover": {
+    "filter_slots": {},
+    "segment_slots": {
+      "9": [
+        "ATL"
+      ],
+      "11": 30
+    },
+    "tfs": "CBwQAhomEgoyMDI2LTEyLTAzagcIARIDSkZLcgcIARIDTEFYegNBVEyIAR5AAUgBcAGCAQsI____________AZgBAg"
+  },
+  "maxlayover": {
+    "filter_slots": {},
+    "segment_slots": {
+      "9": [
+        "ATL"
+      ],
+      "11": 30,
+      "12": 870
+    },
+    "tfs": "CBwQAhoqEgoyMDI2LTEyLTAzagcIARIDSkZLcgcIARIDTEFYegNBVEyIAR6QAeYGQAFIAXABggELCP___________wGYAQI"
+  }
+}

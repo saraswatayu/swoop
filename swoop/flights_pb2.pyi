@@ -44,11 +44,23 @@ class FlightData:
     to_flight: Airport
     max_stops: int
     airlines: List[str]
+    max_duration: int
+    connecting_airports: List[str]
+    exclude_connecting_airports: List[str]
+    min_layover_duration: int
+    max_layover_duration: int
+    def __init__(self) -> None: ...
+
+class Baggage:
+    carry_on_bags: int
+    checked_bags: int
     def __init__(self) -> None: ...
 
 class Info:
     data: List[FlightData]
     seat: int
+    max_price: int
+    baggage: Baggage
     passengers: List[int]
     trip: int
     exclude_basic_economy: bool

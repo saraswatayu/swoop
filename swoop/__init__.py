@@ -46,7 +46,25 @@ from .exceptions import (
     SwoopUpstreamError,
 )
 from .builders import CabinClass, SearchLeg
-from .models import Deal, DealsDiff, DealsResult, ExploreDestination, ExploreResult, Passengers, PriceChange, PriceResult, ResolvedLeg, SearchResult, SelectedLeg, TransportConfig, TripLeg, TripOption
+from .models import (
+    CalendarDay,
+    CalendarResult,
+    Deal,
+    DealsDiff,
+    DealsResult,
+    ExploreDestination,
+    ExploreResult,
+    Passengers,
+    PriceChange,
+    PriceResult,
+    ResolvedLeg,
+    SearchResult,
+    SelectedLeg,
+    TransportConfig,
+    TripLeg,
+    TripOption,
+)
+from ._calendar import CalendarPrice, calendar_prices, get_calendar, get_price_graph
 from .rpc import (
     SORT_ARRIVAL_TIME,
     SORT_CHEAPEST,
@@ -152,10 +170,16 @@ def _search_with_normalized_legs(
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
     time_budget: Optional[int] = None,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
 ) -> SearchResult:
     """Execute a staged trip search from normalized leg definitions."""
     return search_trip_options(
         request_legs,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         sort=sort,
@@ -178,6 +202,9 @@ def search_legs(
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
     time_budget: Optional[int] = None,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
 ) -> SearchResult:
     """Search Google Flights using explicit leg definitions.
 
@@ -205,6 +232,10 @@ def search_legs(
         SwoopUpstreamError: If Google rejects the request with a structured
             ErrorResponse envelope — an upstream outage, distinct from an empty
             result. See :func:`search` for the full transport-error set.
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
     """
     _validate_leg_search_inputs(legs, cabin=cabin, passengers=passengers)
 
@@ -213,6 +244,11 @@ def search_legs(
             leg.from_airport,
             leg.to_airport,
             leg.date,
+            max_duration=leg.max_duration,
+            connecting_airports=leg.connecting_airports,
+            exclude_connecting_airports=leg.exclude_connecting_airports,
+            min_layover_duration=leg.min_layover_duration,
+            max_layover_duration=leg.max_layover_duration,
             max_stops=leg.max_stops,
             airlines=list(leg.airlines) if leg.airlines else None,
         )
@@ -221,6 +257,9 @@ def search_legs(
 
     return _search_with_normalized_legs(
         request_legs,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         sort=sort,
@@ -255,6 +294,14 @@ def search(
     max_results: Optional[int] = None,
     beam_width: Optional[int] = None,
     time_budget: Optional[int] = None,
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    connecting_airports: Optional[list[str]] = None,
+    exclude_connecting_airports: Optional[list[str]] = None,
+    min_layover_duration: Optional[int] = None,
+    max_layover_duration: Optional[int] = None,
 ) -> SearchResult:
     """Search Google Flights and return decoded results.
 
@@ -315,6 +362,10 @@ def search(
 
         # Business class, nonstop only
         results = search("LAX", "NRT", "2026-06-15", cabin="business", max_stops=0)
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
     """
     # Parse flight number filter if provided
     parsed_carrier = None
@@ -349,6 +400,11 @@ def search(
             origin,
             destination,
             date,
+            max_duration=max_duration,
+            connecting_airports=connecting_airports,
+            exclude_connecting_airports=exclude_connecting_airports,
+            min_layover_duration=min_layover_duration,
+            max_layover_duration=max_layover_duration,
             max_stops=max_stops,
             airlines=first_leg_airlines,
             earliest_departure=earliest_departure,
@@ -363,6 +419,11 @@ def search(
                 destination,
                 origin,
                 return_date,
+                max_duration=max_duration,
+                connecting_airports=connecting_airports,
+                exclude_connecting_airports=exclude_connecting_airports,
+                min_layover_duration=min_layover_duration,
+                max_layover_duration=max_layover_duration,
                 max_stops=max_stops,
                 airlines=list(airlines) if airlines else None,
                 earliest_departure=return_earliest_departure,
@@ -372,6 +433,9 @@ def search(
 
     result = _search_with_normalized_legs(
         request_legs,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         sort=sort,
@@ -399,6 +463,14 @@ def price_legs(
     passengers: Passengers = Passengers(),
     include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    connecting_airports: Optional[list[str]] = None,
+    exclude_connecting_airports: Optional[list[str]] = None,
+    min_layover_duration: Optional[int] = None,
+    max_layover_duration: Optional[int] = None,
 ) -> Optional[PriceResult]:
     """Look up the current bookable fare using explicit leg definitions.
 
@@ -416,6 +488,10 @@ def price_legs(
         SwoopUpstreamError: If Google rejects the request with a structured
             ErrorResponse envelope — an upstream outage, distinct from an empty
             result. See :func:`search` for the full transport-error set.
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
     """
     if len(legs) == 0:
         raise ValueError("at least one leg is required")
@@ -431,16 +507,26 @@ def price_legs(
         carrier_filters.append(carrier)
 
     request_legs = build_request_legs_from_selected(legs, carrier_filters=carrier_filters)
+    request_legs = [
+        _normalize_rpc_leg(
+            leg["origin"], leg["destination"], leg["date"], airlines=leg.get("airlines"),
+            max_duration=max_duration, connecting_airports=connecting_airports,
+            exclude_connecting_airports=exclude_connecting_airports,
+            min_layover_duration=min_layover_duration, max_layover_duration=max_layover_duration,
+        )
+        for leg in request_legs
+    ]
     resolved, selections, rpc_calls = resolve_selected_trip(
         request_legs,
         [leg.flight_number for leg in legs],
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         transport=transport,
         exclude_basic_economy=(
-            cabin == "economy"
-            and len(legs) == 1
-            and not include_basic_economy
+            cabin == "economy" and len(legs) == 1 and not include_basic_economy
         ),
     )
     if not resolved:
@@ -449,6 +535,9 @@ def price_legs(
     return price_selected_trip(
         request_legs,
         resolved,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         include_basic_economy=include_basic_economy,
@@ -497,6 +586,14 @@ def check_price(
     max_stops: Optional[int] = None,
     include_basic_economy: bool = False,
     transport: TransportConfig = TransportConfig(),
+    carry_on_bags: int = 0,
+    checked_bags: int = 0,
+    max_price: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    connecting_airports: Optional[list[str]] = None,
+    exclude_connecting_airports: Optional[list[str]] = None,
+    min_layover_duration: Optional[int] = None,
+    max_layover_duration: Optional[int] = None,
 ) -> Optional[PriceResult]:
     """Look up the current bookable fare for a specific flight.
 
@@ -542,6 +639,10 @@ def check_price(
         )
         if result:
             print(f"${result.price} roundtrip")
+
+    ``carry_on_bags`` (0–1) and ``checked_bags`` (0–2) request bags per
+    passenger. ``max_price`` is a ceiling in display-currency major units.
+    Duration and layover limits, where accepted, are in minutes.
     """
     # Parse requested flight numbers for airline narrowing
     outbound_carrier, _ = parse_flight_number(flight_number)
@@ -559,6 +660,11 @@ def check_price(
             origin,
             destination,
             date,
+            max_duration=max_duration,
+            connecting_airports=connecting_airports,
+            exclude_connecting_airports=exclude_connecting_airports,
+            min_layover_duration=min_layover_duration,
+            max_layover_duration=max_layover_duration,
             max_stops=max_stops,
             airlines=[outbound_carrier] if outbound_carrier else None,
         )
@@ -570,6 +676,11 @@ def check_price(
                 destination,
                 origin,
                 return_date,
+                max_duration=max_duration,
+                connecting_airports=connecting_airports,
+                exclude_connecting_airports=exclude_connecting_airports,
+                min_layover_duration=min_layover_duration,
+                max_layover_duration=max_layover_duration,
                 max_stops=max_stops,
                 airlines=[return_carrier] if return_carrier else None,
             )
@@ -579,13 +690,14 @@ def check_price(
     resolved, selections, rpc_calls = resolve_selected_trip(
         request_legs,
         requested_flights,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         transport=transport,
         exclude_basic_economy=(
-            cabin == "economy"
-            and return_date is None
-            and not include_basic_economy
+            cabin == "economy" and return_date is None and not include_basic_economy
         ),
     )
     if not resolved:
@@ -594,6 +706,9 @@ def check_price(
     return price_selected_trip(
         request_legs,
         resolved,
+        carry_on_bags=carry_on_bags,
+        checked_bags=checked_bags,
+        max_price=max_price,
         cabin=cabin,
         passengers=passengers,
         include_basic_economy=include_basic_economy,
@@ -1169,6 +1284,12 @@ def deals(
 
 __all__ = [
     # Functions
+    "calendar_prices",
+    "get_calendar",
+    "get_price_graph",
+    "CalendarPrice",
+    "CalendarDay",
+    "CalendarResult",
     "search",
     "search_legs",
     "check_price",

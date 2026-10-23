@@ -3,7 +3,7 @@
 import click
 
 from .. import __version__
-from .commands import deals_cmd, explore_cmd, price_cmd, search_cmd
+from .commands import calendar_cmd, deals_cmd, explore_cmd, price_cmd, search_cmd
 
 
 @click.group(invoke_without_command=True)
@@ -19,3 +19,5 @@ main.add_command(search_cmd)
 main.add_command(price_cmd)
 main.add_command(deals_cmd)
 main.add_command(explore_cmd)
+
+main.add_command(calendar_cmd)

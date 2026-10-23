@@ -30,6 +30,7 @@ from ._booking import (
     _skip_wire_value,
     parse_booking_payload,
 )
+from ._currency import _currency_header
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import BookingOption, RawSearchResult, Itinerary, decode_result, _safe_get, raise_if_error_envelope
 from .exceptions import (
@@ -456,6 +457,9 @@ def _http_post(
     url = _apply_country(url, transport.country)
     client = _get_client(transport.proxy, transport.impersonate)
     headers = {"content-type": "application/x-www-form-urlencoded;charset=UTF-8"}
+    if transport.currency is not None:
+        country = transport.country if transport.country is not None else _default_country
+        headers["x-goog-ext-259736195-jspb"] = _currency_header(country, transport.currency)
     return _post_with_retry(client, url, content, headers, transport=transport)
 
 

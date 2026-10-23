@@ -599,8 +599,9 @@ filters[0]  = []                          # empty
 filters[1]  = main filter block:
   [1][2]    = trip type (1=roundtrip, 2=one-way)
   [1][5]    = seat type (1=economy, 2=premium-economy, 3=business, 4=first)
-  [1][6]    = passengers [adults, children, infants_lap, infants_seat]
-  [1][7]    = price limit (null = no limit)
+  [1][6]    = passengers [adults, children, infants_seat, infants_lap]
+  [1][7]    = [null, max_price]            # major units of display currency; null when unset
+  [1][10]   = [carry_on, checked]           # requested bags per passenger; null when both zero
   [1][13]   = segments array (outbound + optional return)
   [1][17]   = 1 (constant)
 filters[2]  = sort order (1=top, 2=cheapest, 3=dep_time, 4=arr_time, 5=duration)
@@ -619,13 +620,32 @@ segment[3]  = max_stops (0=any, 1=nonstop, 2=one, 3=two)
 segment[4]  = airline_codes_filter
 segment[5]  = null
 segment[6]  = "YYYY-MM-DD"               # travel date
-segment[7]  = null                        # max duration
+segment[7]  = [max_duration]              # total leg duration ceiling in minutes, or null
 segment[8]  = selected_legs              # for return expansion
-segment[9]  = null                        # layover airports
-segment[10-12] = null
-segment[13] = null                        # layover duration
+segment[9]  = connecting_airports         # included connecting IATA codes, or null
+segment[10] = exclude_connecting_airports # excluded connecting IATA codes, or null
+segment[11] = min_layover_duration        # scalar minutes, or null
+segment[12] = max_layover_duration        # scalar minutes, or null
+segment[13] = null                        # unused/reserved
 segment[14] = 3                          # constant
 ```
+
+### Calendar pricing and currency
+
+`GetCalendarGrid`, `GetCalendarPicker`, and `GetCalendarGraph` use the same
+main filter block, including baggage, ceiling, routing, cabin, passengers,
+airlines, stops, basic-economy exclusion and separate-ticket exclusion.
+`GetCalendarGraph` is the working price-graph RPC on FlightsFrontendService.
+
+- Grid: `[null, filter_block, [departure_start, departure_end], [return_start, return_end]]`;
+  omit the return window for one-way pricing.
+- Picker/graph with a stay range:
+  `[null, filter_block, [window_start, window_end], null, [min_stay, max_stay]]`.
+- Outbound departure/arrival time windows belong only to the first segment.
+  Return departure limits are explicitly set on the return segment.
+- The `x-goog-ext-259736195-jspb` header carries display currency independently
+  of the country selected by the URL's `gl` parameter. Price ceilings use that
+  display currency.
 
 ### GetBookingResults
 

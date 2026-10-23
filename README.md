@@ -548,3 +548,20 @@ Testing notes:
 ## License
 
 MIT
+
+Display currency can be chosen independently of the point of sale:
+
+```python
+import swoop
+
+# British point of sale, prices displayed in Japanese yen.
+transport = swoop.TransportConfig(country="GB", currency="JPY")
+results = swoop.search("JFK", "LAX", "2026-12-03", transport=transport)
+```
+
+`currency` is an optional three-letter ISO 4217 code. Omitting it preserves
+Google's default currency. Shopping and booking requests use the same locale
+header; selectors retain the requested country and currency for later pricing.
+Passing an explicit country or currency to `price_selector(..., transport=...)`
+overrides that saved value. The CLI accepts `--country GB --currency JPY` on
+`search`, `price`, `deals`, and `explore`.

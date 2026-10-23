@@ -453,10 +453,11 @@ class TestFrozenDefaults:
         assert tc.country is None
         assert tc.proxy is None
         assert tc.impersonate is None
+        assert tc.currency is None
 
     def test_transport_config_fields(self):
         from dataclasses import fields as dc_fields
-        expected = {"timeout", "retries", "country", "proxy", "impersonate"}
+        expected = {"timeout", "retries", "country", "proxy", "impersonate", "currency"}
         actual = {f.name for f in dc_fields(TransportConfig)}
         assert actual == expected
 

@@ -10,6 +10,7 @@ import logging
 from datetime import date, timedelta
 from typing import Any, Optional
 
+from ._currency import _COUNTRY_CURRENCY, _currency_header
 from ._regions import region_for_iata
 from .builders import CABIN_CLASS_MAP, CabinClass
 from .decoder import _safe_get, raise_if_error_envelope
@@ -331,29 +332,6 @@ def _parse_deal(
 # Currency header
 # ---------------------------------------------------------------------------
 
-_COUNTRY_CURRENCY: dict[str, str] = {
-    "US": "USD", "GB": "GBP", "CA": "CAD", "AU": "AUD", "NZ": "NZD",
-    "JP": "JPY", "KR": "KRW", "CN": "CNY", "IN": "INR", "SG": "SGD",
-    "HK": "HKD", "TW": "TWD", "TH": "THB", "MY": "MYR", "PH": "PHP",
-    "ID": "IDR", "VN": "VND", "MX": "MXN", "BR": "BRL", "AR": "ARS",
-    "CL": "CLP", "CO": "COP", "PE": "PEN", "ZA": "ZAR", "AE": "AED",
-    "SA": "SAR", "IL": "ILS", "TR": "TRY", "RU": "RUB", "UA": "UAH",
-    "PL": "PLN", "CZ": "CZK", "HU": "HUF", "RO": "RON", "SE": "SEK",
-    "NO": "NOK", "DK": "DKK", "CH": "CHF", "EG": "EGP", "NG": "NGN",
-    "KE": "KES", "PA": "USD",
-}
-
-# EUR countries
-for _cc in ("DE", "FR", "IT", "ES", "NL", "BE", "AT", "PT", "IE", "FI",
-            "GR", "LT", "LV", "EE", "SK", "SI", "LU", "MT", "CY", "HR"):
-    _COUNTRY_CURRENCY[_cc] = "EUR"
-
-
-def _currency_header(country: Optional[str]) -> str:
-    """Build the x-goog-ext-259736195-jspb header value."""
-    cc = (country or "US").upper()
-    curr = _COUNTRY_CURRENCY.get(cc, "USD")
-    return json.dumps(["en", cc, curr, 1, None, [300], None, None, 7, []])
 
 
 # ---------------------------------------------------------------------------
@@ -400,7 +378,7 @@ def fetch_deals(
     headers = {
         "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
         "x-same-domain": "1",
-        "x-goog-ext-259736195-jspb": _currency_header(transport.country),
+        "x-goog-ext-259736195-jspb": _currency_header(transport.country, transport.currency),
         "referer": "https://www.google.com/travel/flights/deals",
     }
 
@@ -423,7 +401,7 @@ def fetch_deals(
 
     # Determine currency from country
     cc = (transport.country or "US").upper()
-    currency = _COUNTRY_CURRENCY.get(cc, "USD")
+    currency = transport.currency or _COUNTRY_CURRENCY.get(cc, "USD")
 
     # Step 4: Parse individual deals
     deals: list[Deal] = []

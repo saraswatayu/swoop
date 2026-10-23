@@ -81,6 +81,7 @@ def _run_search(
     timeout, retries,
     country, proxy,
     max_results, beam_width, time_budget,
+    currency=None,
 ):
     """Run swoop.search() with the given parameters. Returns the result."""
     import swoop
@@ -103,6 +104,7 @@ def _run_search(
         timeout=timeout,
         retries=retries,
         country=country,
+        currency=currency,
         proxy=proxy,
     )
 
@@ -151,6 +153,7 @@ def _run_search_legs(
     max_results,
     beam_width,
     time_budget,
+    currency=None,
 ):
     """Run swoop.search_legs() with global CLI filters applied to each leg."""
     import swoop
@@ -183,6 +186,7 @@ def _run_search_legs(
         timeout=timeout,
         retries=retries,
         country=country,
+        currency=currency,
         proxy=proxy,
     )
 
@@ -233,6 +237,7 @@ def _search_options(f):
         click.option("-c", "--cabin", type=click.Choice(CABIN_CHOICES, case_sensitive=False), default="economy", show_default=True, help="Cabin class."),
         click.option("-s", "--sort", type=click.Choice(list(SORT_MAP), case_sensitive=False), default="departure", show_default=True, help="Sort order."),
         click.option("--country", type=str, default=None, help="Point-of-sale country code (e.g. GB, DE). Affects currency and fares."),
+        click.option("--currency", type=str, default=None, help="Display currency (e.g. EUR), independent of --country."),
         # Passengers
         click.option("-p", "--passengers", type=int, default=1, show_default=True, help="Number of adults."),
         click.option("--children", type=int, default=0, show_default=True, help="Number of children (2-11)."),
@@ -301,7 +306,7 @@ def search_cmd(
     airline, flight_number, include_basic,
     depart_after, depart_before, arrive_after, arrive_before,
     return_depart_after, return_depart_before,
-    country, proxy,
+    country, currency, proxy,
     timeout, retries, max_results, beam_width, time_budget,
     limit, show_price_commands,
     output_format, no_color, quiet, verbose,
@@ -383,7 +388,7 @@ def search_cmd(
                     sort=sort, nonstop=nonstop, max_stops=max_stops,
                     airline=airline, include_basic=include_basic,
                     timeout=timeout, retries=retries,
-                    country=country, proxy=proxy,
+                    country=country, currency=currency, proxy=proxy,
                     max_results=max_results, beam_width=beam_width,
                     time_budget=time_budget,
                 )
@@ -401,7 +406,7 @@ def search_cmd(
                     return_depart_after=return_depart_after,
                     return_depart_before=return_depart_before,
                     timeout=timeout, retries=retries,
-                    country=country, proxy=proxy,
+                    country=country, currency=currency, proxy=proxy,
                     max_results=max_results, beam_width=beam_width,
                     time_budget=time_budget,
                 )
@@ -483,6 +488,7 @@ def search_cmd(
 @click.option("--max-stops", type=click.IntRange(0, 2), default=None)
 @click.option("--include-basic", is_flag=True, default=False, help="Include basic economy fares.")
 @click.option("--country", type=str, default=None, help="Point-of-sale country code (e.g. GB, DE). Affects currency and fares.")
+@click.option("--currency", type=str, default=None, help="Display currency (e.g. EUR), independent of --country.")
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True)
 @click.option("--retries", type=int, default=2, show_default=True)
@@ -494,7 +500,7 @@ def price_cmd(
     depart, return_leg, leg, cabin, passengers,
     children, infants_in_seat, infants_on_lap,
     max_stops, include_basic,
-    country, proxy,
+    country, currency, proxy,
     timeout, retries,
     output_format, no_color, quiet, verbose,
 ):
@@ -609,7 +615,7 @@ def price_cmd(
     try:
         with spinner:
             if has_selector:
-                transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
+                transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, currency=currency, proxy=proxy)
                 result = swoop.price_selector(selector, transport=transport)
             elif has_leg:
                 pax = swoop.Passengers(
@@ -618,7 +624,7 @@ def price_cmd(
                     infants_in_seat=infants_in_seat,
                     infants_on_lap=infants_on_lap,
                 )
-                transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
+                transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, currency=currency, proxy=proxy)
                 result = swoop.price_legs(
                     [
                         swoop.SelectedLeg(
@@ -643,7 +649,7 @@ def price_cmd(
                     infants_in_seat=infants_in_seat,
                     infants_on_lap=infants_on_lap,
                 )
-                transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
+                transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, currency=currency, proxy=proxy)
                 result = swoop.check_price(
                     depart[1],
                     origin=origin,
@@ -745,6 +751,7 @@ def price_cmd(
 @click.option("--min-discount", type=int, default=None,
               help="Min discount percentage. Client-side filter.")
 @click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--currency", type=str, default=None, help="Display currency (e.g. EUR), independent of --country.")
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
 @click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
@@ -756,7 +763,7 @@ def deals_cmd(
     include_basic,
     depart_window, trip_length, dest_whitelist, dest_blacklist, region_name,
     max_price, min_discount,
-    country, proxy, timeout, retries,
+    country, currency, proxy, timeout, retries,
     limit, output_format, no_color, quiet, verbose,
 ):
     """Discover the best flight deals from an airport.
@@ -788,7 +795,7 @@ def deals_cmd(
 
     pax = swoop.Passengers(adults=passengers)
     transport = swoop.TransportConfig(
-        timeout=timeout, retries=retries, country=country, proxy=proxy,
+        timeout=timeout, retries=retries, country=country, currency=currency, proxy=proxy,
     )
 
     # Multi-origin: comma-separated string → list of IATAs.
@@ -891,6 +898,7 @@ def deals_cmd(
 @click.option("--trip-length", type=str, default=None,
               help="Trip length range MIN-MAX nights (e.g. 5-10). Roundtrip only. Client-side filter.")
 @click.option("--country", type=str, default=None, help="Point-of-sale country code.")
+@click.option("--currency", type=str, default=None, help="Display currency (e.g. EUR), independent of --country.")
 @click.option("--proxy", type=str, default=None, help="HTTP/SOCKS5 proxy URL.")
 @click.option("--timeout", type=int, default=90, show_default=True, help="HTTP timeout in seconds.")
 @click.option("--retries", type=int, default=2, show_default=True, help="Retries on rate limit.")
@@ -900,7 +908,7 @@ def deals_cmd(
 def explore_cmd(
     ctx, origin, cabin, one_way, nonstop, max_stops, passengers,
     dest_whitelist, dest_blacklist, region_name, trip_length,
-    country, proxy, timeout, retries,
+    country, currency, proxy, timeout, retries,
     limit, output_format, no_color, quiet, verbose,
 ):
     """Discover destinations you could fly to from an airport.
@@ -928,7 +936,7 @@ def explore_cmd(
 
     stops = 0 if nonstop else max_stops
     pax = swoop.Passengers(adults=passengers)
-    transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, proxy=proxy)
+    transport = swoop.TransportConfig(timeout=timeout, retries=retries, country=country, currency=currency, proxy=proxy)
 
     parsed_trip_length = _parse_trip_length(trip_length, err=err, ctx=ctx)
 
